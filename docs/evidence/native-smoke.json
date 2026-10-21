@@ -1,11 +1,830 @@
 {
-    "distribution":  "portable-zip",
-    "returned_home":  true,
-    "update_check_verified":  true,
-    "process":  "Airloom.exe",
-    "update_status":  "当前已是最新版本。",
-    "note":  "Real UI launch from a clean extracted distribution; settings and the live GitHub metadata update check verified using UI Automation, then returned home. No installer was downloaded and no physical HomePod was connected.",
-    "hwnd":  524592,
-    "result":  "window-opened",
-    "settings_verified":  true
+  "update_status": "当前已是最新版本。",
+  "distribution": "portable-zip",
+  "settings_verified": true,
+  "volume_layout_verified": true,
+  "result": "window-opened",
+  "pointer_drag_verified": true,
+  "process": "Airloom.exe",
+  "pointer_input": {
+    "method": "SendInput",
+    "dpi": 96,
+    "foreground_verified": true,
+    "point_owner_verified": true,
+    "thumb_start": {
+      "x": 365,
+      "y": 565
+    },
+    "cursor_start": {
+      "x": 365,
+      "y": 565
+    },
+    "track_start": 311,
+    "track_end": 527,
+    "moves": [
+      {
+        "x": 387,
+        "y": 565,
+        "value": 35
+      },
+      {
+        "x": 408,
+        "y": 565,
+        "value": 45
+      },
+      {
+        "x": 430,
+        "y": 565,
+        "value": 55
+      },
+      {
+        "x": 451,
+        "y": 565,
+        "value": 65
+      },
+      {
+        "x": 473,
+        "y": 565,
+        "value": 75
+      }
+    ],
+    "final_value": 75,
+    "failure": null,
+    "button_down_verified": true
+  },
+  "desktop_width": 1680,
+  "adaptive_layout_verified": true,
+  "hwnd": 589858,
+  "returned_home": true,
+  "volume_measurements": [
+    {
+      "window_width": 880,
+      "window_height": 680,
+      "volume": 0,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 627
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 124,
+          "width": 580,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 245,
+          "width": 572,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 507,
+          "width": 572,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 549,
+          "width": 238,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 486,
+          "y": 529,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 864,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 300,
+        "y": 549,
+        "width": 236,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 880,
+      "window_height": 680,
+      "volume": 9,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 627
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 124,
+          "width": 580,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 245,
+          "width": 572,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 507,
+          "width": 572,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 549,
+          "width": 238,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 486,
+          "y": 529,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 864,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 549,
+        "width": 234,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 880,
+      "window_height": 680,
+      "volume": 10,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 627
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 124,
+          "width": 580,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 245,
+          "width": 572,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 507,
+          "width": 572,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 549,
+          "width": 238,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 486,
+          "y": 529,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 864,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 549,
+        "width": 234,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 880,
+      "window_height": 680,
+      "volume": 99,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 627
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 124,
+          "width": 580,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 245,
+          "width": 572,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 507,
+          "width": 572,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 549,
+          "width": 238,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 486,
+          "y": 529,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 864,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 549,
+        "width": 234,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 880,
+      "window_height": 680,
+      "volume": 100,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 627
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 124,
+          "width": 580,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 245,
+          "width": 572,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 507,
+          "width": 572,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 549,
+          "width": 238,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 486,
+          "y": 529,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 864,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 549,
+        "width": 236,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1100,
+      "window_height": 800,
+      "volume": 0,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 747
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 800,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 792,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 520,
+          "width": 792,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 562,
+          "width": 458,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 706,
+          "y": 542,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1084,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 300,
+        "y": 562,
+        "width": 456,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1100,
+      "window_height": 800,
+      "volume": 9,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 747
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 800,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 792,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 520,
+          "width": 792,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 562,
+          "width": 458,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 706,
+          "y": 542,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1084,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 562,
+        "width": 454,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1100,
+      "window_height": 800,
+      "volume": 10,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 747
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 800,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 792,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 520,
+          "width": 792,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 562,
+          "width": 458,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 706,
+          "y": 542,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1084,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 562,
+        "width": 454,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1100,
+      "window_height": 800,
+      "volume": 99,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 747
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 800,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 792,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 520,
+          "width": 792,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 562,
+          "width": 458,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 706,
+          "y": 542,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1084,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 562,
+        "width": 454,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1100,
+      "window_height": 800,
+      "volume": 100,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 747
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 800,
+          "height": 528
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 792,
+          "height": 248
+        },
+        "TransportPanel": {
+          "x": 278,
+          "y": 520,
+          "width": 792,
+          "height": 95
+        },
+        "VolumeSliderHost": {
+          "x": 300,
+          "y": 562,
+          "width": 458,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 706,
+          "y": 542,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1084,
+      "composition": "compact",
+      "slider_visual_bounds": {
+        "x": 302,
+        "y": 562,
+        "width": 456,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1600,
+      "window_height": 1000,
+      "volume": 0,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 947
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 1300,
+          "height": 460
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 946,
+          "height": 289
+        },
+        "TransportPanel": {
+          "x": 1238,
+          "y": 258,
+          "width": 332,
+          "height": 289
+        },
+        "VolumeSliderHost": {
+          "x": 1260,
+          "y": 296,
+          "width": 288,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 1496,
+          "y": 276,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1584,
+      "composition": "wide",
+      "slider_visual_bounds": {
+        "x": 1260,
+        "y": 296,
+        "width": 286,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1600,
+      "window_height": 1000,
+      "volume": 9,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 947
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 1300,
+          "height": 460
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 946,
+          "height": 289
+        },
+        "TransportPanel": {
+          "x": 1238,
+          "y": 258,
+          "width": 332,
+          "height": 289
+        },
+        "VolumeSliderHost": {
+          "x": 1260,
+          "y": 296,
+          "width": 288,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 1496,
+          "y": 276,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1584,
+      "composition": "wide",
+      "slider_visual_bounds": {
+        "x": 1262,
+        "y": 296,
+        "width": 284,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1600,
+      "window_height": 1000,
+      "volume": 10,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 947
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 1300,
+          "height": 460
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 946,
+          "height": 289
+        },
+        "TransportPanel": {
+          "x": 1238,
+          "y": 258,
+          "width": 332,
+          "height": 289
+        },
+        "VolumeSliderHost": {
+          "x": 1260,
+          "y": 296,
+          "width": 288,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 1496,
+          "y": 276,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1584,
+      "composition": "wide",
+      "slider_visual_bounds": {
+        "x": 1262,
+        "y": 296,
+        "width": 284,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1600,
+      "window_height": 1000,
+      "volume": 99,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 947
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 1300,
+          "height": 460
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 946,
+          "height": 289
+        },
+        "TransportPanel": {
+          "x": 1238,
+          "y": 258,
+          "width": 332,
+          "height": 289
+        },
+        "VolumeSliderHost": {
+          "x": 1260,
+          "y": 296,
+          "width": 288,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 1496,
+          "y": 276,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1584,
+      "composition": "wide",
+      "slider_visual_bounds": {
+        "x": 1262,
+        "y": 296,
+        "width": 284,
+        "height": 32
+      }
+    },
+    {
+      "window_width": 1600,
+      "window_height": 1000,
+      "volume": 100,
+      "bounds": {
+        "DeviceRail": {
+          "x": 8,
+          "y": 45,
+          "width": 248,
+          "height": 947
+        },
+        "PageContent": {
+          "x": 274,
+          "y": 137,
+          "width": 1300,
+          "height": 460
+        },
+        "SignalPanel": {
+          "x": 278,
+          "y": 258,
+          "width": 946,
+          "height": 289
+        },
+        "TransportPanel": {
+          "x": 1238,
+          "y": 258,
+          "width": 332,
+          "height": 289
+        },
+        "VolumeSliderHost": {
+          "x": 1260,
+          "y": 296,
+          "width": 288,
+          "height": 32
+        },
+        "VolumeValue": {
+          "x": 1496,
+          "y": 276,
+          "width": 52,
+          "height": 17
+        }
+      },
+      "workspace_width_dip": 1584,
+      "composition": "wide",
+      "slider_visual_bounds": {
+        "x": 1262,
+        "y": 296,
+        "width": 286,
+        "height": 32
+      }
+    }
+  ],
+  "desktop_height": 1050,
+  "diagnostics_copy_verified": true,
+  "note": "Real WinUI launch from the shipped archive; on-screen volume geometry verified at 880/1100/1600 pixels with 0/9/10/99/100 values and a real pointer drag. Scrollable controls are brought into view before measurement. Screenshots at all three sizes, settings, live GitHub update metadata, and diagnostics clipboard verified. No physical HomePod was connected.",
+  "update_check_verified": true
 }

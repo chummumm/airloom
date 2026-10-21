@@ -1,0 +1,46 @@
+{
+  "method": "SendInput",
+  "dpi": 96,
+  "foreground_verified": true,
+  "point_owner_verified": true,
+  "thumb_start": {
+    "x": 365,
+    "y": 565
+  },
+  "cursor_start": {
+    "x": 365,
+    "y": 565
+  },
+  "track_start": 311,
+  "track_end": 527,
+  "moves": [
+    {
+      "x": 387,
+      "y": 565,
+      "value": 35
+    },
+    {
+      "x": 408,
+      "y": 565,
+      "value": 45
+    },
+    {
+      "x": 430,
+      "y": 565,
+      "value": 55
+    },
+    {
+      "x": 451,
+      "y": 565,
+      "value": 65
+    },
+    {
+      "x": 473,
+      "y": 565,
+      "value": 75
+    }
+  ],
+  "final_value": 75,
+  "failure": null,
+  "button_down_verified": true
+}
