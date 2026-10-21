@@ -6,6 +6,148 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- Merged dictionaries are searched before this dictionary's theme
+                     dictionaries. Keep native overrides after XamlControlsResources
+                     so its built-in brushes cannot shadow the application palette. -->
+                <ResourceDictionary>
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Default">
+                            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#DEDEDE" />
+                            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#C7C7C7" />
+                            <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="#303030" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#171717" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#171717" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#B8B8B8" />
+                            <SolidColorBrush x:Key="AccentButtonBackground" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#DEDEDE" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C7C7C7" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#303030" />
+                            <SolidColorBrush x:Key="AccentButtonForeground" Color="#171717" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#171717" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#171717" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#B8B8B8" />
+                            <SolidColorBrush x:Key="ButtonBackground" Color="#1C1C1C" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#303030" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#3B3B3B" />
+                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#1C1C1C" />
+                            <SolidColorBrush x:Key="ButtonForeground" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#989898" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#333333" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#4C4C4C" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#555555" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#333333" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#DEDEDE" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C7C7C7" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#303030" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#DEDEDE" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#C7C7C7" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#303030" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#171717" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#171717" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#171717" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#B8B8B8" />
+                            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DEDEDE" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C7C7C7" />
+                            <SolidColorBrush x:Key="SliderThumbBackground" Color="#F5F5F5" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="Light">
+                            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#20242A" />
+                            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#343A43" />
+                            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#484F59" />
+                            <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="#E5E9EF" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#626A73" />
+                            <SolidColorBrush x:Key="AccentButtonBackground" Color="#20242A" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#343A43" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#484F59" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#E5E9EF" />
+                            <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#626A73" />
+                            <SolidColorBrush x:Key="ButtonBackground" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#E9EDF2" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#DEE2E7" />
+                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#F2F4F7" />
+                            <SolidColorBrush x:Key="ButtonForeground" Color="#20242A" />
+                            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#20242A" />
+                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#20242A" />
+                            <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#727A84" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#DEE2E7" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#C5CCD5" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#BEC6D0" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#DEE2E7" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#20242A" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#343A43" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#484F59" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#E5E9EF" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#20242A" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#343A43" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#484F59" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#E5E9EF" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#626A73" />
+                            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#20242A" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#343A43" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#484F59" />
+                            <SolidColorBrush x:Key="SliderThumbBackground" Color="#20242A" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="HighContrast">
+                            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SliderTrackValueFill" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                            <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBackground" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="{ThemeResource SystemColorWindowColor}" />
+                            <SolidColorBrush x:Key="AccentButtonForeground" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="ButtonBackground" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="ButtonForeground" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="{ThemeResource SystemColorWindowColor}" />
+                        </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
@@ -30,49 +172,6 @@
                     <SolidColorBrush x:Key="StageRuleBrush" Color="#333333" />
                     <SolidColorBrush x:Key="StageAudioBrush" Color="#8BB6FB" />
                     <SolidColorBrush x:Key="StageInsetBrush" Color="#292929" />
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#DEDEDE" />
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#C7C7C7" />
-                    <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="#303030" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#171717" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#171717" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#B8B8B8" />
-                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#DEDEDE" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C7C7C7" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#303030" />
-                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#171717" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#171717" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#171717" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#B8B8B8" />
-                    <SolidColorBrush x:Key="ButtonBackground" Color="#1C1C1C" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#303030" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#3B3B3B" />
-                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#1C1C1C" />
-                    <SolidColorBrush x:Key="ButtonForeground" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#989898" />
-                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#333333" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#4C4C4C" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#555555" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#333333" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#DEDEDE" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C7C7C7" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#303030" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#DEDEDE" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#C7C7C7" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#303030" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#171717" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#171717" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#171717" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#B8B8B8" />
-                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#F5F5F5" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DEDEDE" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C7C7C7" />
-                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#F5F5F5" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="AppCanvasBrush" Color="#F2F4F7" />
@@ -96,49 +195,6 @@
                     <SolidColorBrush x:Key="StageRuleBrush" Color="#333333" />
                     <SolidColorBrush x:Key="StageAudioBrush" Color="#8BB6FB" />
                     <SolidColorBrush x:Key="StageInsetBrush" Color="#292929" />
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#20242A" />
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#343A43" />
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#484F59" />
-                    <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="#E5E9EF" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#626A73" />
-                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#20242A" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#343A43" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#484F59" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#E5E9EF" />
-                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#626A73" />
-                    <SolidColorBrush x:Key="ButtonBackground" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#E9EDF2" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#DEE2E7" />
-                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#F2F4F7" />
-                    <SolidColorBrush x:Key="ButtonForeground" Color="#20242A" />
-                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#20242A" />
-                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#20242A" />
-                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#727A84" />
-                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#DEE2E7" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#C5CCD5" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#BEC6D0" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#DEE2E7" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#20242A" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#343A43" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#484F59" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#E5E9EF" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#20242A" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#343A43" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#484F59" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#E5E9EF" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#626A73" />
-                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#20242A" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#343A43" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#484F59" />
-                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#20242A" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="InkBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
@@ -160,51 +216,8 @@
                     <SolidColorBrush x:Key="StageInsetBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="BrandSoftBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="PrimaryActionBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="BrandBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
                     <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="AccentFillColorDisabledBrush" Color="{ThemeResource SystemColorWindowColor}" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="AccentButtonBackground" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="{ThemeResource SystemColorWindowColor}" />
-                    <SolidColorBrush x:Key="AccentButtonForeground" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="ButtonBackground" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="ButtonForeground" Color="{ThemeResource SystemColorButtonTextColor}" />
-                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="{ThemeResource SystemColorButtonTextColor}" />
-                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="{ThemeResource SystemColorButtonTextColor}" />
-                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="{ThemeResource SystemColorWindowColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
             <Style TargetType="TextBlock">

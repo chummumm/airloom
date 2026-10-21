@@ -573,25 +573,48 @@ function Select-NativeTheme([string] $Name) {
     $Expansion.Collapse()
     Start-Sleep -Milliseconds 350
     $Selected = [System.Windows.Automation.SelectionPattern]$Picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
-    if (@($Selected.GetCurrentSelection())[0].Current.Name -ne $Name) { throw "Native theme selection did not retain '$Name'." }
+    $SelectedItems = @($Selected.Current.GetSelection())
+    if ($SelectedItems.Count -ne 1 -or $SelectedItems[0].Current.Name -ne $Name) { throw "Native theme selection did not retain '$Name'." }
     Set-SettingsScroll 0
 }
 
 function Test-NativeThemes([string] $Prefix) {
     $Themes = @()
+    $ThemeErrors = @()
     foreach ($Theme in @(@('浅色', 'light'), @('深色', 'dark'))) {
-        Invoke-NativeButton (Wait-NativeId 'SettingsButton')
-        $null = Wait-NativeId 'SettingsBackButton'
-        Select-NativeTheme $Theme[0]
-        Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-settings-$($Theme[1]).png")
-        Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
-        $null = Wait-NativeId 'HomeView'
-        Start-Sleep -Milliseconds 250
-        Set-HomeScroll 0
-        Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-home-$($Theme[1]).png")
-        $Themes += $Theme[1]
+        $ThemeFailed = $false
+        try {
+            Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+            $null = Wait-NativeButton '返回声音投放'
+            Select-NativeTheme $Theme[0]
+            Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-settings-$($Theme[1]).png")
+            Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+            Start-Sleep -Milliseconds 250
+            Set-HomeScroll 0
+            Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-home-$($Theme[1]).png")
+            $Themes += $Theme[1]
+        } catch {
+            $ThemeFailed = $true
+            $ThemeErrors += "$Prefix $($Theme[1]): $($_.Exception.Message)"
+            try { Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-$($Theme[1])-failure.png") } catch { }
+        } finally {
+            # Restore the page even after a selection/assertion failure, so the
+            # other theme and the independent fixture can still produce evidence.
+            if ($ThemeFailed -and $null -ne $Process -and -not $Process.HasExited) {
+                try {
+                    $BackButton = Wait-NativeId 'SettingsBackButton'
+                    if (-not $BackButton.Current.IsOffscreen) {
+                        $Picker = Wait-NativeId 'ThemePicker'
+                        $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+                        $Expansion.Collapse()
+                        Invoke-NativeButton $BackButton
+                        Start-Sleep -Milliseconds 250
+                    }
+                } catch { $ThemeErrors += "$Prefix $($Theme[1]) navigation: $($_.Exception.Message)" }
+            }
+        }
     }
-    return [ordered]@{ verified = $true; themes = $Themes }
+    return [ordered]@{ verified = ($ThemeErrors.Count -eq 0 -and $Themes.Count -eq 2); themes = $Themes; errors = $ThemeErrors }
 }
 
 function Build-VisualFixture([string] $OutputDirectory) {
@@ -623,11 +646,13 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
         $null = Wait-NativeId $Id
     }
     $ThemeProof = Test-NativeThemes 'fixture-playing'
+    $script:FixtureThemeErrors = @($ThemeProof.errors)
+    $FixtureTheme = if ($ThemeProof.themes -contains 'dark') { 'dark' } else { 'theme-unverified' }
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 880, 680, 0x0004)
     Start-Sleep -Milliseconds 400
     Set-HomeScroll 0
     Assert-CompactReceiversVisible
-    Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-playing-home-compact-dark.png')
+    Save-NativeScreenshot (Join-Path $EvidencePath "fixture-playing-home-compact-$FixtureTheme.png")
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
     Start-Sleep -Milliseconds 400
     $Slider = Wait-NativeId 'VolumeSlider'
@@ -643,7 +668,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     # Cancelling its request must leave the other two fixture receivers selected.
     Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-bedroom')
     $null = Wait-NativeButton '继续连接'
-    Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-auth-dark.png')
+    Save-NativeScreenshot (Join-Path $EvidencePath "fixture-auth-$FixtureTheme.png")
     Invoke-NativeButton (Wait-NativeButton '取消')
     Start-Sleep -Milliseconds 400
     $Targets = (Wait-NativeId 'TargetName').Current.Name
@@ -657,9 +682,9 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     if ($FixtureDiagnostics.fixture -ne $true) { throw 'The isolated screenshot process did not identify its fixture data.' }
     Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
     return [ordered]@{
-        verified = $true; data_source = 'CI-only replacement DLL in a separate temporary archive copy'
+        verified = $ThemeProof.verified; data_source = 'CI-only replacement DLL in a separate temporary archive copy'
         synthetic_data = $true; real_audio_or_receiver_claim = $false
-        themes = $ThemeProof.themes; receivers = 3; initially_streaming = 2
+        themes = $ThemeProof.themes; errors = $ThemeProof.errors; receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
         populated_volume_retained = $true; compact_receivers_visible_at_top = $true
     }
@@ -760,14 +785,25 @@ try {
     # no fixture switch, receivers or signals are added to production code.
     New-Item -ItemType Directory -Path $FixtureRoot -Force | Out-Null
     Copy-Item -Path (Join-Path $SmokeRoot '*') -Destination $FixtureRoot -Recurse -Force
-    Build-VisualFixture $FixtureRoot
-    $FixtureProof = Test-PopulatedVisualFixture $FixtureRoot
-    Stop-NativeApplication
+    $FixtureThemeErrors = @()
+    try {
+        Build-VisualFixture $FixtureRoot
+        $FixtureProof = Test-PopulatedVisualFixture $FixtureRoot
+    } catch {
+        $FixtureProof = [ordered]@{
+            verified = $false; synthetic_data = $true; real_audio_or_receiver_claim = $false
+            errors = @($FixtureThemeErrors) + @("Populated fixture: $($_.Exception.Message)")
+        }
+        if ($null -ne $Process -and -not $Process.HasExited) {
+            try { Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-failure.png') } catch { }
+        }
+    } finally { Stop-NativeApplication }
     if ((Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash -ne $ShippedCoreHash) {
         throw 'The populated visual fixture changed the real core used for shipped-archive verification.'
     }
+    $VisualErrors = @($ThemeProof.errors) + @($FixtureProof.errors)
     $Result = @{
-        result = 'window-opened'
+        result = $(if ($VisualErrors.Count -eq 0) { 'window-opened' } else { 'verification-failed' })
         distribution = 'portable-zip'
         process = 'Airloom.exe'
         hwnd = $ShippedWindowHandle
@@ -786,14 +822,18 @@ try {
         themes = $ThemeProof.themes
         fixture_states_verified = $FixtureProof.verified
         fixture_evidence = $FixtureProof
+        verification_errors = $VisualErrors
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
         desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
-        note = 'Real WinUI launch from the shipped archive; persistent transport, wide side-by-side and compact receivers-first composition, receiver visibility at scroll top, volume geometry at 880/1100/1600 pixels with 0/9/10/99/100 values, real pointer drag, light/dark switching, settings, live update metadata and diagnostics verified. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog visual checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
+        note = 'Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))
+    if ($VisualErrors.Count -gt 0) { throw ('Native visual verification failed: ' + ($VisualErrors -join ' | ')) }
 } catch {
-    try { Save-NativeScreenshot (Join-Path $EvidencePath 'native-smoke-failure.png') } catch { }
+    if ($null -ne $Process -and -not $Process.HasExited) {
+        try { Save-NativeScreenshot (Join-Path $EvidencePath 'native-smoke-failure.png') } catch { }
+    }
     throw
 } finally {
     if ($null -ne $Process -and -not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
