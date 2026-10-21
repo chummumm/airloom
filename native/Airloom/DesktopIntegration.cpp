@@ -152,10 +152,10 @@ namespace airloom::native
         LPARAM lParam, UINT_PTR, DWORD_PTR instance)
     {
         auto self = reinterpret_cast<DesktopIntegration*>(instance);
-        if (message == self->m_taskbarCreated)
+        if (self->m_taskbarCreated != 0 && message == self->m_taskbarCreated)
         {
             self->m_added = false;
-            self->AddIcon();
+            if (!self->AddIcon()) self->Show();
             return 0;
         }
         if (message == ShowWindowMessage)

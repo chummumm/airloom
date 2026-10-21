@@ -40,6 +40,19 @@ namespace
             state == L"reconnecting" || state == L"auth_required";
     }
 
+    bool HighContrastEnabled()
+    {
+        HIGHCONTRASTW settings{sizeof(settings)};
+        return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(settings), &settings, 0) &&
+            (settings.dwFlags & HCF_HIGHCONTRASTON) != 0;
+    }
+
+    Windows::UI::Color SystemColor(int index)
+    {
+        auto const color = GetSysColor(index);
+        return Windows::UI::Color{255, GetRValue(color), GetGValue(color), GetBValue(color)};
+    }
+
     bool SameDevices(Snapshot const& a, Snapshot const& b)
     {
         return a.selectedDeviceId == b.selectedDeviceId && a.devices.size() == b.devices.size() &&
@@ -96,7 +109,7 @@ namespace
         Grid icon;
         icon.Width(40);
         icon.Height(47);
-        Rectangle shell;
+        Microsoft::UI::Xaml::Shapes::Rectangle shell;
         shell.Width(33);
         shell.Height(40);
         shell.RadiusX(13);
@@ -104,7 +117,7 @@ namespace
         shell.Fill(body);
         shell.VerticalAlignment(VerticalAlignment::Bottom);
         icon.Children().Append(shell);
-        Ellipse top;
+        Microsoft::UI::Xaml::Shapes::Ellipse top;
         top.Width(31);
         top.Height(9);
         top.Fill(accent);
@@ -197,6 +210,7 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::InitializePreferences()
     {
+        m_highContrast = HighContrastEnabled();
         ThemePicker().SelectedIndex(static_cast<int32_t>(Preferences::Theme()));
         m_visualizerEnabled = Preferences::Visualizer();
         VisualizerToggle().IsOn(m_visualizerEnabled);
@@ -245,8 +259,7 @@ namespace winrt::Airloom::implementation
         // obtain the matching resource dictionary explicitly when the actual theme changes.
         auto dictionaries = Application::Current().Resources().ThemeDictionaries();
         auto key = LayoutRoot().ActualTheme() == ElementTheme::Light ? L"Light" : L"Default";
-        Windows::UI::ViewManagement::AccessibilitySettings accessibility;
-        if (accessibility.HighContrast()) key = L"HighContrast";
+        if (m_highContrast) key = L"HighContrast";
         if (dictionaries.HasKey(box_value(key)))
         {
             auto dictionary = dictionaries.Lookup(box_value(key)).as<ResourceDictionary>();
@@ -267,6 +280,12 @@ namespace winrt::Airloom::implementation
             BOOL enabled = TRUE;
             if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
                 m_motionAllowed = enabled != FALSE;
+            auto const highContrast = HighContrastEnabled();
+            if (m_highContrast != highContrast)
+            {
+                m_highContrast = highContrast;
+                ApplyTheme();
+            }
         }
         try
         {
@@ -305,6 +324,8 @@ namespace winrt::Airloom::implementation
         bool const auth = next.state == L"auth_required";
         bool const discovering = next.state == L"discovering";
         auto const device = next.SelectedDevice();
+        bool const hasSource = std::any_of(next.sources.begin(), next.sources.end(), [&next](auto const& source)
+            { return source.id == next.selectedSourceId; });
         if (!m_devicesRendered || m_forceDeviceRender || !SameDevices(m_snapshot, next)) RenderDevices(next);
         if (!m_sourcesRendered || !SameSources(m_snapshot, next)) RenderSources(next);
         DeviceCards().IsEnabled(!active);
@@ -332,7 +353,7 @@ namespace winrt::Airloom::implementation
         StatusDescription().Text(description);
         StatusDot().Fill(Brush(streaming ? L"AudioBrush" : busy || auth ? L"BrandBrush" : L"MutedBrush"));
         ConnectLabel().Text(action);
-        ConnectButton().IsEnabled(active || (device && device->online && !next.selectedSourceId.empty()));
+        ConnectButton().IsEnabled(active || (device && device->online && hasSource));
         ConnectGlyph().Glyph(streaming ? L"\uE71A" : auth ? L"\uE72E" : L"\uE768");
         ConnectGlyph().Visibility(busy && m_motionAllowed ? Visibility::Collapsed : Visibility::Visible);
         ConnectSpinner().Visibility(busy && m_motionAllowed ? Visibility::Visible : Visibility::Collapsed);
@@ -345,7 +366,7 @@ namespace winrt::Airloom::implementation
             VolumeSlider().Value(std::round(next.volume * 100.0));
             VolumeLabel().Text(to_hstring(static_cast<int>(std::round(next.volume * 100.0))) + L"%");
         }
-        LocalMuteToggle().IsEnabled(!next.selectedSourceId.empty());
+        LocalMuteToggle().IsEnabled(hasSource);
         LocalMuteToggle().IsOn(next.muteLocal);
 
         if (m_desktop.HasTrayIcon())
@@ -649,7 +670,7 @@ namespace winrt::Airloom::implementation
         password.Header(box_value(device ? device->name : pin ? L"配对码" : L"访问密码"));
         password.PlaceholderText(pin ? L"配对码" : L"访问密码");
         password.PasswordRevealMode(PasswordRevealMode::Peek);
-        password.MaxLength(512);
+        password.MaxLength(1024);
         SetAccessibleName(password, pin ? L"设备配对码" : L"AirPlay 访问密码");
         content.Children().Append(password);
         TextBlock validation;
@@ -669,10 +690,14 @@ namespace winrt::Airloom::implementation
         note.Foreground(Brush(L"MutedBrush"));
         content.Children().Append(note);
         dialog.Content(content);
-        dialog.PrimaryButtonClick([password, validation](auto const&, ContentDialogButtonClickEventArgs const& args)
+        dialog.PrimaryButtonClick([password, validation, pin](auto const&, ContentDialogButtonClickEventArgs const& args)
             {
-                if (password.Password().empty())
+                auto const value = password.Password();
+                auto const bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.c_str(),
+                    static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+                if (value.empty() || bytes <= 0 || bytes > 1024 || std::wstring_view(value).find(L'\0') != std::wstring_view::npos)
                 {
+                    validation.Text(value.empty() ? pin ? L"请先输入配对码。" : L"请先输入访问密码。" : L"凭据格式无效或长度超过设备协议限制（1024 字节）。");
                     validation.Visibility(Visibility::Visible);
                     args.Cancel(true);
                     password.Focus(FocusState::Programmatic);
@@ -739,11 +764,17 @@ namespace winrt::Airloom::implementation
         if (!m_hwnd) return;
         bool const dark = LayoutRoot().ActualTheme() == ElementTheme::Dark;
         auto titlebar = AppWindow().TitleBar();
-        auto const foreground = dark ? Windows::UI::Color{255, 240, 240, 247} : Windows::UI::Color{255, 30, 32, 45};
+        auto const foreground = m_highContrast ? SystemColor(COLOR_WINDOWTEXT) :
+            dark ? Windows::UI::Color{255, 240, 240, 247} : Windows::UI::Color{255, 30, 32, 45};
         titlebar.ButtonForegroundColor(foreground);
+        titlebar.ButtonHoverForegroundColor(m_highContrast ? SystemColor(COLOR_HIGHLIGHTTEXT) : foreground);
+        titlebar.ButtonPressedForegroundColor(foreground);
+        titlebar.ButtonInactiveForegroundColor(m_highContrast ? SystemColor(COLOR_GRAYTEXT) :
+            dark ? Windows::UI::Color{255, 153, 156, 173} : Windows::UI::Color{255, 107, 110, 128});
         titlebar.ButtonBackgroundColor(Windows::UI::Color{0, 0, 0, 0});
         titlebar.ButtonInactiveBackgroundColor(Windows::UI::Color{0, 0, 0, 0});
-        titlebar.ButtonHoverBackgroundColor(dark ? Windows::UI::Color{30, 255, 255, 255} : Windows::UI::Color{18, 0, 0, 0});
+        titlebar.ButtonHoverBackgroundColor(m_highContrast ? SystemColor(COLOR_HIGHLIGHT) :
+            dark ? Windows::UI::Color{30, 255, 255, 255} : Windows::UI::Color{18, 0, 0, 0});
         m_forceDeviceRender = true;
     }
 

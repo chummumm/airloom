@@ -1,0 +1,64 @@
+name: Publish verified preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Build and verify run ID to publish
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-preview
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify build and publish immutable preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Expected a numeric build run ID.'; exit 1; }
+          gh api "repos/$REPOSITORY/actions/runs/$BUILD_RUN_ID" > /tmp/airloom-release-run.json
+          BUILD_SHA=$(python3 - <<'PY'
+          import json, os
+          with open('/tmp/airloom-release-run.json') as source:
+              run = json.load(source)
+          assert run['conclusion'] == 'success', 'Only successful builds may be released.'
+          assert run['head_branch'] == 'main', 'Expected a main branch build.'
+          assert run['event'] in ('push', 'workflow_dispatch'), 'PR artifacts cannot be released.'
+          assert run['path'] == '.github/workflows/ci.yml', 'Unexpected build workflow.'
+          assert run['head_repository']['full_name'] == os.environ['REPOSITORY'], 'Unexpected source repository.'
+          print(run['head_sha'])
+          PY
+          )
+          gh run download "$BUILD_RUN_ID" --repo "$REPOSITORY" --name airloom-windows-x64 --dir release-assets
+          test -s release-assets/dist/Airloom-0.1.0-setup-x64.exe
+          test -s release-assets/dist/airloom-windows-x64-portable.zip
+          test -s release-assets/artifacts/native-smoke.json
+          python3 - <<'PY'
+          import json
+          with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
+              assert json.load(source)['result'] == 'window-opened', 'Native startup check is missing.'
+          PY
+          (cd release-assets/dist && sha256sum Airloom-0.1.0-setup-x64.exe airloom-windows-x64-portable.zip > SHA256SUMS.txt)
+          gh release create v0.1.0-preview.1 \
+            --repo "$REPOSITORY" --target "$BUILD_SHA" --prerelease \
+            --title 'Airloom 0.1.0 Preview 1' \
+            --notes-file docs/releases/0.1.0-preview.1.md \
+            release-assets/dist/Airloom-0.1.0-setup-x64.exe \
+            release-assets/dist/airloom-windows-x64-portable.zip \
+            release-assets/dist/SHA256SUMS.txt \
+            release-assets/artifacts/native-window.png \
+            release-assets/artifacts/native-smoke.json

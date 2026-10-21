@@ -231,7 +231,7 @@ impl StereoResampler {
     }
 
     pub(crate) fn push(&mut self, stereo: Vec<f32>) -> Result<Vec<Vec<f32>>> {
-        if stereo.len() % 2 != 0 {
+        if !stereo.len().is_multiple_of(2) {
             return Err(CaptureError::Conversion("incomplete stereo frame".into()));
         }
         if stereo.is_empty() {

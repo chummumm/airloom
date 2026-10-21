@@ -119,7 +119,8 @@ fn pad(bytes: &[u8]) -> Result<Vec<u8>> {
 
 impl SrpExchange {
     pub fn begin(password: &[u8], salt: &[u8], server_public: &[u8]) -> Result<Self> {
-        Self::with_secret(password, salt, server_public, &random::<32>())
+        let private = Zeroizing::new(random::<32>());
+        Self::with_secret(password, salt, server_public, private.as_ref())
     }
     fn with_secret(
         password: &[u8],
@@ -189,17 +190,33 @@ mod tests {
     use super::*;
     #[test]
     fn srp_matches_independently_generated_srptools_fixture() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/srp_sha512_3072.json")).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/srp_sha512_3072.json")).unwrap();
         let bytes = |key: &str| hex::decode(fixture[key].as_str().unwrap()).unwrap();
         let exchange = SrpExchange::with_secret(
             fixture["password"].as_str().unwrap().as_bytes(),
-            &bytes("salt"), &bytes("server_public"), &bytes("client_private"),
-        ).unwrap();
+            &bytes("salt"),
+            &bytes("server_public"),
+            &bytes("client_private"),
+        )
+        .unwrap();
         assert_eq!(exchange.public, bytes("client_public"));
         assert_eq!(exchange.proof.as_slice(), bytes("client_proof"));
-        assert_eq!(exchange.verify(&bytes("server_proof")).unwrap().as_slice(), bytes("session_key"));
-        let invalid = SrpExchange::with_secret(b"wrong password", &bytes("salt"), &bytes("server_public"), &bytes("client_private")).unwrap();
-        assert!(matches!(invalid.verify(&bytes("server_proof")), Err(Error::AuthenticationRejected { .. })));
+        assert_eq!(
+            exchange.verify(&bytes("server_proof")).unwrap().as_slice(),
+            bytes("session_key")
+        );
+        let invalid = SrpExchange::with_secret(
+            b"wrong password",
+            &bytes("salt"),
+            &bytes("server_public"),
+            &bytes("client_private"),
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid.verify(&bytes("server_proof")),
+            Err(Error::AuthenticationRejected { .. })
+        ));
     }
     #[test]
     fn hap_frames_are_authenticated_and_counters_are_directional() {

@@ -207,8 +207,10 @@ mod tests {
 
     #[test]
     fn rejects_unbounded_queues_and_invalid_sample_rates() {
-        let mut config = CaptureConfig::default();
-        config.queue_capacity = 0;
+        let mut config = CaptureConfig {
+            queue_capacity: 0,
+            ..CaptureConfig::default()
+        };
         assert!(config.validate().is_err());
         config.queue_capacity = 65;
         assert!(config.validate().is_err());

@@ -60,7 +60,7 @@ cargo fmt --all -- --check
 
 ### Windows 完整应用
 
-安装 Visual Studio 2022 的 C++ 桌面开发组件、Windows SDK 10.0.26100.0、Rust MSVC 工具链、NuGet CLI 和 Python 3（用于收集依赖许可证）。在开发者 PowerShell 中执行：
+安装 Visual Studio 2022 或 2026 的 C++ 桌面开发与 WinUI/C++ 工具组件、Windows SDK 10.0.26100.0、Rust MSVC 工具链、NuGet CLI 和 Python 3（用于收集依赖许可证）。工程会根据 Visual Studio 版本选择 v143 或 v145 工具集。在开发者 PowerShell 中执行：
 
 ```powershell
 ./scripts/build-windows.ps1 -Configuration Release

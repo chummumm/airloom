@@ -20,6 +20,7 @@ pub struct Clock {
     pub master_id: AtomicU64,
     pub exchanges: AtomicU64,
     pub following: AtomicBool,
+    last_exchange_ms: AtomicU64,
 }
 impl Clock {
     pub fn new(identity: u64) -> Self {
@@ -33,20 +34,40 @@ impl Clock {
             master_id: AtomicU64::new(identity),
             exchanges: AtomicU64::new(0),
             following: AtomicBool::new(false),
+            last_exchange_ms: AtomicU64::new(0),
         }
     }
     pub fn local_ns(&self) -> u64 {
         self.epoch_ns
             .saturating_add(self.epoch.elapsed().as_nanos() as u64)
     }
-    pub fn now_ns(&self) -> u64 {
-        self.local_ns()
-            .saturating_add_signed(self.offset_ns.load(Ordering::Relaxed))
-    }
     fn follow(&self, id: u64, offset: i64) {
+        let previous = self.offset_ns.load(Ordering::Relaxed);
+        let delta = offset as i128 - previous as i128;
+        let offset =
+            if self.last_exchange_ms.load(Ordering::Relaxed) != 0 && delta.abs() < 1_000_000 {
+                (previous as i128 + delta / 8) as i64
+            } else {
+                offset
+            };
         self.master_id.store(id, Ordering::Relaxed);
         self.offset_ns.store(offset, Ordering::Relaxed);
         self.following.store(true, Ordering::Release);
+    }
+    fn exchanged(&self) {
+        self.exchanges.fetch_add(1, Ordering::Relaxed);
+        self.last_exchange_ms.store(
+            self.epoch.elapsed().as_millis() as u64 + 1,
+            Ordering::Release,
+        );
+    }
+    fn last_exchange_age(&self) -> Option<Duration> {
+        let last = self.last_exchange_ms.load(Ordering::Acquire);
+        (last != 0).then(|| {
+            Duration::from_millis(
+                (self.epoch.elapsed().as_millis() as u64 + 1).saturating_sub(last),
+            )
+        })
     }
 }
 
@@ -64,6 +85,33 @@ impl Drop for TimingRuntime {
 }
 
 impl TimingRuntime {
+    pub async fn wait_for_ptp_exchange(&self) -> Result<()> {
+        let start = Instant::now();
+        while self.clock.exchanges.load(Ordering::Acquire) < 3 {
+            if self.tasks.iter().any(JoinHandle::is_finished) {
+                return Err(Error::SessionLost("timing worker ended".into()));
+            }
+            if start.elapsed() >= Duration::from_secs(5) {
+                return Err(Error::Timeout("PTP clock exchange"));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        Ok(())
+    }
+    pub fn check_health(&self, ptp: bool) -> Result<()> {
+        if self.tasks.iter().any(JoinHandle::is_finished) {
+            return Err(Error::SessionLost("timing worker ended".into()));
+        }
+        if ptp
+            && self
+                .clock
+                .last_exchange_age()
+                .is_none_or(|age| age > Duration::from_secs(5))
+        {
+            return Err(Error::SessionLost("PTP clock exchange stalled".into()));
+        }
+        Ok(())
+    }
     pub async fn ntp(local: IpAddr, peer: IpAddr, identity: u64) -> Result<Self> {
         let socket = UdpSocket::bind(SocketAddr::new(local, 0)).await?;
         let port = socket.local_addr()?.port();
@@ -84,7 +132,7 @@ impl TimingRuntime {
                 response[16..24].copy_from_slice(&received.to_be_bytes());
                 response[24..32].copy_from_slice(&ntp_time(task_clock.local_ns()).to_be_bytes());
                 if socket.send_to(&response, address).await.is_ok() {
-                    task_clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                    task_clock.exchanged();
                 }
             }
         });
@@ -112,7 +160,16 @@ impl TimingRuntime {
         let clock = Arc::new(Clock::new(identity));
         let task_clock = clock.clone();
         let task = tokio::spawn(async move {
-            run_ptp(event, general, peer, identity, prefer_receiver, task_clock).await;
+            run_ptp(
+                event,
+                general,
+                SocketAddr::new(peer, 319),
+                SocketAddr::new(peer, 320),
+                identity,
+                prefer_receiver,
+                task_clock,
+            )
+            .await;
         });
         Ok(Self {
             port: 319,
@@ -129,18 +186,27 @@ pub fn ntp_time(unix_ns: u64) -> u64 {
 }
 
 pub fn sync_packet(
-    timestamp: u32,
+    anchor_timestamp: u32,
+    anchor_local_ns: u64,
     latency_frames: u32,
     clock: &Clock,
     ptp: bool,
     first: bool,
 ) -> Vec<u8> {
+    // An immutable local-time/RTP relationship prevents packet scheduling jitter
+    // from moving the receiver's render timeline at every sync announcement.
+    let local_ns = clock.local_ns();
+    let elapsed_frames = (local_ns.saturating_sub(anchor_local_ns) as u128
+        * crate::SAMPLE_RATE as u128
+        / 1_000_000_000) as u32;
+    let timestamp = anchor_timestamp.wrapping_add(elapsed_frames);
     if ptp {
         let mut packet = vec![0; 28];
         packet[0] = if first { 0x90 } else { 0x80 };
         packet[1] = 0xd7;
         packet[4..8].copy_from_slice(&timestamp.wrapping_sub(latency_frames).to_be_bytes());
-        packet[8..16].copy_from_slice(&clock.now_ns().to_be_bytes());
+        let master_ns = local_ns.saturating_add_signed(clock.offset_ns.load(Ordering::Acquire));
+        packet[8..16].copy_from_slice(&master_ns.to_be_bytes());
         packet[16..20].copy_from_slice(&timestamp.to_be_bytes());
         packet[20..28].copy_from_slice(&clock.master_id.load(Ordering::Acquire).to_be_bytes());
         packet
@@ -150,7 +216,7 @@ pub fn sync_packet(
         packet[1] = 0xd4;
         packet[3] = 7;
         packet[4..8].copy_from_slice(&timestamp.wrapping_sub(latency_frames).to_be_bytes());
-        packet[8..16].copy_from_slice(&ntp_time(clock.local_ns()).to_be_bytes());
+        packet[8..16].copy_from_slice(&ntp_time(local_ns).to_be_bytes());
         packet[16..20].copy_from_slice(&timestamp.to_be_bytes());
         packet
     }
@@ -204,13 +270,13 @@ fn difference(remote: u64, local: u64) -> Option<i64> {
 async fn run_ptp(
     event: UdpSocket,
     general: UdpSocket,
-    peer: IpAddr,
+    event_peer: SocketAddr,
+    general_peer: SocketAddr,
     identity: u64,
     prefer_receiver: bool,
     clock: Arc<Clock>,
 ) {
-    let event_peer = SocketAddr::new(peer, 319);
-    let general_peer = SocketAddr::new(peer, 320);
+    let peer = event_peer.ip();
     let mut tick = interval(Duration::from_millis(125));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut event_buffer = [0; 2048];
@@ -219,6 +285,7 @@ async fn run_ptp(
     let mut followed_source = None::<[u8; 10]>;
     let mut sync_received = None::<(u16, u64, i64)>;
     let mut sync_offset = None::<i64>;
+    let mut path_delay = 0i64;
     let mut pending_delay = None::<(u16, u64)>;
     let mut last_peer = Instant::now();
     loop {
@@ -230,19 +297,21 @@ async fn run_ptp(
                     clock.following.store(false,Ordering::Release);followed_source=None;sync_received=None;
                     clock.master_id.store(identity,Ordering::Relaxed);clock.offset_ns.store(0,Ordering::Relaxed);
                 }
-                if !clock.following.load(Ordering::Acquire) {
+                if !prefer_receiver {
                     let sync=ptp_header(0,44,identity,sequence,0x0600);
                     let sent=clock.local_ns();if event.send_to(&sync,event_peer).await.is_err(){return;}
                     let mut follow=ptp_header(8,44,identity,sequence,0x0400);put_timestamp(&mut follow[34..44],sent);
                     if general.send_to(&follow,general_peer).await.is_err(){return;}
                     if sequence%8==1 {
                         let mut announce=ptp_header(11,64,identity,sequence,0x0400);
-                        announce[47]=if prefer_receiver{250}else{128};announce[48]=248;announce[49]=0xfe;
-                        announce[50..52].copy_from_slice(&0xffffu16.to_be_bytes());announce[52]=248;
-                        announce[53..61].copy_from_slice(&identity.to_be_bytes());announce[63]=0xa0;
+                        // AirPlay senders use this grandmaster dataset. It is a
+                        // wire-compatibility advertisement, not a precision claim.
+                        announce[47]=128;announce[48]=6;announce[49]=0x21;
+                        announce[50..52].copy_from_slice(&0x436au16.to_be_bytes());announce[52]=128;
+                        announce[53..61].copy_from_slice(&identity.to_be_bytes());announce[63]=0x20;
                         if general.send_to(&announce,general_peer).await.is_err(){return;}
                     }
-                } else if sequence%8==1 {
+                } else if clock.following.load(Ordering::Acquire) && sequence%8==1 {
                     let request=ptp_header(1,44,identity,sequence,0x0400);
                     pending_delay=Some((sequence,clock.local_ns()));
                     if event.send_to(&request,event_peer).await.is_err(){return;}
@@ -268,7 +337,7 @@ async fn run_ptp(
         let arrived = clock.local_ns();
         match kind {
             11 if length >= 64 => {
-                if prefer_receiver || data[47] < 128 {
+                if prefer_receiver {
                     followed_source = Some(source);
                     last_peer = Instant::now();
                     clock.master_id.store(
@@ -288,8 +357,11 @@ async fn run_ptp(
                         difference(origin.saturating_add_signed(correction(&data)), arrived)
                     {
                         sync_offset = Some(offset);
-                        clock.follow(clock.master_id.load(Ordering::Relaxed), offset);
-                        clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                        clock.follow(
+                            clock.master_id.load(Ordering::Relaxed),
+                            offset.saturating_add(path_delay),
+                        );
+                        clock.exchanged();
                     }
                 }
             }
@@ -305,8 +377,11 @@ async fn run_ptp(
                             received,
                         ) {
                             sync_offset = Some(offset);
-                            clock.follow(clock.master_id.load(Ordering::Relaxed), offset);
-                            clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                            clock.follow(
+                                clock.master_id.load(Ordering::Relaxed),
+                                offset.saturating_add(path_delay),
+                            );
+                            clock.exchanged();
                             last_peer = Instant::now();
                         }
                         sync_received = None;
@@ -320,9 +395,12 @@ async fn run_ptp(
                     {
                         if seq == pending {
                             if let Some(backward) = difference(remote, sent) {
+                                path_delay = ((backward as i128 - forward as i128) / 2)
+                                    .clamp(0, 100_000_000)
+                                    as i64;
                                 let adjusted = ((forward as i128 + backward as i128) / 2) as i64;
                                 clock.follow(clock.master_id.load(Ordering::Relaxed), adjusted);
-                                clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                                clock.exchanged();
                             }
                             pending_delay = None;
                         }
@@ -334,7 +412,7 @@ async fn run_ptp(
                 put_timestamp(&mut response[34..44], arrived);
                 response[44..54].copy_from_slice(&source);
                 if general.send_to(&response, general_peer).await.is_ok() {
-                    clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                    clock.exchanged();
                 }
             }
             2 if length >= 54 => {
@@ -349,7 +427,7 @@ async fn run_ptp(
                 put_timestamp(&mut follow[34..44], sent);
                 follow[44..54].copy_from_slice(&source);
                 if general.send_to(&follow, general_peer).await.is_ok() {
-                    clock.exchanges.fetch_add(1, Ordering::Relaxed);
+                    clock.exchanged();
                 }
             }
             12 if length >= 50 => {
@@ -380,6 +458,110 @@ async fn run_ptp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn next_kind(socket: &UdpSocket, kind: u8) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let mut packet = [0; 2048];
+                let (size, _) = socket.recv_from(&mut packet).await.unwrap();
+                if packet[0] & 15 == kind {
+                    return packet[..size].to_vec();
+                }
+            }
+        })
+        .await
+        .expect("expected PTP message")
+    }
+    #[tokio::test]
+    async fn ptp_master_sends_gptp_and_answers_delay_requests() {
+        let peer_event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let peer_general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = event.local_addr().unwrap();
+        let general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let clock = Arc::new(Clock::new(1234));
+        let task = tokio::spawn(run_ptp(
+            event,
+            general,
+            peer_event.local_addr().unwrap(),
+            peer_general.local_addr().unwrap(),
+            1234,
+            false,
+            clock.clone(),
+        ));
+        let sync = next_kind(&peer_event, 0).await;
+        assert_eq!(sync[0], 0x10);
+        assert_eq!(sync[6] & 2, 2);
+        let announce = next_kind(&peer_general, 11).await;
+        assert_eq!(announce[47], 128);
+        let request = ptp_header(1, 44, 5678, 42, 0x0400);
+        peer_event.send_to(&request, address).await.unwrap();
+        let response = next_kind(&peer_general, 9).await;
+        assert_eq!(&response[30..32], &42u16.to_be_bytes());
+        assert_eq!(&response[44..54], &request[20..30]);
+        assert!(timestamp(&response[34..44]).unwrap() > 0);
+        assert_eq!(clock.exchanges.load(Ordering::Relaxed), 1);
+        task.abort();
+        let _ = task.await;
+    }
+    #[tokio::test]
+    async fn ptp_follower_uses_receiver_clock_identity_and_timebase() {
+        let peer_event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let peer_general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let event_address = event.local_addr().unwrap();
+        let general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let general_address = general.local_addr().unwrap();
+        let clock = Arc::new(Clock::new(1234));
+        let remote_id = 0x1122334455667788u64;
+        let task = tokio::spawn(run_ptp(
+            event,
+            general,
+            peer_event.local_addr().unwrap(),
+            peer_general.local_addr().unwrap(),
+            1234,
+            true,
+            clock.clone(),
+        ));
+        let mut announce = ptp_header(11, 64, remote_id, 1, 0x0400);
+        announce[47] = 248;
+        announce[53..61].copy_from_slice(&remote_id.to_be_bytes());
+        peer_general
+            .send_to(&announce, general_address)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !clock.following.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let sent = clock.local_ns();
+        let sync = ptp_header(0, 44, remote_id, 2, 0x0600);
+        peer_event.send_to(&sync, event_address).await.unwrap();
+        // Separate two-step datagrams, as on the wire; let Sync be observed before Follow_Up.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let mut follow = ptp_header(8, 44, remote_id, 2, 0x0400);
+        put_timestamp(&mut follow[34..44], sent + 5_000_000_000);
+        peer_general
+            .send_to(&follow, general_address)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while clock.exchanges.load(Ordering::Acquire) == 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(clock.master_id.load(Ordering::Relaxed), remote_id);
+        assert!((4_950_000_000..5_050_000_000).contains(&clock.offset_ns.load(Ordering::Relaxed)));
+        let packet = sync_packet(100_000, clock.local_ns(), 11025, &clock, true, true);
+        assert_eq!(&packet[..2], &[0x90, 0xd7]);
+        assert_eq!(&packet[20..28], &remote_id.to_be_bytes());
+        task.abort();
+        let _ = task.await;
+    }
     #[test]
     fn timestamps_and_ptp_frames_use_network_order() {
         let time = 1_700_000_000_123_456_789;

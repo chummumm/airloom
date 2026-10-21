@@ -63,6 +63,7 @@ namespace winrt::Airloom::implementation
         bool m_background{};
         bool m_visualizerEnabled{true};
         bool m_motionAllowed{true};
+        bool m_highContrast{};
         bool m_devicesRendered{};
         bool m_sourcesRendered{};
         bool m_forceDeviceRender{};

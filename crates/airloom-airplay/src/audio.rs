@@ -56,10 +56,11 @@ impl Drop for PacketEncoder {
 }
 impl PacketEncoder {
     pub fn new(key: [u8; 32], timestamp: u32, ssrc: u32) -> Self {
+        let sequence = u16::from_le_bytes(crypto::random());
         Self {
             key,
-            nonce: 0,
-            sequence: u16::from_le_bytes(crypto::random()),
+            nonce: sequence as u64,
+            sequence,
             timestamp,
             ssrc,
             first: true,
@@ -98,14 +99,20 @@ mod tests {
     #[test]
     #[ignore = "requires FFmpeg on PATH"]
     fn independent_ffmpeg_decodes_alac_to_bit_exact_pcm() {
-        use std::{io::Write, process::{Command, Stdio}};
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
+        };
         let samples: Vec<i16> = (0..FRAMES_PER_PACKET * CHANNELS)
-            .map(|i| (i as i16).wrapping_mul(97).wrapping_add(i16::MIN)).collect();
+            .map(|i| (i as i16).wrapping_mul(97).wrapping_add(i16::MIN))
+            .collect();
         let packet = alac_packet(&samples).unwrap();
         // Minimal CAF container, fixed-size packets, ALACSpecificConfig cookie.
         let mut caf = b"caff\x00\x01\x00\x00".to_vec();
-        fn chunk(out: &mut Vec<u8>, tag: &[u8;4], data: &[u8]) {
-            out.extend_from_slice(tag); out.extend_from_slice(&(data.len() as u64).to_be_bytes()); out.extend_from_slice(data);
+        fn chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {
+            out.extend_from_slice(tag);
+            out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+            out.extend_from_slice(data);
         }
         let mut description = 44100f64.to_be_bytes().to_vec();
         description.extend_from_slice(b"alac");
@@ -114,19 +121,47 @@ mod tests {
         }
         chunk(&mut caf, b"desc", &description);
         let mut cookie = (FRAMES_PER_PACKET as u32).to_be_bytes().to_vec();
-        cookie.extend_from_slice(&[0,16,40,10,14,2]);
+        cookie.extend_from_slice(&[0, 16, 40, 10, 14, 2]);
         cookie.extend_from_slice(&255u16.to_be_bytes());
-        for field in [0u32,0,44100] { cookie.extend_from_slice(&field.to_be_bytes()); }
+        for field in [0u32, 0, 44100] {
+            cookie.extend_from_slice(&field.to_be_bytes());
+        }
         chunk(&mut caf, b"kuki", &cookie);
-        let mut data = vec![0;4]; data.extend(packet);
+        let mut data = vec![0; 4];
+        data.extend(packet);
         chunk(&mut caf, b"data", &data);
-        let mut child = Command::new("ffmpeg").args(["-hide_banner","-loglevel","error","-f","caf","-i","pipe:0","-f","s16le","-acodec","pcm_s16le","pipe:1"])
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("FFmpeg installed");
+        let mut child = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "caf",
+                "-i",
+                "pipe:0",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "pipe:1",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("FFmpeg installed");
         child.stdin.take().unwrap().write_all(&caf).unwrap();
         let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let expected: Vec<u8> = samples.iter().flat_map(|v| v.to_le_bytes()).collect();
-        assert_eq!(output.stdout, expected, "independent decoder must recover every sample");
+        assert_eq!(
+            output.stdout, expected,
+            "independent decoder must recover every sample"
+        );
     }
     #[test]
     fn alac_bitstream_contains_exact_signed_stereo_samples() {
@@ -150,6 +185,7 @@ mod tests {
         let key = [5; 32];
         let mut encoder = PacketEncoder::new(key, 10, 20);
         encoder.sequence = u16::MAX;
+        encoder.nonce = u16::MAX as u64;
         let (_, a) = encoder.packet(&[0; 704]).unwrap();
         let (_, b) = encoder.packet(&[0; 704]).unwrap();
         assert_ne!(&a[a.len() - 8..], &b[b.len() - 8..]);

@@ -184,9 +184,9 @@ impl PairingSession {
             b"Pair-Setup-Encrypt-Salt",
             b"Pair-Setup-Encrypt-Info",
         ));
-        let controller_seed = crypto::random::<32>();
+        let controller_seed = Zeroizing::new(crypto::random::<32>());
         let signing = SigningKey::from_bytes(&controller_seed);
-        let controller_id = hex::encode_upper(crypto::random::<16>()).into_bytes();
+        let controller_id = self.connection.identity.clone().into_bytes();
         let controller_public = signing.verifying_key().to_bytes();
         let mut info = crypto::derive(
             &shared,
@@ -248,7 +248,7 @@ impl PairingSession {
             version: 1,
             device_id: self.device_id,
             controller_id,
-            controller_seed,
+            controller_seed: *controller_seed,
             receiver_id,
             receiver_key,
         })
@@ -269,13 +269,16 @@ pub(crate) async fn verify(
     let kind = AuthenticationKind::Credentials;
     if credentials.version != 1
         || credentials.device_id != device.id
-        || credentials.controller_id.is_empty()
-        || credentials.controller_id.len() > 256
+        || credentials.controller_id.len() != 16
+        || !credentials.controller_id.iter().all(u8::is_ascii_hexdigit)
         || credentials.receiver_id.is_empty()
         || credentials.receiver_id.len() > 256
     {
         return Err(Error::AuthenticationRejected { kind });
     }
+    connection.identity = std::str::from_utf8(&credentials.controller_id)
+        .map_err(|_| Error::AuthenticationRejected { kind })?
+        .to_owned();
     let private = StaticSecret::from(crypto::random::<32>());
     let public = PublicKey::from(&private).to_bytes();
     let response = post(

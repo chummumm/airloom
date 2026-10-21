@@ -7,6 +7,8 @@ mod discovery;
 mod pairing;
 mod rtsp;
 mod sender;
+#[cfg(test)]
+mod test_receiver;
 mod timing;
 mod tlv;
 

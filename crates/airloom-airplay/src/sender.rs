@@ -113,31 +113,55 @@ pub struct VolumeControl {
 impl VolumeControl {
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
         if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
-            return Err(Error::InvalidArgument("volume must be between 0 and 1".into()));
+            return Err(Error::InvalidArgument(
+                "volume must be between 0 and 1".into(),
+            ));
         }
-        if self.stopped.load(Ordering::Acquire) { return Err(Error::Stopped); }
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(Error::Stopped);
+        }
         let connection = self.connection.upgrade().ok_or(Error::Stopped)?;
         let failure = self.failure.upgrade().ok_or(Error::Stopped)?;
-        let mut guard = ControlCancellation { failure: failure.clone(), completed: false };
+        let mut guard = ControlCancellation {
+            failure: failure.clone(),
+            completed: false,
+        };
         let result = async {
             let mut connection = connection.lock().await;
-            if self.stopped.load(Ordering::Acquire) { return Err(Error::Stopped); }
-            if let Some(error) = failure.lock().map_err(|_| protocol("session status lock poisoned"))?.as_ref() {
+            if self.stopped.load(Ordering::Acquire) {
+                return Err(Error::Stopped);
+            }
+            if let Some(error) = failure
+                .lock()
+                .map_err(|_| protocol("session status lock poisoned"))?
+                .as_ref()
+            {
                 return Err(Error::SessionLost(error.clone()));
             }
             set_volume_request(&mut connection, volume).await
-        }.await;
+        }
+        .await;
         guard.completed = true;
         if let Err(error) = &result {
-            if !matches!(error, Error::Stopped) { record_failure(&failure, error); }
+            if !matches!(error, Error::Stopped) {
+                record_failure(&failure, error);
+            }
         }
         result
     }
 }
-struct ControlCancellation { failure: Failure, completed: bool }
+struct ControlCancellation {
+    failure: Failure,
+    completed: bool,
+}
 impl Drop for ControlCancellation {
     fn drop(&mut self) {
-        if !self.completed { record_failure(&self.failure, "volume request was cancelled; reconnect required"); }
+        if !self.completed {
+            record_failure(
+                &self.failure,
+                "volume request was cancelled; reconnect required",
+            );
+        }
     }
 }
 
@@ -151,6 +175,7 @@ pub struct Sender {
     pending: VecDeque<i16>,
     next_packet: Option<Instant>,
     last_sync: Option<Instant>,
+    anchor: Option<(u32, u64)>,
     latency_frames: u32,
     ptp: bool,
     timing: Option<TimingRuntime>,
@@ -227,16 +252,35 @@ impl Sender {
         let shared = if let Some(credentials) = &options.credentials {
             pairing::verify(&mut connection, &device, credentials).await?
         } else {
-            pairing::transient(&mut connection, options.password.as_deref())
-                .await
-                .map_err(|e| match e {
-                    Error::AuthenticationRejected { .. } if options.password.is_none() => {
-                        Error::AuthenticationRequired {
-                            kind: AuthenticationKind::Password,
-                        }
+            let attempt = pairing::transient(&mut connection, options.password.as_deref()).await;
+            // Some receivers protect RTSP with Digest but keep the fixed transient
+            // SRP secret. A rejected SRP attempt leaves its socket unusable: retry
+            // that one alternative on a fresh connection, retaining the password
+            // for a later Digest challenge. Never retry malformed/wire failures.
+            let attempt = if options.password.is_some()
+                && matches!(
+                    attempt,
+                    Err(Error::AuthenticationRejected {
+                        kind: AuthenticationKind::Password
+                    })
+                ) {
+                connection = Connection::connect(remote, options.password.clone()).await?;
+                let info = connection.exchange("GET", "/info", "", &[], &[]).await?;
+                if info.status != 404 {
+                    connection.check(&info, "receiver info")?;
+                }
+                pairing::transient(&mut connection, None).await
+            } else {
+                attempt
+            };
+            attempt.map_err(|e| match e {
+                Error::AuthenticationRejected { .. } if options.password.is_none() => {
+                    Error::AuthenticationRequired {
+                        kind: AuthenticationKind::Password,
                     }
-                    other => other,
-                })?
+                }
+                other => other,
+            })?
         };
         connection.secure(&shared);
         let local = connection.wire.local_addr()?.ip();
@@ -251,8 +295,15 @@ impl Sender {
             .model
             .as_deref()
             .is_some_and(|m| m.starts_with("AudioAccessory"))
-            && !device.txt.get("tsid").is_some_and(|v| !v.is_empty())
-            && !device.txt.get("pgid").is_some_and(|v| !v.is_empty());
+            && device.txt.get("igl").is_some_and(|v| v == "1")
+            && device
+                .txt
+                .get("osvers")
+                .and_then(|v| v.split('.').next())
+                .and_then(|v| v.parse::<u32>().ok())
+                .is_some_and(|version| version >= 27)
+            && device.txt.get("tsid").is_none_or(|v| v.is_empty())
+            && device.txt.get("pgid").is_none_or(|v| v.is_empty());
         let timing = if ptp {
             TimingRuntime::ptp(local, remote.ip(), identity, standalone_homepod).await?
         } else {
@@ -260,7 +311,8 @@ impl Sender {
         };
         let transport = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
         let control = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
-        let device_id = connection.identity
+        let device_id = connection
+            .identity
             .as_bytes()
             .chunks(2)
             .map(|part| std::str::from_utf8(part).unwrap())
@@ -423,6 +475,7 @@ impl Sender {
             pending: VecDeque::new(),
             next_packet: None,
             last_sync: None,
+            anchor: None,
             latency_frames,
             ptp,
             timing: Some(timing),
@@ -433,6 +486,14 @@ impl Sender {
             credentials: options.credentials.clone(),
             stopped: Arc::new(AtomicBool::new(false)),
         };
+        if ptp {
+            sender
+                .timing
+                .as_ref()
+                .ok_or(Error::Stopped)?
+                .wait_for_ptp_exchange()
+                .await?;
+        }
         Ok(sender)
     }
 
@@ -440,7 +501,9 @@ impl Sender {
     /// during source inactivity. A call is bounded to one second of PCM.
     pub async fn send_pcm(&mut self, samples: &[i16]) -> Result<()> {
         self.check_health()?;
-        if samples.len() % CHANNELS != 0 || samples.len() > SAMPLE_RATE as usize * CHANNELS {
+        if !samples.len().is_multiple_of(CHANNELS)
+            || samples.len() > SAMPLE_RATE as usize * CHANNELS
+        {
             return Err(Error::InvalidArgument(
                 "PCM must be complete stereo frames, at most one second per call".into(),
             ));
@@ -462,6 +525,7 @@ impl Sender {
                 }
                 self.counters.reanchors.fetch_add(1, Ordering::Relaxed);
                 self.last_sync = None;
+                self.anchor = None;
                 due = now;
             }
             tokio::time::sleep_until(due).await;
@@ -472,8 +536,12 @@ impl Sender {
                     .is_some_and(|last| last.elapsed() >= Duration::from_millis(250))
             {
                 let timing = self.timing.as_ref().ok_or(Error::Stopped)?;
+                let (timestamp, local_ns) = *self
+                    .anchor
+                    .get_or_insert_with(|| (self.encoder.timestamp, timing.clock.local_ns()));
                 let sync = timing::sync_packet(
-                    self.encoder.timestamp,
+                    timestamp,
+                    local_ns,
                     self.latency_frames,
                     &timing.clock,
                     self.ptp,
@@ -519,7 +587,11 @@ impl Sender {
         self.volume_control().set_volume(volume).await
     }
     pub fn volume_control(&self) -> VolumeControl {
-        VolumeControl { connection: Arc::downgrade(&self.connection), failure: Arc::downgrade(&self.failure), stopped: self.stopped.clone() }
+        VolumeControl {
+            connection: Arc::downgrade(&self.connection),
+            failure: Arc::downgrade(&self.failure),
+            stopped: self.stopped.clone(),
+        }
     }
     pub async fn stop(&mut self) -> Result<()> {
         if self.stopped.swap(true, Ordering::AcqRel) {
@@ -577,6 +649,10 @@ impl Sender {
         {
             return Err(Error::SessionLost(failure.clone()));
         }
+        self.timing
+            .as_ref()
+            .ok_or(Error::Stopped)?
+            .check_health(self.ptp)?;
         Ok(())
     }
 }

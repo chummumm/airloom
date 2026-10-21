@@ -39,6 +39,8 @@ pub struct AppError {
 
 #[derive(Clone, Serialize)]
 pub struct AuthPrompt {
+    /// Identifies this exact prompt; stale dialog responses must be ignored.
+    pub request_id: u64,
     pub kind: &'static str,
     pub device_id: String,
     pub message: String,
@@ -57,6 +59,7 @@ pub struct Metrics {
     pub buffer_ms: Option<f32>,
     pub latency_ms: Option<f32>,
     pub dropped_frames: u64,
+    pub underrun_frames: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -106,16 +109,43 @@ impl Default for Snapshot {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
-    Refresh,
-    SelectDevice { device_id: String },
-    SelectSource { source_id: String },
-    Connect,
-    Pair,
-    Disconnect,
-    SetVolume { volume: f32 },
-    SetMuteLocal { enabled: bool },
-    Authenticate { value: zeroize::Zeroizing<String>, remember: bool },
-    ForgetCredentials { device_id: String },
+    Refresh {},
+    SelectDevice {
+        device_id: String,
+    },
+    SelectSource {
+        source_id: String,
+    },
+    Connect {},
+    Pair {
+        #[serde(default)]
+        request_id: Option<u64>,
+    },
+    Disconnect {
+        #[serde(default)]
+        request_id: Option<u64>,
+    },
+    SetVolume {
+        volume: f32,
+    },
+    SetMuteLocal {
+        enabled: bool,
+    },
+    Authenticate {
+        request_id: u64,
+        value: zeroize::Zeroizing<String>,
+        remember: bool,
+    },
+    ForgetCredentials {
+        device_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandError {
+    Invalid,
+    QueueFull,
+    Stopped,
 }
 
 impl Command {
@@ -123,13 +153,25 @@ impl Command {
         match self {
             Self::SetVolume { volume } => volume.is_finite() && (0.0..=1.0).contains(volume),
             Self::SelectDevice { device_id } | Self::ForgetCredentials { device_id } => {
-                !device_id.is_empty() && device_id.len() <= 1024
+                valid_identifier(device_id, 1024)
             }
-            Self::SelectSource { source_id } => !source_id.is_empty() && source_id.len() <= 4096,
-            Self::Authenticate { value, .. } => !value.is_empty() && value.len() <= 256,
+            Self::SelectSource { source_id } => valid_identifier(source_id, 4096),
+            Self::Authenticate {
+                request_id, value, ..
+            } => {
+                *request_id != 0
+                    && !value.is_empty()
+                    && value.len() <= 1024
+                    && !value.contains('\0')
+            }
+            Self::Pair { request_id } | Self::Disconnect { request_id } => *request_id != Some(0),
             _ => true,
         }
     }
+}
+
+fn valid_identifier(value: &str, maximum_bytes: usize) -> bool {
+    !value.is_empty() && value.len() <= maximum_bytes && !value.chars().any(char::is_control)
 }
 
 pub fn pcm_i16(samples: &[f32]) -> Vec<i16> {
@@ -186,8 +228,29 @@ mod tests {
 
     #[test]
     fn commands_reject_typos_and_out_of_range_volume() {
-        assert!(serde_json::from_str::<Command>(r#"{"type":"connect","pasword":"x"}"#).is_err());
+        for command in ["connect", "refresh", "pair", "disconnect"] {
+            let json = format!(r#"{{"type":"{command}","pasword":"x"}}"#);
+            assert!(serde_json::from_str::<Command>(&json).is_err(), "{command}");
+            let valid = format!(r#"{{"type":"{command}"}}"#);
+            assert!(serde_json::from_str::<Command>(&valid).unwrap().validate());
+        }
         let invalid: Command = serde_json::from_str(r#"{"type":"set_volume","volume":2}"#).unwrap();
+        assert!(!invalid.validate());
+    }
+
+    #[test]
+    fn authentication_requires_a_prompt_identity_and_sanitized_identifiers() {
+        assert!(serde_json::from_str::<Command>(
+            r#"{"type":"authenticate","value":"secret","remember":false}"#
+        )
+        .is_err());
+        let valid: Command = serde_json::from_str(
+            r#"{"type":"authenticate","request_id":42,"value":"secret","remember":false}"#,
+        )
+        .unwrap();
+        assert!(valid.validate());
+        let invalid: Command =
+            serde_json::from_str(r#"{"type":"select_source","source_id":"bad\u0000id"}"#).unwrap();
         assert!(!invalid.validate());
     }
 

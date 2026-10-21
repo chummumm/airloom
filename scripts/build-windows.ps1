@@ -4,7 +4,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $ProjectRoot
 try {
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'Install Rust with the MSVC toolchain first.' }
-    if (-not (Get-Command msbuild -ErrorAction SilentlyContinue)) { throw 'Run in a Visual Studio 2022 Developer PowerShell with C++ desktop tools and Windows SDK 26100.' }
+    if (-not (Get-Command msbuild -ErrorAction SilentlyContinue)) { throw 'Run in a Visual Studio 2022 or 2026 Developer PowerShell with C++ desktop tools and Windows SDK 26100.' }
     & cargo fetch --locked
     if ($LASTEXITCODE -ne 0) { throw 'Rust dependency download failed.' }
     $RustArgs = @('build','-p','airloom-core','--target','x86_64-pc-windows-msvc','--locked')
@@ -20,10 +20,11 @@ try {
     if (-not (Test-Path (Join-Path $OutputPath 'Airloom.exe'))) { throw 'Native executable not found at expected output path.' }
     $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $VsInstall = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $VsInstall) { throw 'Visual C++ installation not found for runtime packaging.' }
     $CrtPath = Get-ChildItem (Join-Path $VsInstall 'VC/Redist/MSVC') -Directory |
         Sort-Object { [version]$_.Name } -Descending |
-        ForEach-Object { Join-Path $_.FullName 'x64/Microsoft.VC143.CRT' } |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
+        ForEach-Object { Get-ChildItem (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
+        Select-Object -First 1 -ExpandProperty FullName
     if (-not $CrtPath) { throw 'Redistributable Visual C++ x64 runtime files not found.' }
     Copy-Item (Join-Path $CrtPath '*.dll') $OutputPath -Force
     Copy-Item "target/x86_64-pc-windows-msvc/$RustProfile/airloom_core.dll" $OutputPath -Force

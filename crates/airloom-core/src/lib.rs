@@ -32,8 +32,11 @@ pub unsafe extern "C" fn airloom_destroy(handle: *mut c_void) {
 
 /// # Safety
 /// `handle` must be live; `json` must point to a NUL-terminated UTF-8 string valid
-/// for the duration of this call. Authentication input is copied only into the
-/// command queue and is never included in snapshots or log messages.
+/// for the duration of this call. Authentication input stays in transient
+/// command/authentication state and is never included in snapshots or logs.
+/// The caller retains ownership of the input buffer and should clear secrets
+/// from that buffer after the call. Auth responses must include the prompt's
+/// `request_id`; an old dialog cannot authorize a newer authentication attempt.
 #[no_mangle]
 pub unsafe extern "C" fn airloom_command(handle: *mut c_void, json: *const c_char) -> i32 {
     catch_unwind(AssertUnwindSafe(|| {
