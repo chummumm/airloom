@@ -266,6 +266,60 @@ namespace
         std::cout << (unresponsive ? "Bounded exit timeout" : "Legacy tray-exit migration") << " passed\n";
     }
 
+    struct TimeoutDialogCleanup
+    {
+        HANDLE process;
+        ~TimeoutDialogCleanup()
+        {
+            if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) return;
+            auto dialog = WindowForProcess(GetProcessId(process), false);
+            std::array<wchar_t, 128> title{};
+            if (!dialog || !GetWindowTextW(dialog, title.data(), static_cast<int>(title.size()))
+                || std::wstring_view(title.data()) != L"Airloom 更新未完成") return;
+            // Failure cleanup closes only this test helper's known error dialog.
+            // It never terminates the parent or turns an assertion into success.
+            PostMessageW(dialog, WM_CLOSE, 0, 0);
+            WaitForSingleObject(process, 5000);
+        }
+    };
+
+    void DismissTimeoutDialog(HANDLE process, HWND dialog)
+    {
+        HWND button{};
+        auto deadline = GetTickCount64() + 5000;
+        do
+        {
+            button = GetDlgItem(dialog, IDOK);
+            if (IsWindowVisible(dialog) && button && IsWindowVisible(button) && IsWindowEnabled(button)) break;
+            Require(WaitForSingleObject(process, 0) == WAIT_TIMEOUT, "Timeout helper exited before user acknowledgement");
+            Sleep(25);
+        } while (GetTickCount64() < deadline);
+        Require(button && IsWindowVisible(dialog) && IsWindowVisible(button) && IsWindowEnabled(button),
+            "Timeout dialog's OK button did not become ready");
+
+        // Enumeration can observe a dialog before its controls are initialized.
+        // A real control notification carries the button HWND in lParam; zero
+        // describes a menu command and is not a reliable MessageBox dismissal.
+        DWORD_PTR response{};
+        SetLastError(ERROR_SUCCESS);
+        auto delivered = SendMessageTimeoutW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED),
+            reinterpret_cast<LPARAM>(button), SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &response);
+        auto deliveryError = GetLastError();
+        auto exited = WaitForSingleObject(process, 5000);
+        if (!delivered || exited != WAIT_OBJECT_0)
+        {
+            std::cerr << "Timeout dialog acknowledgement: delivered=" << (delivered != 0)
+                << ", win32_error=" << deliveryError << ", wait_result=" << exited
+                << ", dialog_alive=" << IsWindow(dialog) << ", button_alive=" << IsWindow(button) << '\n';
+        }
+        Require(delivered != 0, "Timeout dialog acknowledgement was not delivered");
+        Require(exited == WAIT_OBJECT_0, "Failure dialog did not close its helper after OK acknowledgement");
+        DWORD result{};
+        Require(GetExitCodeProcess(process, &result) != FALSE && result == 1,
+            "Acknowledged timeout did not return the helper failure result");
+        Require(!IsWindow(dialog), "Timeout dialog survived helper exit");
+    }
+
     void ParentExitTimeout(fs::path const& helperSource)
     {
         InstallFixture fixture(helperSource, 0);
@@ -274,6 +328,7 @@ namespace
         Handle helperProcess;
         Require(StartHelper(fixture.helper, fixture.installer, fixture.application, Sha256File(fixture.installer),
             fixture.lock.value, parent.process.value, &helperProcess), "Timeout fixture handoff failed");
+        TimeoutDialogCleanup dialogCleanup{helperProcess.value};
         fixture.lock.Reset();
         auto dialog = WaitForWindow(helperProcess.value, false, 35000);
         std::array<wchar_t, 128> title{};
@@ -282,8 +337,7 @@ namespace
         Require(!fs::exists(fixture.appDirectory / L"installed.txt"), "Timeout ran an installer against a live parent");
         Require(!fs::exists(fixture.installer), "Timeout left the downloaded installer behind");
         Require(WaitForSingleObject(parent.process.value, 0) == WAIT_TIMEOUT, "Timeout force-terminated the parent");
-        PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-        Require(WaitForSingleObject(helperProcess.value, 5000) == WAIT_OBJECT_0, "Failure dialog did not close its helper");
+        DismissTimeoutDialog(helperProcess.value, dialog);
         StopFixture(parent);
         ClearTestUpdateError();
         std::cout << "Helper timeout: visible feedback, no installation, parent preserved\n";
