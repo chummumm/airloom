@@ -4,6 +4,7 @@
 //! sample rate. WASAPI, native formats and COM apartment ownership stay inside
 //! this crate. No audio is captured on unsupported platforms.
 
+mod application;
 pub mod credentials;
 
 #[cfg(any(windows, test))]
@@ -45,11 +46,18 @@ pub enum CaptureError {
     Conversion(String),
     #[error("Credential data exceeds Windows Credential Manager's size limit")]
     CredentialTooLarge,
+    #[error(
+        "The selected application has exited; refresh the application list and select it again"
+    )]
+    ApplicationExited,
+    #[error("Local endpoint mute is not available when capturing one application")]
+    ApplicationMuteUnsupported,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaptureSource {
-    /// A stable Windows endpoint ID. The special ID `default` is also accepted.
+    /// A Windows endpoint ID, or an application ID bound to one process lifetime.
+    /// The special endpoint ID `default` is also accepted.
     pub id: String,
     pub name: String,
     pub is_default: bool,
@@ -57,7 +65,7 @@ pub struct CaptureSource {
 
 #[derive(Clone, Debug, Default)]
 pub struct CaptureInfo {
-    /// Resolved endpoint ID, including when capture was requested as `default`.
+    /// Resolved endpoint ID or lifetime-bound application ID.
     pub source_id: String,
     pub source_name: String,
 }
@@ -90,6 +98,12 @@ impl CaptureConfig {
             return Err(CaptureError::InvalidConfig(
                 "source ID is empty or contains NUL",
             ));
+        }
+        if is_application_source(&self.source_id) {
+            application::ApplicationId::parse(&self.source_id)?;
+            if self.mute_local {
+                return Err(CaptureError::ApplicationMuteUnsupported);
+            }
         }
         if !(8_000..=192_000).contains(&self.target_sample_rate) {
             return Err(CaptureError::InvalidConfig(
@@ -137,13 +151,37 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSource>> {
     }
 }
 
+/// Lists applications with a nonexpired Windows audio session, including paused
+/// sessions. Browser and other
+/// same-executable subprocesses are grouped under their live app root. IDs are
+/// scoped to the current process lifetime and must not be reused after restart.
+pub fn enumerate_applications() -> Result<Vec<CaptureSource>> {
+    #[cfg(windows)]
+    {
+        platform::enumerate_applications()
+    }
+    #[cfg(not(windows))]
+    {
+        Err(CaptureError::UnsupportedPlatform)
+    }
+}
+
+/// Identifies the application ID namespace, including malformed IDs that must
+/// be rejected rather than interpreted as an endpoint or default capture.
+pub fn is_application_source(source_id: &str) -> bool {
+    source_id.starts_with(application::SOURCE_PREFIX)
+}
+
 pub struct CaptureStream {
     #[cfg(windows)]
     inner: platform::Stream,
 }
 
 impl CaptureStream {
-    /// Starts capture of an existing render endpoint. `default` resolves when
+    /// Starts capture of a render endpoint or a selected application's process
+    /// tree. An application ID pins one process lifetime; exit is an error and
+    /// never falls back to capturing the computer's other sounds.
+    /// `default` resolves when
     /// capture starts; changing the system default later does not silently move
     /// this session. Restart capture to use the newly selected endpoint.
     pub fn start(config: CaptureConfig) -> Result<Self> {
@@ -238,11 +276,35 @@ mod tests {
         assert!(config.validate().is_err());
     }
 
+    #[test]
+    fn application_mode_rejects_malformed_identity_and_endpoint_mute() {
+        let mut config = CaptureConfig {
+            source_id: "process:42:100".into(),
+            ..CaptureConfig::default()
+        };
+        assert!(config.validate().is_ok());
+        config.mute_local = true;
+        assert!(matches!(
+            config.validate(),
+            Err(CaptureError::ApplicationMuteUnsupported)
+        ));
+        config.mute_local = false;
+        config.source_id = "process:42".into();
+        assert!(matches!(
+            config.validate(),
+            Err(CaptureError::InvalidConfig(_))
+        ));
+    }
+
     #[cfg(not(windows))]
     #[test]
     fn unsupported_platform_never_claims_capture_success() {
         assert!(matches!(
             enumerate_sources(),
+            Err(CaptureError::UnsupportedPlatform)
+        ));
+        assert!(matches!(
+            enumerate_applications(),
             Err(CaptureError::UnsupportedPlatform)
         ));
         assert!(matches!(

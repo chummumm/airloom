@@ -561,14 +561,17 @@ function Set-SettingsScroll([double] $Percent) {
     }
 }
 
-function Select-NativeTheme([string] $Name) {
-    $Picker = Wait-NativeId 'ThemePicker'
-    # Theme controls can be below the fold at the minimum native window size.
-    foreach ($Percent in @(0, 25, 50, 75, 100)) {
-        Set-SettingsScroll $Percent
-        if (-not $Picker.Current.IsOffscreen -and -not $Picker.Current.BoundingRectangle.IsEmpty) { break }
+function Get-NativeSelectionNames([string] $Id) {
+    $Picker = Wait-NativeId $Id
+    $Selection = [System.Windows.Automation.SelectionPattern]$Picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+    return @($Selection.Current.GetSelection() | ForEach-Object { $_.Current.Name })
+}
+
+function Select-NativeOption([string] $Id, [string] $Name) {
+    $Picker = Wait-NativeId $Id
+    if (-not $Picker.Current.IsEnabled -or $Picker.Current.IsOffscreen -or $Picker.Current.BoundingRectangle.IsEmpty) {
+        throw "The native picker '$Id' is not enabled and visible."
     }
-    if ($Picker.Current.IsOffscreen) { throw 'The theme picker could not be brought into view.' }
     $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $Expansion.Expand()
     $NameCondition = [System.Windows.Automation.PropertyCondition]::new(
@@ -597,14 +600,23 @@ function Select-NativeTheme([string] $Name) {
         if ($null -ne $Option) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $Deadline)
-    if ($null -eq $Option) { throw "The native theme option '$Name' was not exposed after opening the picker." }
+    if ($null -eq $Option) { throw "The native option '$Name' was not exposed after opening '$Id'." }
     $Selection = [System.Windows.Automation.SelectionItemPattern]$Option.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
     $Selection.Select()
     $Expansion.Collapse()
     Start-Sleep -Milliseconds 350
-    $Selected = [System.Windows.Automation.SelectionPattern]$Picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
-    $SelectedItems = @($Selected.Current.GetSelection())
-    if ($SelectedItems.Count -ne 1 -or $SelectedItems[0].Current.Name -ne $Name) { throw "Native theme selection did not retain '$Name'." }
+    $SelectedNames = @(Get-NativeSelectionNames $Id)
+    if ($SelectedNames.Count -ne 1 -or $SelectedNames[0] -ne $Name) { throw "Native picker '$Id' did not retain '$Name'." }
+}
+
+function Select-NativeTheme([string] $Name) {
+    $Picker = Wait-NativeId 'ThemePicker'
+    # Theme controls can be below the fold at the minimum native window size.
+    foreach ($Percent in @(0, 25, 50, 75, 100)) {
+        Set-SettingsScroll $Percent
+        if (-not $Picker.Current.IsOffscreen -and -not $Picker.Current.BoundingRectangle.IsEmpty) { break }
+    }
+    Select-NativeOption 'ThemePicker' $Name
     Set-SettingsScroll 0
 }
 
@@ -688,6 +700,160 @@ function Build-VisualFixture([string] $OutputDirectory) {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Dll)) { throw 'Isolated visual fixture build failed.' }
 }
 
+function Read-FixtureDiagnostics {
+    Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+    $null = Wait-NativeButton '返回声音投放'
+    try {
+        Invoke-NativeButton (Wait-NativeId 'CopyDiagnosticsButton')
+        Start-Sleep -Milliseconds 200
+        $Diagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
+        if ($Diagnostics.fixture -ne $true -or $null -eq $Diagnostics.fixture_state) {
+            throw 'The isolated process did not identify its synthetic command evidence.'
+        }
+        return $Diagnostics
+    } finally {
+        Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+        Start-Sleep -Milliseconds 250
+        Set-HomeScroll 0
+    }
+}
+
+function Invoke-FixtureConnectPointer([string] $Theme) {
+    $Button = Wait-NativeId 'ConnectButton'
+    if (-not $Button.Current.IsEnabled -or $Button.Current.IsOffscreen) {
+        throw 'The primary action must be enabled and visible before physical input.'
+    }
+    $Bounds = $Button.Current.BoundingRectangle
+    $Scale = [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle) / 96.0
+    if ($Bounds.IsEmpty -or [Math]::Abs($Bounds.Height / $Scale - 44) -gt 1) {
+        throw 'The primary action did not retain its 44 DIP native button height.'
+    }
+    $OriginalCursor = [AirloomUiProbe]::Cursor()
+    $ButtonPressed = $false
+    try {
+        $null = [AirloomUiProbe]::SetForegroundWindow($Process.MainWindowHandle)
+        Start-Sleep -Milliseconds 200
+        if ([AirloomUiProbe]::GetForegroundWindow() -ne $Process.MainWindowHandle) {
+            throw 'The fixture window did not become foreground for physical button input.'
+        }
+        $PageBounds = (Wait-NativeId 'PageContent').Current.BoundingRectangle
+        $null = [AirloomUiProbe]::MovePointer([int]($PageBounds.X + 8), [int]($PageBounds.Y + 8))
+        (Wait-NativeId 'SettingsButton').SetFocus()
+        Start-Sleep -Milliseconds 150
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-button-normal-$Theme.png")
+        $Button.SetFocus()
+        Start-Sleep -Milliseconds 150
+        if (-not $Button.Current.HasKeyboardFocus) { throw 'The primary action did not accept native UIA focus.' }
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-button-focus-$Theme.png")
+        $CenterX = [int]($Bounds.X + $Bounds.Width / 2)
+        $CenterY = [int]($Bounds.Y + $Bounds.Height / 2)
+        [AirloomUiProbe]::RequirePointOwner($CenterX, $CenterY, [uint32]$Process.Id)
+        $null = [AirloomUiProbe]::MovePointer($CenterX, $CenterY)
+        Start-Sleep -Milliseconds 200
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-button-hover-$Theme.png")
+        [AirloomUiProbe]::LeftButton($true)
+        $ButtonPressed = $true
+        Start-Sleep -Milliseconds 150
+        if (-not [AirloomUiProbe]::LeftButtonIsDown()) { throw 'The physical button press was not observed.' }
+        foreach ($Dimension in @('X', 'Y', 'Width', 'Height')) {
+            if ([Math]::Abs($Button.Current.BoundingRectangle.$Dimension - $Bounds.$Dimension) -gt 1) {
+                throw "The primary action moved during pointer interaction ($Dimension)."
+            }
+        }
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-button-pressed-$Theme.png")
+        [AirloomUiProbe]::LeftButton($false)
+        $ButtonPressed = $false
+        Start-Sleep -Milliseconds 400
+        return [ordered]@{
+            pointer_method = 'Checked SendInput hover, left-button down, and left-button up'
+            focus_method = 'UIA SetFocus with HasKeyboardFocus verification'
+            focus_verified = $true; physical_press_verified = $true; stable_bounds_verified = $true
+            height_dip = $Bounds.Height / $Scale
+        }
+    } finally {
+        if ($ButtonPressed) { [AirloomUiProbe]::LeftButton($false) }
+        $null = [AirloomUiProbe]::MovePointer($OriginalCursor.X, $OriginalCursor.Y)
+    }
+}
+
+function Test-ApplicationSourceFixture([string] $Theme) {
+    Set-HomeScroll 0
+    $LocalMute = Wait-NativeId 'LocalMuteToggle'
+    $MutePattern = [System.Windows.Automation.TogglePattern]$LocalMute.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if (-not $LocalMute.Current.IsEnabled) { throw 'Endpoint mode unexpectedly disabled local mute.' }
+    if ($MutePattern.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { $MutePattern.Toggle() }
+    Start-Sleep -Milliseconds 350
+    $BeforeSwitch = Read-FixtureDiagnostics
+    if ($BeforeSwitch.mute_local -ne $true -or $BeforeSwitch.fixture_state.streaming_receivers -ne 2) {
+        throw 'The initial two-receiver fixture did not acknowledge endpoint mute before mode switching.'
+    }
+
+    Select-NativeOption 'SourceModePicker' '指定应用'
+    $SelectedNames = @(Get-NativeSelectionNames 'SourcePicker')
+    if ($SelectedNames.Count -ne 0 -or (Wait-NativeId 'ConnectButton').Current.IsEnabled -or
+        (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
+        throw 'Application mode selected a source or enabled playback before explicit application choice.'
+    }
+    $LocalMute = Wait-NativeId 'LocalMuteToggle'
+    $MutePattern = [System.Windows.Automation.TogglePattern]$LocalMute.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($LocalMute.Current.IsEnabled -or $MutePattern.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw 'Application mode did not disable and clear local output mute.'
+    }
+    $AwaitingSelection = Read-FixtureDiagnostics
+    if ($AwaitingSelection.capture.source_mode -ne 'application' -or $AwaitingSelection.fixture_state.source_id -ne '' -or
+        $AwaitingSelection.fixture_state.source_count -ne 3 -or $AwaitingSelection.fixture_state.streaming_receivers -ne 0 -or
+        $AwaitingSelection.session_state -ne 'idle' -or $AwaitingSelection.capture.state -ne 'idle' -or
+        $AwaitingSelection.mute_local -ne $false) {
+        throw 'Mode switching did not reach an idle, unselected application fixture through the real native command path.'
+    }
+    Save-NativeScreenshot (Join-Path $EvidencePath "fixture-application-awaiting-selection-$Theme.png")
+
+    $BrowserName = 'Microsoft Edge · 测试应用'
+    $BrowserId = 'process:4200:133700000000000000'
+    Select-NativeOption 'SourcePicker' $BrowserName
+    if (-not (Wait-NativeId 'ConnectButton').Current.IsEnabled -or (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
+        throw 'Explicit application selection did not become ready without automatically starting playback.'
+    }
+    $ButtonProof = Invoke-FixtureConnectPointer $Theme
+    Assert-ActiveFixtureWaveform
+    $PlayingApplication = Read-FixtureDiagnostics
+    if ($PlayingApplication.capture.source_mode -ne 'application' -or $PlayingApplication.fixture_state.source_id -ne $BrowserId -or
+        $PlayingApplication.fixture_state.streaming_receivers -ne 2 -or $PlayingApplication.capture.state -ne 'signal' -or
+        $PlayingApplication.mute_local -ne $false) {
+        throw 'The physical primary-button click did not start the explicitly selected synthetic application.'
+    }
+
+    Invoke-NativeButton (Wait-NativeId 'SourceRetryButton')
+    Start-Sleep -Milliseconds 350
+    $SelectedNames = @(Get-NativeSelectionNames 'SourcePicker')
+    $AfterRefresh = Read-FixtureDiagnostics
+    if ($SelectedNames.Count -ne 1 -or $SelectedNames[0] -ne $BrowserName -or
+        $AfterRefresh.fixture_state.source_id -ne $BrowserId -or $AfterRefresh.fixture_state.streaming_receivers -ne 2 -or
+        $AfterRefresh.fixture_state.refresh_count -ne ($PlayingApplication.fixture_state.refresh_count + 1) -or
+        (Wait-NativeId 'LocalMuteToggle').Current.IsEnabled) {
+        throw 'Refreshing application sources changed the explicit selection/playback, skipped the core command, or enabled local mute.'
+    }
+    $ApplicationThemes = Test-NativeThemes 'fixture-application' $true
+    $script:FixtureThemeErrors = @($script:FixtureThemeErrors) + @($ApplicationThemes.errors)
+
+    Select-NativeOption 'SourceModePicker' '系统声音'
+    $ReturnedToSystem = Read-FixtureDiagnostics
+    if ($ReturnedToSystem.capture.source_mode -ne 'endpoint' -or $ReturnedToSystem.fixture_state.streaming_receivers -ne 0 -or
+        $ReturnedToSystem.session_state -ne 'idle' -or $ReturnedToSystem.capture.state -ne 'idle' -or
+        $ReturnedToSystem.test_tone_active -ne $false -or $ReturnedToSystem.mute_local -ne $false -or
+        @($ReturnedToSystem.receivers).Count -ne 2 -or (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
+        throw 'Returning to system capture did not stop application playback while preserving the receiver selection.'
+    }
+    return [ordered]@{
+        verified = $ApplicationThemes.verified; themes = $ApplicationThemes.themes; errors = $ApplicationThemes.errors
+        explicit_selection_verified = $true; mode_switch_stops_playback_verified = $true
+        source_refresh_retains_selection_verified = $true; local_mute_disabled_verified = $true
+        active_waveform_mode_verified = $ApplicationThemes.active_waveform_mode_verified
+        button_pointer_interaction_verified = $true; button_input = $ButtonProof
+        synthetic_application_count = 3; selected_application = $BrowserName
+    }
+}
+
 function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     $PriorEnabled = $env:AIRLOOM_UI_FIXTURE
     try {
@@ -719,29 +885,36 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
         Assert-StableLayout $Baseline (Get-NativeLayout) 'Populated fixture volume'
     }
     # This click enters the same native password dialog used for real receivers.
-    # Cancelling its request must leave the other two fixture receivers selected.
+    # Cancelling its request stops only that route. Production deliberately
+    # keeps its selection, while the other two receivers continue playing.
     Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-bedroom')
     $null = Wait-NativeButton '继续连接'
     Save-NativeScreenshot (Join-Path $EvidencePath "fixture-auth-$FixtureTheme.png")
     Invoke-NativeButton (Wait-NativeButton '取消')
     Start-Sleep -Milliseconds 400
     $Targets = (Wait-NativeId 'TargetName').Current.Name
-    if (-not $Targets.Contains('客厅 HomePod') -or -not $Targets.Contains('书房 HomePod mini') -or $Targets.Contains('卧室')) {
+    if (-not $Targets.Contains('客厅 HomePod') -or -not $Targets.Contains('书房 HomePod mini') -or -not $Targets.Contains('卧室')) {
         throw 'Cancelling one fixture authentication request changed the other selected receivers.'
     }
-    Invoke-NativeButton (Wait-NativeId 'SettingsButton')
-    Invoke-NativeButton (Wait-NativeId 'CopyDiagnosticsButton')
-    Start-Sleep -Milliseconds 150
-    $FixtureDiagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
-    if ($FixtureDiagnostics.fixture -ne $true) { throw 'The isolated screenshot process did not identify its fixture data.' }
-    Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+    $FixtureDiagnostics = Read-FixtureDiagnostics
+    $CancelledRoutes = @($FixtureDiagnostics.receivers | Where-Object { $_.slot -eq 2 -and $_.state -eq 'idle' })
+    if ($FixtureDiagnostics.fixture_state.auth_pending -ne $false -or $CancelledRoutes.Count -ne 1 -or
+        $FixtureDiagnostics.fixture_state.streaming_receivers -ne 2) {
+        throw 'Cancelling one authentication request failed to stop just its route and preserve the other two streams.'
+    }
+    Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-bedroom')
+    Start-Sleep -Milliseconds 350
+    $ApplicationProof = Test-ApplicationSourceFixture $FixtureTheme
     return [ordered]@{
-        verified = $ThemeProof.verified; data_source = 'CI-only replacement DLL in a separate temporary archive copy'
+        verified = ($ThemeProof.verified -and $ApplicationProof.verified); data_source = 'CI-only replacement DLL in a separate temporary archive copy'
         synthetic_data = $true; real_audio_or_receiver_claim = $false
-        themes = $ThemeProof.themes; errors = $ThemeProof.errors; receivers = 3; initially_streaming = 2
+        themes = $ThemeProof.themes; errors = @($ThemeProof.errors) + @($ApplicationProof.errors); receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
         populated_volume_retained = $true; compact_receivers_visible_at_top = $true
         active_waveform_mode_verified = $ThemeProof.active_waveform_mode_verified
+        application_source_ui_verified = $ApplicationProof.verified
+        button_pointer_interaction_verified = $ApplicationProof.button_pointer_interaction_verified
+        application_source_ui = $ApplicationProof
     }
 }
 
@@ -885,7 +1058,7 @@ try {
         verification_errors = $VisualErrors
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
         desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
-        note = 'Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
+        note = 'Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated states, application-source controls, button input, and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio capture or transport. No physical HomePod was connected to CI.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))

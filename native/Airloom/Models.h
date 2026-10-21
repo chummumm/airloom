@@ -36,6 +36,9 @@ namespace airloom::native
         winrt::hstring selectedDeviceId;
         std::vector<winrt::hstring> selectedDeviceIds;
         winrt::hstring selectedSourceId;
+        winrt::hstring sourceMode{L"endpoint"};
+        bool sourcesRefreshing{};
+        winrt::hstring sourceMessage;
         double volume{0.75};
         bool muteLocal{};
         double leftLevel{};

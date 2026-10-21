@@ -1,9 +1,15 @@
 //! All Core Audio objects are created, used and released on one COM worker.
 
+#[path = "applications.rs"]
+mod applications;
+
+pub(crate) use applications::enumerate_applications;
+
 use crate::mute_policy::MuteOwnership;
 use crate::pipeline::{levels, Encoding, NativeFormat, StereoResampler};
 use crate::{
-    AudioChunk, CaptureConfig, CaptureError, CaptureInfo, CaptureSource, Result, DEFAULT_SOURCE_ID,
+    is_application_source, AudioChunk, CaptureConfig, CaptureError, CaptureInfo, CaptureSource,
+    Result, DEFAULT_SOURCE_ID,
 };
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 use std::ffi::c_void;
@@ -21,7 +27,8 @@ use windows::Win32::Media::Audio::Endpoints::{
 use windows::Win32::Media::Audio::{
     eMultimedia, eRender, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
     MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE_ACTIVE, WAVEFORMATEX,
 };
 use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
@@ -195,8 +202,21 @@ impl Stream {
     }
 
     pub(crate) fn read_timeout(&self, timeout: Duration) -> Result<Option<AudioChunk>> {
+        if let Some(error) = self.take_error() {
+            while self.audio.try_recv().is_ok() {}
+            return Err(error);
+        }
         match self.audio.recv_timeout(timeout) {
-            Ok(chunk) => Ok(Some(chunk)),
+            Ok(chunk) => {
+                // Do not deliver queued samples after the worker has reported
+                // a source failure, especially a selected application exiting.
+                if let Some(error) = self.take_error() {
+                    while self.audio.try_recv().is_ok() {}
+                    Err(error)
+                } else {
+                    Ok(Some(chunk))
+                }
+            }
             Err(RecvTimeoutError::Timeout) => Ok(None),
             Err(RecvTimeoutError::Disconnected) => {
                 Err(self.take_error().unwrap_or(CaptureError::WorkerStopped))
@@ -256,7 +276,7 @@ fn run_worker(
             return Ok(());
         }
     };
-    let mut session = match Session::start(&config) {
+    let mut session = match Session::start(&config, cancelled) {
         Ok(session) => session,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -270,6 +290,9 @@ fn run_worker(
     let mut dropped_frames = 0u64;
     let result = (|| {
         while !cancelled.load(Ordering::Acquire) {
+            if let Some(process) = &session.process {
+                process.ensure_alive()?;
+            }
             while let Ok(command) = commands.try_recv() {
                 match command {
                     Command::SetMute(enabled, reply) => {
@@ -349,7 +372,8 @@ struct Session {
     // Drop order keeps the event alive until the audio client is released.
     client: IAudioClient,
     capture: IAudioCaptureClient,
-    device: IMMDevice,
+    device: Option<IMMDevice>,
+    process: Option<applications::ApplicationProcess>,
     event: Event,
     format: NativeFormat,
     resampler: StereoResampler,
@@ -360,7 +384,10 @@ struct Session {
 }
 
 impl Session {
-    fn start(config: &CaptureConfig) -> Result<Self> {
+    fn start(config: &CaptureConfig, cancelled: &AtomicBool) -> Result<Self> {
+        if is_application_source(&config.source_id) {
+            return Self::start_application(config, cancelled);
+        }
         let enumerator = enumerator()?;
         let device = if config.source_id == DEFAULT_SOURCE_ID {
             unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) }
@@ -404,7 +431,8 @@ impl Session {
         let mut session = Self {
             client,
             capture,
-            device,
+            device: Some(device),
+            process: None,
             event,
             format,
             resampler,
@@ -418,6 +446,70 @@ impl Session {
         if config.mute_local {
             session.set_mute(true)?;
         }
+        Ok(session)
+    }
+
+    fn start_application(config: &CaptureConfig, cancelled: &AtomicBool) -> Result<Self> {
+        let process = applications::ApplicationProcess::open(&config.source_id)?;
+        let info = CaptureInfo {
+            source_id: config.source_id.clone(),
+            source_name: process.name(),
+        };
+        let client = process.activate(cancelled)?;
+        process.ensure_alive()?;
+        // The virtual process device has no physical endpoint mix format.
+        // Explicit shared-mode PCM plus Windows' converter matches the process
+        // loopback contract and leaves our resampler/queue pipeline unchanged.
+        let mix = WAVEFORMATEX {
+            wFormatTag: 1,
+            nChannels: 2,
+            nSamplesPerSec: config.target_sample_rate,
+            nAvgBytesPerSec: config.target_sample_rate * 4,
+            nBlockAlign: 4,
+            wBitsPerSample: 16,
+            cbSize: 0,
+        };
+        let format = NativeFormat::new(config.target_sample_rate, 2, 4, 0, Encoding::Signed16)?;
+        let resampler = StereoResampler::new(config.target_sample_rate, config.target_sample_rate)?;
+        unsafe {
+            client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK
+                    | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+                0,
+                0,
+                &mix,
+                None,
+            )
+        }
+        .map_err(|error| failure("Initialize application audio capture", error))?;
+        let event = Event(
+            unsafe { CreateEventW(None, false, false, None) }
+                .map_err(|error| failure("Create application capture event", error))?,
+        );
+        unsafe { client.SetEventHandle(event.0) }
+            .map_err(|error| failure("Attach application capture event", error))?;
+        let capture = unsafe { client.GetService() }
+            .map_err(|error| failure("Get application capture service", error))?;
+        let buffer_frames = unsafe { client.GetBufferSize() }
+            .map_err(|error| failure("Get application capture buffer size", error))?;
+        let mut session = Self {
+            client,
+            capture,
+            device: None,
+            process: Some(process),
+            event,
+            format,
+            resampler,
+            buffer_frames,
+            local_mute: None,
+            started: false,
+            info,
+        };
+        unsafe { session.client.Start() }
+            .map_err(|error| failure("Start application audio capture", error))?;
+        session.started = true;
         Ok(session)
     }
 
@@ -474,7 +566,11 @@ impl Session {
 
     fn set_mute(&mut self, enabled: bool) -> Result<()> {
         if enabled && self.local_mute.is_none() {
-            self.local_mute = Some(LocalMute::new(&self.device)?);
+            let device = self
+                .device
+                .as_ref()
+                .ok_or(CaptureError::ApplicationMuteUnsupported)?;
+            self.local_mute = Some(LocalMute::new(device)?);
         }
         if let Some(mute) = &mut self.local_mute {
             mute.set_enabled(enabled)?;

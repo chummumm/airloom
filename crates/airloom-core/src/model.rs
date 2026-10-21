@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceMode {
+    #[default]
+    Endpoint,
+    Application,
+}
+
+impl SourceMode {
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Endpoint => "endpoint",
+            Self::Application => "application",
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct DeviceView {
     pub id: String,
@@ -71,7 +88,7 @@ pub struct Metrics {
 
 #[derive(Clone, Serialize)]
 pub struct CaptureView {
-    /// Actual endpoint signal; a generated test tone never changes this value.
+    /// Actual captured signal; a generated test tone never changes this value.
     pub state: &'static str,
     pub source_id: String,
     pub source_name: String,
@@ -89,7 +106,7 @@ impl Default for CaptureView {
             state: "idle",
             source_id: String::new(),
             source_name: String::new(),
-            message: "连接后显示所选输出设备的真实声音。".into(),
+            message: "连接后显示所选声音来源的真实声音。".into(),
             frames_received: 0,
             chunks_received: 0,
             last_packet_ms: None,
@@ -115,6 +132,7 @@ pub struct Diagnostics {
 
 #[derive(Clone, Serialize)]
 pub struct CaptureDiagnostics {
+    pub source_mode: SourceMode,
     pub state: &'static str,
     pub frames_received: u64,
     pub chunks_received: u64,
@@ -144,6 +162,7 @@ impl Diagnostics {
             mute_local: snapshot.mute_local,
             test_tone_active: snapshot.test_tone_active,
             capture: CaptureDiagnostics {
+                source_mode: snapshot.source_mode,
                 state: snapshot.capture.state,
                 frames_received: snapshot.capture.frames_received,
                 chunks_received: snapshot.capture.chunks_received,
@@ -167,6 +186,9 @@ pub struct Snapshot {
     pub status_message: String,
     pub devices: Vec<DeviceView>,
     pub sources: Vec<SourceView>,
+    pub source_mode: SourceMode,
+    pub sources_refreshing: bool,
+    pub source_message: String,
     pub selected_device_id: String,
     pub selected_device_ids: Vec<String>,
     pub selected_source_id: String,
@@ -193,6 +215,9 @@ impl Default for Snapshot {
             status_message: "选择一个或多个设备，让声音流动起来。".into(),
             devices: Vec::new(),
             sources: Vec::new(),
+            source_mode: SourceMode::Endpoint,
+            sources_refreshing: false,
+            source_message: "选择电脑正在播放声音的输出设备。".into(),
             selected_device_id: String::new(),
             selected_device_ids: Vec::new(),
             selected_source_id: "default".into(),
@@ -219,6 +244,10 @@ impl Default for Snapshot {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Refresh {},
+    RefreshSources {},
+    SelectSourceMode {
+        mode: SourceMode,
+    },
     SelectDevice {
         device_id: String,
     },

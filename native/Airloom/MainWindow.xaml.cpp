@@ -69,7 +69,7 @@ namespace
 
     bool SameSources(Snapshot const& a, Snapshot const& b)
     {
-        return a.selectedSourceId == b.selectedSourceId && a.sources.size() == b.sources.size() &&
+        return a.sourceMode == b.sourceMode && a.sourcesRefreshing == b.sourcesRefreshing && a.selectedSourceId == b.selectedSourceId && a.sources.size() == b.sources.size() &&
             std::equal(a.sources.begin(), a.sources.end(), b.sources.begin(), [](auto const& left, auto const& right)
                 { return left.id == right.id && left.name == right.name && left.kind == right.kind; });
     }
@@ -324,6 +324,7 @@ namespace winrt::Airloom::implementation
         bool const auth = next.authRequestId != 0;
         bool const discovering = next.state == L"discovering";
         bool const sourceError = next.errorCode == L"capture_sources";
+        bool const applicationSource = next.sourceMode == L"application";
         auto const device = next.SelectedDevice();
         bool const hasSource = std::any_of(next.sources.begin(), next.sources.end(), [&next](auto const& source)
             { return source.id == next.selectedSourceId; });
@@ -336,6 +337,8 @@ namespace winrt::Airloom::implementation
         }
         if (!m_sourcesRendered || !SameSources(m_snapshot, next)) RenderSources(next);
         SourcePicker().IsEnabled(!next.sources.empty());
+        SourceModePicker().IsEnabled(m_engine.Available());
+        SourceGlyph().Glyph(applicationSource ? L"\uE737" : L"\uE7F4");
         auto const visibleCount = static_cast<size_t>(std::count_if(next.devices.begin(), next.devices.end(), [this](Device const& entry)
             { return !IsDeviceHidden(entry.id); }));
         DeviceCount().Text(visibleCount == 0 ? L"在同一个网络中寻找" :
@@ -362,7 +365,7 @@ namespace winrt::Airloom::implementation
         if (!next.statusMessage.empty() && next.errorMessage.empty()) description = next.statusMessage;
         if (sourceError)
         {
-            badge = L"等待音频输出";
+            badge = applicationSource ? L"等待选择应用" : L"等待音频输出";
             eyebrow = L"等待声音来源";
             description = device ? L"完成声音来源设置后，可连接已选扬声器。" : L"选择扬声器，准备投放电脑声音。";
             action = L"开始投放";
@@ -420,16 +423,22 @@ namespace winrt::Airloom::implementation
             if (VolumeSlider().Value() != value) VolumeSlider().Value(value);
             SetText(VolumeLabel(), to_hstring(static_cast<int>(value)) + L"%");
         }
-        LocalMuteToggle().IsEnabled(hasSource);
+        LocalMuteToggle().IsEnabled(hasSource && !applicationSource);
+        ToolTipService::SetToolTip(LocalMuteToggle(), box_value(applicationSource
+            ? L"指定应用模式保留本机播放，不改变电脑整体静音状态。"
+            : L"静音所选 Windows 输出；断开后恢复。若采集无声，请先关闭。"));
         LocalMuteToggle().IsOn(next.muteLocal);
         // Keep the transport slot stable when source enumeration finishes or fails.
         TestToneButton().IsEnabled(streaming && !sourceError);
-        SourceRetryButton().Visibility(sourceError ? Visibility::Visible : Visibility::Collapsed);
-        SourceRetryButton().IsEnabled(m_engine.Available());
+        SourceRetryButton().IsEnabled(m_engine.Available() && !next.sourcesRefreshing);
+        SourceRetryButton().Content(box_value(next.sourcesRefreshing ? L"正在刷新…" : L"刷新列表"));
         CopyDiagnosticsButton().IsEnabled(!next.diagnosticsJson.empty() && next.diagnosticsJson != L"{}");
         SetText(TestToneLabel(), next.testToneActive ? L"停止试播" : L"试播 3 秒");
-        SetText(CaptureStatusText(), sourceError ? next.errorMessage : next.testToneActive ? L"正在播放测试音，结束后恢复电脑声音。" :
-            !next.captureMessage.empty() ? next.captureMessage : L"连接后显示实际声音采集状态。");
+        SetText(CaptureStatusText(), sourceError ? next.errorMessage :
+            next.sourcesRefreshing && next.sources.empty() ? L"正在读取声音来源…" :
+            next.testToneActive ? L"正在播放测试音，结束后恢复所选声音。" :
+            next.captureState != L"idle" && !next.captureMessage.empty() ? next.captureMessage :
+            !next.sourceMessage.empty() ? next.sourceMessage : L"连接后显示实际声音采集状态。");
         CaptureStatusText().MaxLines(sourceError ? 0 : 2);
         ToolTipService::SetToolTip(CaptureStatusText(), box_value(CaptureStatusText().Text()));
         CaptureStatusText().Foreground(Brush(sourceError ? L"DangerBrush" : next.captureState == L"signal" ? L"AudioBrush" :
@@ -596,6 +605,13 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::RenderSources(Snapshot const& next)
     {
+        auto const applicationSource = next.sourceMode == L"application";
+        auto const modeIndex = applicationSource ? 1 : 0;
+        if (SourceModePicker().SelectedIndex() != modeIndex) SourceModePicker().SelectedIndex(modeIndex);
+        Automation::AutomationProperties::SetName(SourcePicker(), applicationSource ? L"选择要推流的应用" : L"声音来源，Windows 播放设备");
+        ToolTipService::SetToolTip(SourcePicker(), box_value(applicationSource
+            ? L"只采集所选应用及其子进程。同一浏览器的标签页属于同一应用。"
+            : L"选择正在播放声音的 Windows 输出设备。"));
         SourcePicker().Items().Clear();
         int32_t selected = -1;
         int32_t index = 0;
@@ -610,7 +626,9 @@ namespace winrt::Airloom::implementation
             ++index;
         }
         SourcePicker().SelectedIndex(selected);
-        SourcePicker().PlaceholderText(next.sources.empty() ? L"未找到可用的播放设备" : L"选择 Windows 播放设备");
+        SourcePicker().PlaceholderText(next.sourcesRefreshing && next.sources.empty() ? L"正在读取…" : applicationSource
+            ? (next.sources.empty() ? L"先让应用播放声音，再刷新" : L"选择要推流的应用")
+            : (next.sources.empty() ? L"未找到可用的播放设备" : L"选择 Windows 播放设备"));
         m_sourcesRendered = true;
     }
 
@@ -753,6 +771,23 @@ namespace winrt::Airloom::implementation
         if (m_snapshot.authRequestId == 0) return;
         auto command = MakeCommand(L"disconnect");
         command.Insert(L"request_id", JsonValue::CreateNumberValue(static_cast<double>(m_snapshot.authRequestId)));
+        Send(command);
+    }
+
+    void MainWindow::OnRefreshSources(IInspectable const&, RoutedEventArgs const&)
+    {
+        Send(L"refresh_sources");
+    }
+
+    void MainWindow::OnSourceModeChanged(IInspectable const&, SelectionChangedEventArgs const&)
+    {
+        if (m_rendering || !m_loaded) return;
+        auto item = SourceModePicker().SelectedItem().try_as<ComboBoxItem>();
+        if (!item) return;
+        auto mode = unbox_value<hstring>(item.Tag());
+        if (mode == m_snapshot.sourceMode) return;
+        auto command = MakeCommand(L"select_source_mode");
+        command.Insert(L"mode", JsonValue::CreateStringValue(mode));
         Send(command);
     }
 
@@ -1017,6 +1052,7 @@ namespace winrt::Airloom::implementation
             Grid::SetColumn(toggle, 1);
             toggle.VerticalAlignment(VerticalAlignment::Center);
             toggle.MinWidth(76);
+            toggle.Style(Application::Current().Resources().Lookup(box_value(L"CompactButtonStyle")).as<Style>());
             toggle.Content(box_value(hidden ? L"恢复显示" : L"隐藏"));
             SetAccessibleName(toggle, (hidden ? L"恢复显示 " : L"隐藏 ") + entry.name);
             toggle.Click([weak = get_weak(), id = entry.id, name = entry.name, hidden](auto const&, auto const&)

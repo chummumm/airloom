@@ -13,6 +13,7 @@
 #include <locale>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -23,11 +24,15 @@ namespace
     {
         std::mutex mutex;
         std::array<bool, 3> selected{true, true, false};
+        std::array<bool, 3> playing{true, true, false};
         double volume{0.56};
+        bool running{true};
         bool muteLocal{};
         bool testTone{};
         bool authentication{};
-        bool sourceHeadphones{};
+        bool applicationMode{};
+        std::string sourceId{"fixture-default"};
+        unsigned sourceRefreshes{};
         unsigned frame{};
     };
 
@@ -35,6 +40,51 @@ namespace
         "fixture-living-room", "fixture-study", "fixture-bedroom"};
     constexpr std::array<char const*, 3> DeviceNames{
         "客厅 HomePod", "书房 HomePod mini", "卧室 · 窗边的 HomePod"};
+    struct Source { char const* id; char const* name; };
+    constexpr std::array<Source, 2> EndpointSources{{
+        {"fixture-default", "扬声器 · Realtek USB Audio"},
+        {"fixture-headphones", "耳机 · USB Audio 输出设备"}}};
+    // These identities deliberately have the production PID + creation-time
+    // shape, but identify no real process on the runner.
+    constexpr std::array<Source, 3> ApplicationSources{{
+        {"process:4200:133700000000000000", "Microsoft Edge · 测试应用"},
+        {"process:4201:133700000000000001", "Spotify · 测试应用"},
+        {"process:4202:133700000000000002", "VLC media player · 测试应用"}}};
+
+    std::span<Source const> Sources(Fixture const& fixture)
+    {
+        if (fixture.applicationMode) return ApplicationSources;
+        return EndpointSources;
+    }
+
+    Source const* SelectedSource(Fixture const& fixture)
+    {
+        for (auto const& source : Sources(fixture))
+            if (fixture.sourceId == source.id) return &source;
+        return nullptr;
+    }
+
+    void StopPlayback(Fixture& fixture)
+    {
+        fixture.running = false;
+        fixture.playing.fill(false);
+        fixture.authentication = false;
+        fixture.testTone = false;
+    }
+
+    void ConnectReceiver(Fixture& fixture, size_t index)
+    {
+        if (!fixture.selected[index] || !SelectedSource(fixture)) return;
+        if (index == 2) fixture.authentication = true;
+        else fixture.playing[index] = true;
+    }
+
+    void StartPlayback(Fixture& fixture)
+    {
+        if (!SelectedSource(fixture)) return;
+        fixture.running = std::any_of(fixture.selected.begin(), fixture.selected.end(), [](bool value) { return value; });
+        for (size_t index = 0; index < DeviceIds.size(); ++index) ConnectReceiver(fixture, index);
+    }
 
     std::string Environment(char const* name)
     {
@@ -65,8 +115,10 @@ namespace
 
     std::string Snapshot(Fixture& fixture)
     {
-        auto streaming = static_cast<unsigned>(std::count(fixture.selected.begin(), fixture.selected.end(), true));
-        if (fixture.authentication && fixture.selected[2]) --streaming;
+        auto const streaming = static_cast<unsigned>(std::count(fixture.playing.begin(), fixture.playing.end(), true));
+        auto const mode = fixture.applicationMode ? "application" : "endpoint";
+        auto const source = SelectedSource(fixture);
+        auto const sourceName = source ? source->name : "";
         constexpr unsigned elapsedSeconds = 187;
         constexpr unsigned packetsPerReceiver = elapsedSeconds * 44100 / 352;
         std::ostringstream json;
@@ -76,7 +128,10 @@ namespace
             << "\",\"status_message\":\"界面测试数据 · 未连接真实扬声器\",\"volume\":" << fixture.volume
             << ",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
             << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
-            << ",\"selected_source_id\":\"" << (fixture.sourceHeadphones ? "fixture-headphones" : "fixture-default")
+            << ",\"source_mode\":\"" << mode << "\",\"sources_refreshing\":false,\"source_message\":\""
+            << (fixture.applicationMode ? "只采集所选应用及其子进程；同一浏览器的多个标签页会一起采集。"
+                : "采集所选 Windows 输出设备上的全部应用声音。")
+            << "\",\"selected_source_id\":\"" << fixture.sourceId
             << "\",\"selected_device_ids\":[";
         bool first = true;
         std::string firstId;
@@ -93,7 +148,7 @@ namespace
         {
             if (index != 0) json << ',';
             bool const auth = index == 2 && fixture.authentication && fixture.selected[index];
-            bool const playing = fixture.selected[index] && !auth;
+            bool const playing = fixture.playing[index];
             json << "{\"id\":\"" << DeviceIds[index] << "\",\"name\":\"" << DeviceNames[index]
                 << "\",\"model\":\"" << (index == 1 ? "HomePod mini" : "HomePod")
                 << "\",\"online\":true,\"password_required\":" << (index == 2 ? "true" : "false")
@@ -101,9 +156,17 @@ namespace
                 << ",\"state\":\"" << (auth ? "auth_required" : playing ? "streaming" : "idle")
                 << "\",\"packets_sent\":" << (playing ? packetsPerReceiver : 0) << '}';
         }
-        json << "],\"sources\":[{\"id\":\"fixture-default\",\"name\":\"扬声器 · Realtek USB Audio\",\"kind\":\"system\"},"
-            << "{\"id\":\"fixture-headphones\",\"name\":\"耳机 · USB Audio 输出设备\",\"kind\":\"system\"}],"
-            << "\"elapsed_seconds\":" << (streaming ? elapsedSeconds : 0)
+        json << "],\"sources\":[";
+        first = true;
+        for (auto const& entry : Sources(fixture))
+        {
+            if (!first) json << ',';
+            json << "{\"id\":\"" << entry.id << "\",\"name\":\"" << entry.name
+                << "\",\"kind\":\"" << mode << "\",\"is_default\":"
+                << (!fixture.applicationMode && first ? "true" : "false") << '}';
+            first = false;
+        }
+        json << "],\"elapsed_seconds\":" << (streaming ? elapsedSeconds : 0)
             << ",\"level\":{\"left\":" << (streaming ? 0.36 : 0.0) << ",\"right\":" << (streaming ? 0.28 : 0.0)
             << "},\"waveform\":[";
         // Match the real core's 64 nonnegative peak-envelope bins. The native
@@ -118,9 +181,29 @@ namespace
         ++fixture.frame;
         json << "],\"metrics\":{\"sample_rate\":44100,\"packets_sent\":" << packetsPerReceiver * streaming
             << "},\"capture\":{\"state\":\"" << (streaming ? "signal" : "idle")
-            << "\",\"message\":\"界面测试信号 · 非真实音频\",\"source_name\":\"扬声器 · Realtek USB Audio\"},"
+            << "\",\"message\":\"界面测试信号 · 非真实音频\",\"source_name\":\"" << sourceName << "\"},"
             << "\"diagnostics\":{\"schema_version\":1,\"app_version\":\"ui-fixture\",\"fixture\":true,"
-            << "\"capture\":{\"state\":\"signal\"},\"receivers\":[]}";
+            << "\"session_state\":\"" << (streaming ? "streaming" : "idle")
+            << "\",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
+            << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
+            << ",\"capture\":{\"source_mode\":\"" << mode << "\",\"state\":\"" << (streaming ? "signal" : "idle")
+            << "\"},\"receivers\":[";
+        first = true;
+        for (size_t index = 0; index < DeviceIds.size(); ++index)
+        {
+            if (!fixture.selected[index]) continue;
+            if (!first) json << ',';
+            json << "{\"slot\":" << index << ",\"state\":\""
+                << (fixture.playing[index] ? "streaming" : index == 2 && fixture.authentication ? "auth_required" : "idle") << "\"}";
+            first = false;
+        }
+        // Test-only command evidence, available through the real diagnostics UI.
+        // Never copied into the production diagnostics schema or release DLL.
+        json << "],\"fixture_state\":{\"source_id\":\"" << fixture.sourceId
+            << "\",\"source_count\":" << Sources(fixture).size()
+            << ",\"refresh_count\":" << fixture.sourceRefreshes
+            << ",\"streaming_receivers\":" << streaming
+            << ",\"auth_pending\":" << (fixture.authentication ? "true" : "false") << "}}";
         if (fixture.authentication)
         {
             json << ",\"auth\":{\"request_id\":1,\"kind\":\"password\",\"device_id\":\"fixture-bedroom\","
@@ -163,26 +246,72 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
             if (value.empty() || end != value.c_str() + value.size() || !std::isfinite(volume)) return 1;
             fixture.volume = std::clamp(volume, 0.0, 1.0);
         }
-        else if (type == "set_mute_local") fixture.muteLocal = Field(json, "enabled") == "true";
-        else if (type == "test_tone") fixture.testTone = Field(json, "enabled") != "false";
-        else if (type == "select_source") fixture.sourceHeadphones = Field(json, "source_id") == "fixture-headphones";
+        else if (type == "set_mute_local") fixture.muteLocal = !fixture.applicationMode && Field(json, "enabled") == "true";
+        else if (type == "test_tone") fixture.testTone = Field(json, "enabled") != "false"
+            && std::any_of(fixture.playing.begin(), fixture.playing.end(), [](bool value) { return value; });
+        else if (type == "select_source_mode")
+        {
+            auto const mode = Field(json, "mode");
+            if (mode != "endpoint" && mode != "application") return 1;
+            bool const applicationMode = mode == "application";
+            if (applicationMode == fixture.applicationMode) return 0;
+            StopPlayback(fixture);
+            fixture.applicationMode = applicationMode;
+            // Synthetic enumeration completes immediately. Like the real core,
+            // endpoints regain their default; applications require explicit choice.
+            fixture.sourceId = applicationMode ? "" : EndpointSources[0].id;
+            if (applicationMode) fixture.muteLocal = false;
+        }
+        else if (type == "refresh_sources") ++fixture.sourceRefreshes;
+        else if (type == "select_source")
+        {
+            auto const id = Field(json, "source_id");
+            for (auto const& entry : Sources(fixture))
+            {
+                if (id != entry.id) continue;
+                bool const resume = fixture.running;
+                StopPlayback(fixture);
+                fixture.sourceId = id;
+                if (fixture.applicationMode) fixture.muteLocal = false;
+                if (resume) StartPlayback(fixture);
+                break;
+            }
+        }
+        else if (type == "connect") StartPlayback(fixture);
         else if (type == "toggle_device")
         {
             auto const id = Field(json, "device_id");
             for (size_t index = 0; index < DeviceIds.size(); ++index)
             {
                 if (id != DeviceIds[index]) continue;
-                fixture.selected[index] = Field(json, "selected") == "true";
-                if (index == 2) fixture.authentication = fixture.selected[index];
+                auto const selected = Field(json, "selected");
+                bool const enabled = selected.empty() ? !fixture.selected[index] : selected == "true";
+                if (enabled == fixture.selected[index]) continue;
+                fixture.selected[index] = enabled;
+                if (enabled && fixture.running) ConnectReceiver(fixture, index);
+                else if (!enabled)
+                {
+                    fixture.playing[index] = false;
+                    if (index == 2) fixture.authentication = false;
+                    if (std::none_of(fixture.selected.begin(), fixture.selected.end(), [](bool value) { return value; }))
+                        StopPlayback(fixture);
+                }
             }
         }
         else if (type == "disconnect")
         {
-            if (!Field(json, "request_id").empty()) fixture.selected[2] = false;
-            else fixture.selected.fill(false);
+            if (!Field(json, "request_id").empty())
+            {
+                fixture.playing[2] = false;
+                fixture.authentication = false;
+            }
+            else StopPlayback(fixture);
+        }
+        else if (type == "authenticate" || type == "pair")
+        {
+            if (fixture.authentication) fixture.playing[2] = true;
             fixture.authentication = false;
         }
-        else if (type == "authenticate" || type == "pair") fixture.authentication = false;
         return 0;
     }
     catch (...) { return 1; }

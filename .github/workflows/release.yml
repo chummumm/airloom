@@ -61,9 +61,10 @@ jobs:
           test -s release-assets/artifacts/native-window-880.png
           test -s release-assets/artifacts/native-window-1100.png
           test -s release-assets/artifacts/native-window-1600.png
-          for IMAGE in native-home-light native-home-dark native-settings-light native-settings-dark fixture-playing-home-light fixture-playing-home-dark fixture-playing-settings-light fixture-playing-settings-dark fixture-playing-home-compact-dark fixture-auth-dark; do
+          for IMAGE in native-home-light native-home-dark native-settings-light native-settings-dark fixture-playing-home-light fixture-playing-home-dark fixture-playing-settings-light fixture-playing-settings-dark fixture-playing-home-compact-dark fixture-auth-dark fixture-application-home-light fixture-application-home-dark fixture-button-normal-dark fixture-button-focus-dark fixture-button-hover-dark fixture-button-pressed-dark; do
             test -s "release-assets/artifacts/$IMAGE.png"
           done
+          test -s release-assets/artifacts/process-capture-api.txt
           python3 - <<'PY'
           import json
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
@@ -84,6 +85,15 @@ jobs:
           assert fixture.get('password_dialog_verified') is True and fixture.get('per_receiver_cancel_verified') is True, 'Native authentication presentation/cancel checks are missing.'
           assert fixture.get('populated_volume_retained') is True, 'Populated native volume check is missing.'
           assert fixture.get('active_waveform_mode_verified') is True, 'Animation-enabled native waveform evidence is missing.'
+          assert fixture.get('application_source_ui_verified') is True, 'Explicit application-source UI checks are missing.'
+          assert fixture.get('button_pointer_interaction_verified') is True, 'Native button pointer/focus checks are missing.'
+          application = fixture.get('application_source_ui', {})
+          for key in ('explicit_selection_verified', 'mode_switch_stops_playback_verified', 'source_refresh_retains_selection_verified', 'local_mute_disabled_verified', 'active_waveform_mode_verified'):
+              assert application.get(key) is True, f'Application-source UI gate is missing: {key}'
+          assert set(application.get('themes', [])) == {'light', 'dark'}, 'Application-mode theme evidence is missing.'
+          with open('release-assets/artifacts/process-capture-api.txt', encoding='utf-8-sig') as source:
+              assert 'Real process loopback passed:' in source.read(), 'Real Windows process capture lifecycle check is missing.'
+
           assert proof.get('desktop_width', 0) >= 1600 and proof.get('desktop_height', 0) >= 1040, 'Native windows were not verified on a sufficiently large display.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
@@ -108,4 +118,11 @@ jobs:
             release-assets/artifacts/fixture-playing-settings-light.png \
             release-assets/artifacts/fixture-playing-settings-dark.png \
             release-assets/artifacts/fixture-playing-home-compact-dark.png \
-            release-assets/artifacts/fixture-auth-dark.png
+            release-assets/artifacts/fixture-auth-dark.png \
+            release-assets/artifacts/fixture-application-home-light.png \
+            release-assets/artifacts/fixture-application-home-dark.png \
+            release-assets/artifacts/fixture-button-normal-dark.png \
+            release-assets/artifacts/fixture-button-focus-dark.png \
+            release-assets/artifacts/fixture-button-hover-dark.png \
+            release-assets/artifacts/fixture-button-pressed-dark.png \
+            release-assets/artifacts/process-capture-api.txt

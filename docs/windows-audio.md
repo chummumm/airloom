@@ -1,7 +1,8 @@
 # Windows audio capture
 
-Airloom captures the shared playback mix of an existing Windows output device
-through WASAPI loopback. It installs no audio driver and creates no output device
+Airloom offers two explicit sound-source scopes: the shared playback mix of an
+existing Windows output device, or a selected application's process tree.
+Both use Windows' built-in WASAPI loopback interfaces. It installs no audio driver and creates no output device
 in Windows Sound settings. The implementation is original Rust code in
 `crates/airloom-capture`; Microsoft's Core Audio interfaces are accessed through
 the `windows` crate.
@@ -16,17 +17,57 @@ change, requires restarting capture.
 
 Capture is shared-mode, event-driven endpoint loopback. It includes applications
 rendering through the selected endpoint's shared audio engine. It does not
-capture microphones, select an individual process, intercept an application's
-exclusive-mode stream, bypass protected-content restrictions, or redirect an
-application that is rendering to another endpoint. Windows' process-loopback API
-is a separate capture path and is not implemented in this version. A UI must not
-offer process selection as an available feature.
+capture microphones, intercept an application's exclusive-mode stream, bypass
+protected-content restrictions, or redirect an application that is rendering to
+another endpoint. Selecting **指定应用** uses the separate process path below.
 
 The event-driven loopback behavior used here is available on Windows 10 version
 1703 and later. Airloom's native UI and installer can impose a newer Windows
 minimum. See Microsoft's [loopback recording documentation][loopback] and
 [application loopback example][process-loopback] for the distinction between
 endpoint capture and process capture.
+
+## Application capture (0.4.0)
+
+`enumerate_applications()` lists nonexpired Core Audio sessions, including paused
+sessions. An app may need to play once before it has a selectable audio session;
+the UI provides a dedicated **刷新列表** action. Windows system sounds, Airloom
+itself, inaccessible processes and shared system hosts are excluded. Processes
+are grouped only through older ancestors with the same full executable path, so
+a browser audio subprocess can resolve to its browser root without ascending
+into Explorer or a launcher. Each choice includes its process ID to distinguish
+separate running instances.
+
+Application IDs contain both PID and process creation time. Selection is explicit:
+switching source scope stops the existing route, retains receiver selection, and
+clears the selected source. Application enumeration never automatically chooses
+the first app. A disappearing app does not select a different app or the system
+mix. Restarted instances need to be selected again.
+
+The worker opens the exact process lifetime and keeps its handle. It activates
+`VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK` through `ActivateAudioInterfaceAsync`
+with `PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE`. Capture therefore
+requests the chosen process and its children, independent of their physical
+output endpoint. Microsoft documents this path for build 20348 and newer;
+Airloom already requires Windows 11 build 22000 or newer. See the official
+[application loopback example][process-loopback] and [activation contract][activation].
+
+The completion callback is agile and owns the immutable activation payload until
+Windows releases it, including after the five-second activation deadline. The
+MTA worker receives a signal and retrieves the audio client. It requests stereo
+16-bit PCM at the transport sample rate with Windows automatic format conversion.
+The existing bounded capture and sender queues are shared with endpoint mode.
+
+If the app has no rendering streams, the API produces silence. The worker checks
+process lifetime at each event-loop iteration (at most a 20 ms wait), prioritizes
+terminal failures over queued samples, and stops on exit. This is one process
+tree, not a browser-tab selector: tabs sharing that browser instance may all be
+captured. Apps delegating audio to an unrelated service or inaccessible process,
+protected media and uncommon application models require separate validation.
+
+The **电脑静音** control is disabled in app mode. Endpoint mute would also affect
+other applications, so the capture API rejects that operation. Local app playback
+continues; the app's original output routing is not changed.
 
 ## Audio contract
 
@@ -152,8 +193,14 @@ confirm endpoint enumeration, 44.1/48 kHz output, channel separation, mute behav
 on the chosen driver, external volume changes, device removal, stop/start and
 sleep/resume recovery. Verify credential save/load/delete using a disposable
 test credential and inspect that no password appears in logs or settings files.
-Process capture, automatic endpoint migration, recovery after a force-killed
-process and exclusive/protected playback remain outside this implementation.
+The separate ignored `process_loopback_activation_and_lifetime` integration test
+uses the real Windows API and an owned silent process to check activation,
+process identity, stop, mute refusal and target exit. It is run explicitly in
+Windows CI. It does not prove audible isolation between two simultaneously
+playing applications. That check, browser child-process behavior and a real
+HomePod listening test remain required hardware validation. Automatic endpoint
+migration, automatic app relaunch/reselection and exclusive/protected playback
+remain outside this implementation.
 
 [loopback]: https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording
 [process-loopback]: https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopbackaudio-sample/
@@ -161,3 +208,5 @@ process and exclusive/protected playback remain outside this implementation.
 [cred-write]: https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credwritew
 [cred-read]: https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credreadw
 [credential]: https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw
+
+[activation]: https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync

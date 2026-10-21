@@ -20,25 +20,25 @@
                             <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#171717" />
                             <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#B8B8B8" />
                             <SolidColorBrush x:Key="AccentButtonBackground" Color="#F5F5F5" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#DEDEDE" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C7C7C7" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#303030" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#E2E2E2" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C8C8C8" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#292929" />
                             <SolidColorBrush x:Key="AccentButtonForeground" Color="#171717" />
                             <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#171717" />
                             <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#171717" />
                             <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#B8B8B8" />
-                            <SolidColorBrush x:Key="ButtonBackground" Color="#1C1C1C" />
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#303030" />
-                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#3B3B3B" />
-                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#1C1C1C" />
+                            <SolidColorBrush x:Key="ButtonBackground" Color="#282828" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#343434" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#3D3D3D" />
+                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#222222" />
                             <SolidColorBrush x:Key="ButtonForeground" Color="#F5F5F5" />
                             <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#F5F5F5" />
-                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#E2E2E2" />
                             <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#989898" />
-                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#333333" />
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#4C4C4C" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#3A3A3A" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#4A4A4A" />
                             <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#555555" />
-                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#333333" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#2D2D2D" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#F5F5F5" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#DEDEDE" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C7C7C7" />
@@ -55,6 +55,22 @@
                             <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DEDEDE" />
                             <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C7C7C7" />
                             <SolidColorBrush x:Key="SliderThumbBackground" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#E2E2E2" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#C8C8C8" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="#292929" />
+                            <SolidColorBrush x:Key="SubtleButtonBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPointerOver" Color="#303030" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPressed" Color="#393939" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundDisabled" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonForeground" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#F5F5F5" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#D6D6D6" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#989898" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPressed" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushDisabled" Color="Transparent" />
                         </ResourceDictionary>
                         <ResourceDictionary x:Key="Light">
                             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#20242A" />
@@ -65,25 +81,25 @@
                             <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#FFFFFF" />
                             <SolidColorBrush x:Key="TextOnAccentFillColorDisabledBrush" Color="#626A73" />
                             <SolidColorBrush x:Key="AccentButtonBackground" Color="#20242A" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#343A43" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#484F59" />
-                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#E5E9EF" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#313840" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#14181D" />
+                            <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#E7EBF0" />
                             <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
                             <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFF" />
                             <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFF" />
                             <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#626A73" />
-                            <SolidColorBrush x:Key="ButtonBackground" Color="#FFFFFF" />
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#E9EDF2" />
-                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#DEE2E7" />
-                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#F2F4F7" />
+                            <SolidColorBrush x:Key="ButtonBackground" Color="#F3F5F8" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#E8ECF2" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#DCE2EA" />
+                            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#F5F6F8" />
                             <SolidColorBrush x:Key="ButtonForeground" Color="#20242A" />
                             <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#20242A" />
                             <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#20242A" />
-                            <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#727A84" />
-                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#DEE2E7" />
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#C5CCD5" />
-                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#BEC6D0" />
-                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#DEE2E7" />
+                            <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#69727E" />
+                            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#DDE2E9" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#CBD2DC" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#BBC5D1" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#E9EDF2" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#20242A" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#343A43" />
                             <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#484F59" />
@@ -100,6 +116,22 @@
                             <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#343A43" />
                             <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#484F59" />
                             <SolidColorBrush x:Key="SliderThumbBackground" Color="#20242A" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#20242A" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#313840" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#14181D" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="#E7EBF0" />
+                            <SolidColorBrush x:Key="SubtleButtonBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPointerOver" Color="#E9EDF2" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPressed" Color="#DCE3EB" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundDisabled" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonForeground" Color="#20242A" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#20242A" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#343A43" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#69727E" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPressed" Color="Transparent" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushDisabled" Color="Transparent" />
                         </ResourceDictionary>
                         <ResourceDictionary x:Key="HighContrast">
                             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
@@ -145,6 +177,22 @@
                             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
                             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
                             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="{ThemeResource SystemColorWindowColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBackground" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBackgroundDisabled" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonForeground" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                            <SolidColorBrush x:Key="SubtleButtonBorderBrushDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
                         </ResourceDictionary>
                     </ResourceDictionary.ThemeDictionaries>
                 </ResourceDictionary>
@@ -258,24 +306,85 @@
             <Style x:Key="SettingsGroupStyle" TargetType="Border" BasedOn="{StaticResource CardStyle}">
                 <Setter Property="Padding" Value="20,18" />
             </Style>
-            <Style x:Key="SubtleButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="Foreground" Value="{ThemeResource InkBrush}" />
-                <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="MinHeight" Value="36" />
-                <Setter Property="Padding" Value="12,7" />
-            </Style>
-            <!-- Keep the native accent template's pressed, pointer, focus and
-                 disabled behavior; application resources make it achromatic. -->
-            <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
-                <Setter Property="Background" Value="{ThemeResource PrimaryActionBrush}" />
-                <Setter Property="Foreground" Value="{ThemeResource PrimaryActionTextBrush}" />
-                <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="MinHeight" Value="40" />
-                <Setter Property="Padding" Value="18,9" />
+            <!-- Explicit content styles intentionally omit Foreground so icon+text
+                 labels inherit each native presenter's enabled/pressed/disabled state. -->
+            <Style x:Key="ButtonLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="FontSize" Value="14" />
                 <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+            </Style>
+            <Style x:Key="ButtonGlyphStyle" TargetType="FontIcon">
+                <Setter Property="FontSize" Value="16" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <!-- All button families inherit WinUI templates, including their 83ms
+                 brush feedback, disabled handling and native keyboard focus visuals.
+                 No custom transition overrides the system's motion preference. -->
+            <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource ButtonBackground}" />
+                <Setter Property="Foreground" Value="{ThemeResource ButtonForeground}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ButtonBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="MinWidth" Value="88" />
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="FocusVisualMargin" Value="-3" />
+            </Style>
+            <Style x:Key="CompactButtonStyle" TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                <Setter Property="MinWidth" Value="64" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="12,6" />
+            </Style>
+            <!-- Keep the framework's SubtleButtonStyle unmasked: its template has
+                 dedicated quiet hover, press and transparent disabled resources. -->
+            <Style x:Key="QuietButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="12,6" />
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="FocusVisualMargin" Value="-3" />
+            </Style>
+            <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource QuietButtonStyle}">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="MinWidth" Value="36" />
+                <Setter Property="Padding" Value="0" />
+            </Style>
+            <Style x:Key="ToolbarButtonStyle" TargetType="Button" BasedOn="{StaticResource QuietButtonStyle}">
+                <Setter Property="MinWidth" Value="76" />
+                <Setter Property="Padding" Value="10,6" />
+            </Style>
+            <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource AccentButtonBackground}" />
+                <Setter Property="Foreground" Value="{ThemeResource AccentButtonForeground}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AccentButtonBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="MinWidth" Value="128" />
+                <Setter Property="MinHeight" Value="44" />
+                <Setter Property="Padding" Value="18,10" />
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="FocusVisualMargin" Value="-3" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

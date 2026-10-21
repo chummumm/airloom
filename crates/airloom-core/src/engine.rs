@@ -1,6 +1,6 @@
 use crate::model::{
     self, AppError, AuthPrompt, CaptureView, Command, DeviceView, Levels, Metrics, Phase, Snapshot,
-    SourceView,
+    SourceMode, SourceView,
 };
 use airloom_airplay::{
     AuthenticationKind, ConnectOptions, Device, Error as AirplayError, PairingCredentials,
@@ -422,23 +422,25 @@ impl CaptureBuffer {
             .as_millis() as u64;
         let peak = peaks[0].max(peaks[1]);
         let (state, message) = if peak >= 0.01 {
-            ("signal", "所选输出设备有音频信号。")
+            ("signal", "所选声音来源有音频信号。")
         } else if peak > 0.00001 {
             (
                 "quiet",
-                "所选输出设备的声音较轻；可播放测试音检查扬声器链路。",
+                "所选声音来源的声音较轻；可播放测试音检查扬声器链路。",
             )
         } else if silent_ms >= 3000 {
             (
                 "silent",
-                if muted {
+                if airloom_capture::is_application_source(&info.source_id) {
+                    "所选应用暂时没有声音。请在该应用中开始播放。"
+                } else if muted {
                     "所选输出暂时没有声音。请检查应用输出设备，也可暂时关闭电脑静音后再试。"
                 } else {
                     "所选输出暂时没有声音。请让播放应用使用这个输出设备，或切换声音来源。"
                 },
             )
         } else {
-            ("waiting", "正在等待所选输出设备的声音…")
+            ("waiting", "正在等待所选声音来源的声音…")
         };
         CaptureView {
             state,
@@ -507,6 +509,9 @@ struct ConnectionRequest {
 }
 struct DiscoveryResult {
     devices: Result<Vec<Device>, AirplayError>,
+}
+struct SourceScanResult {
+    mode: SourceMode,
     sources: airloom_capture::Result<Vec<CaptureSource>>,
 }
 
@@ -520,6 +525,7 @@ struct Actor {
     routes: BTreeMap<String, Route>,
     running: bool,
     discovery: Option<Task<DiscoveryResult>>,
+    source_scan: Option<Task<SourceScanResult>>,
     work: Option<ConnectionWork>,
     queue: VecDeque<ConnectionRequest>,
     pairing: Option<(String, PairingSession)>,
@@ -562,6 +568,7 @@ impl Actor {
             routes,
             running: false,
             discovery: None,
+            source_scan: None,
             work: None,
             queue: VecDeque::new(),
             pairing: None,
@@ -755,6 +762,21 @@ impl Actor {
                     }
                 },
                 result = async {
+                    match &mut self.source_scan {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.source_scan = None;
+                    match result {
+                        Ok(result) => self.sources_discovered(result.mode, result.sources),
+                        Err(_) => {
+                            self.update(|s| s.sources_refreshing = false);
+                            self.error("capture_sources", "声音来源扫描中断，请刷新列表。");
+                        }
+                    }
+                },
+                result = async {
                     match &mut self.work {
                         Some(work) => {
                             let id = work.device_id.clone();
@@ -783,6 +805,9 @@ impl Actor {
         if let Some(task) = self.discovery.take() {
             task.abort();
         }
+        if let Some(task) = self.source_scan.take() {
+            task.abort();
+        }
         for route in self.routes.values_mut() {
             if let Some(task) = route.cleanup.take() {
                 let _ = task.await;
@@ -791,35 +816,60 @@ impl Actor {
     }
 
     fn refresh(&mut self) {
-        if self.discovery.is_some() {
+        self.refresh_sources();
+        if self.discovery.is_none() {
+            self.discovery = Some(tokio::spawn(async {
+                DiscoveryResult {
+                    devices: airloom_airplay::discover(DISCOVERY_WINDOW).await,
+                }
+            }));
+        }
+    }
+
+    fn refresh_sources(&mut self) {
+        if self.source_scan.is_some() {
             return;
         }
-        self.discovery = Some(tokio::spawn(async {
-            let sources = tokio::task::spawn_blocking(airloom_capture::enumerate_sources);
-            let devices = airloom_airplay::discover(DISCOVERY_WINDOW).await;
-            let sources = sources
-                .await
-                .unwrap_or(Err(airloom_capture::CaptureError::WorkerPanicked));
-            DiscoveryResult { devices, sources }
+        let mode = lock(&self.state).source_mode;
+        self.update(|s| s.sources_refreshing = true);
+        self.source_scan = Some(tokio::spawn(async move {
+            let sources = tokio::task::spawn_blocking(move || match mode {
+                SourceMode::Endpoint => airloom_capture::enumerate_sources(),
+                SourceMode::Application => airloom_capture::enumerate_applications(),
+            })
+            .await
+            .unwrap_or(Err(airloom_capture::CaptureError::WorkerPanicked));
+            SourceScanResult { mode, sources }
         }));
     }
 
-    fn discovered(&mut self, result: DiscoveryResult) {
-        let (sources, source_error) = match result.sources {
-            Ok(sources) if sources.is_empty() => (
+    fn sources_discovered(
+        &mut self,
+        mode: SourceMode,
+        result: airloom_capture::Result<Vec<CaptureSource>>,
+    ) {
+        if mode != lock(&self.state).source_mode {
+            // A mode change never accepts a late result from the old scope.
+            // Only one scan is in flight; start the requested scope now.
+            self.refresh_sources();
+            return;
+        }
+        let (sources, source_error) = match result {
+            Ok(sources) if sources.is_empty() && mode == SourceMode::Endpoint => (
                 sources,
-                Some("没有可用的 Windows 输出设备。请连接或启用一个输出设备后重新扫描。".into()),
+                Some("没有可用的 Windows 输出设备。请连接或启用一个输出设备后刷新列表。".into()),
             ),
             Ok(sources) => (sources, None),
             Err(error) => (
                 Vec::new(),
-                Some(format!("无法枚举 Windows 输出设备：{error}")),
+                Some(format!("无法读取声音来源：{}", capture_error(&error))),
             ),
         };
         let active = self.running;
         self.update(|s| {
+            s.sources_refreshing = false;
             s.sources.clear();
-            if sources.iter().any(|source| source.is_default) {
+            if mode == SourceMode::Endpoint && sources.iter().any(|source| source.is_default) {
                 s.sources.push(SourceView {
                     id: "default".into(),
                     name: "系统默认输出".into(),
@@ -831,21 +881,34 @@ impl Actor {
                 .extend(sources.into_iter().map(|source| SourceView {
                     id: source.id,
                     name: source.name,
-                    kind: "endpoint",
+                    kind: mode.kind(),
                     is_default: source.is_default,
                 }));
-            if !active
-                && !s
-                    .sources
-                    .iter()
-                    .any(|source| source.id == s.selected_source_id)
-            {
+            let found = s
+                .sources
+                .iter()
+                .any(|source| source.id == s.selected_source_id);
+            // A vanished application must never select another application or
+            // fall back to the whole-system endpoint, even while stopped.
+            if !active && !found && mode == SourceMode::Endpoint {
                 s.selected_source_id = s
                     .sources
                     .first()
                     .map(|source| source.id.clone())
                     .unwrap_or_default();
             }
+            s.source_message = match mode {
+                SourceMode::Endpoint => "采集所选 Windows 输出设备上的全部应用声音。".into(),
+                SourceMode::Application if !s.selected_source_id.is_empty() && !found => {
+                    "应用已结束或不再可用，请刷新后重新选择。".into()
+                }
+                SourceMode::Application if s.sources.is_empty() => {
+                    "先让目标应用播放一段声音，再点刷新列表。".into()
+                }
+                SourceMode::Application => {
+                    "只采集所选应用及其子进程；同一浏览器的多个标签页会一起采集。".into()
+                }
+            };
         });
         if let Some(message) = source_error {
             if self.capture.is_none() {
@@ -858,6 +921,9 @@ impl Actor {
         {
             self.global_error = None;
         }
+    }
+
+    fn discovered(&mut self, result: DiscoveryResult) {
         match result.devices {
             Ok(mut devices) => {
                 self.online = devices.iter().map(|device| device.id.clone()).collect();
@@ -1067,6 +1133,26 @@ impl Actor {
     fn command(&mut self, command: Command) {
         match command {
             Command::Refresh {} => self.refresh(),
+            Command::RefreshSources {} => self.refresh_sources(),
+            Command::SelectSourceMode { mode } => {
+                if lock(&self.state).source_mode == mode {
+                    return;
+                }
+                self.stop_all();
+                self.clear_error_after_stop();
+                self.update(|s| {
+                    s.source_mode = mode;
+                    s.sources.clear();
+                    s.selected_source_id.clear();
+                    s.sources_refreshing = true;
+                    s.source_message = "正在读取声音来源…".into();
+                    if mode == SourceMode::Application {
+                        s.mute_local = false;
+                    }
+                });
+                self.refresh_sources();
+            }
+
             Command::SelectDevice { device_id } => {
                 if self.known_device(&device_id).is_none() {
                     return;
@@ -1093,7 +1179,14 @@ impl Actor {
                 }
                 let resume = self.running;
                 self.stop_all();
-                self.update(|s| s.selected_source_id = source_id);
+                self.update(|s| {
+                    s.selected_source_id = source_id;
+                    if s.source_mode == SourceMode::Application {
+                        s.mute_local = false;
+                        s.source_message =
+                            "只采集所选应用及其子进程；同一浏览器的多个标签页会一起采集。".into();
+                    }
+                });
                 self.clear_error_after_stop();
                 if resume {
                     self.running = true;
@@ -1103,6 +1196,17 @@ impl Actor {
                 }
             }
             Command::Connect { device_id } => {
+                let valid_source = {
+                    let state = lock(&self.state);
+                    state.sources.iter().any(|source| {
+                        source.id == state.selected_source_id
+                            && source.kind == state.source_mode.kind()
+                    })
+                };
+                if !valid_source {
+                    self.error("capture_sources", "请先选择一个可用的声音来源。");
+                    return;
+                }
                 if device_id
                     .as_ref()
                     .is_some_and(|id| self.known_device(id).is_none())
@@ -1175,6 +1279,10 @@ impl Actor {
                 }
             }
             Command::SetMuteLocal { enabled } => {
+                if lock(&self.state).source_mode == SourceMode::Application {
+                    self.update(|s| s.mute_local = false);
+                    return;
+                }
                 let result = self
                     .capture
                     .as_ref()
@@ -1399,6 +1507,13 @@ impl Actor {
         }
         let config = {
             let state = lock(&self.state);
+            if state.source_mode == SourceMode::Application
+                && !airloom_capture::is_application_source(&state.selected_source_id)
+            {
+                return Err(airloom_capture::CaptureError::InvalidConfig(
+                    "choose an application before capture",
+                ));
+            }
             CaptureConfig {
                 source_id: state.selected_source_id.clone(),
                 target_sample_rate: airloom_airplay::SAMPLE_RATE,
@@ -1436,9 +1551,12 @@ impl Actor {
                     self.device_error(
                         id,
                         "capture_start",
-                        format!("无法采集所选输出设备：{error}"),
+                        format!("无法采集所选声音来源：{}", capture_error(&error)),
                     );
-                    self.error("capture_start", format!("无法采集所选输出设备：{error}"));
+                    self.error(
+                        "capture_start",
+                        format!("无法采集所选声音来源：{}", capture_error(&error)),
+                    );
                     return;
                 }
                 let volume = lock(&self.state).volume;
@@ -1685,7 +1803,7 @@ impl Actor {
             let muted = lock(&self.state).mute_local;
             let mut diagnostic = capture.buffer.view(&capture.info, muted, now);
             self.stop_all();
-            let message = format!("音频采集已中断：{error}");
+            let message = format!("音频采集已中断：{}", capture_error(&error));
             self.error("capture", message.clone());
             diagnostic.state = "error";
             diagnostic.message = message;
@@ -1749,6 +1867,18 @@ impl Actor {
 fn load_access(device_id: &str) -> Option<Access> {
     let data = Zeroizing::new(credentials::load(CREDENTIAL_SERVICE, device_id).ok()??);
     serde_json::from_slice(&data).ok()
+}
+
+fn capture_error(error: &airloom_capture::CaptureError) -> String {
+    match error {
+        airloom_capture::CaptureError::ApplicationExited => {
+            "所选应用已退出，请重新打开应用并刷新列表后再选择。".into()
+        }
+        airloom_capture::CaptureError::ApplicationMuteUnsupported => {
+            "指定应用模式不支持电脑整体静音。".into()
+        }
+        _ => error.to_string(),
+    }
 }
 
 fn user_error(error: &AirplayError) -> String {
@@ -1834,6 +1964,9 @@ mod tests {
     }
 
     async fn shutdown(actor: &mut Actor) {
+        if let Some(task) = actor.source_scan.take() {
+            task.abort();
+        }
         actor.stop_all();
         for route in actor.routes.values_mut() {
             if let Some(task) = route.cleanup.take() {
@@ -2095,6 +2228,98 @@ mod tests {
         shutdown(&mut actor).await;
     }
 
+    fn application(id: &str) -> CaptureSource {
+        CaptureSource {
+            id: id.into(),
+            name: "Music player".into(),
+            is_default: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn application_scope_stops_system_audio_and_requires_an_explicit_selection() {
+        let mut actor = actor();
+        let _receiver = attach_target(&mut actor, "one", 2);
+        actor.update(|s| s.mute_local = true);
+        actor.command(Command::SelectSourceMode {
+            mode: SourceMode::Application,
+        });
+        assert_eq!(actor.active_count(), 0);
+        assert!(!actor.running);
+        assert_eq!(actor.selected, ["one", "two"]);
+        assert!(actor.queue.is_empty());
+        actor.source_scan.take().unwrap().abort();
+        actor.sources_discovered(
+            SourceMode::Application,
+            Ok(vec![application("process:42:100")]),
+        );
+        let state = lock(&actor.state).clone();
+        assert_eq!(state.source_mode, SourceMode::Application);
+        assert!(state.selected_source_id.is_empty());
+        assert!(!state.mute_local);
+        assert_eq!(state.sources[0].kind, "application");
+        actor.command(Command::Connect { device_id: None });
+        assert!(!actor.running);
+        assert!(actor.queue.is_empty());
+        actor.command(Command::SelectSource {
+            source_id: "default".into(),
+        });
+        assert!(lock(&actor.state).selected_source_id.is_empty());
+        actor.command(Command::SelectSource {
+            source_id: "process:42:100".into(),
+        });
+        actor.command(Command::SetMuteLocal { enabled: true });
+        assert_eq!(lock(&actor.state).selected_source_id, "process:42:100");
+        assert!(!lock(&actor.state).mute_local);
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn an_ended_application_never_falls_back_to_another_source() {
+        let mut actor = actor();
+        actor.update(|s| {
+            s.source_mode = SourceMode::Application;
+            s.selected_source_id = "process:42:100".into();
+        });
+        // Even a reused PID represents a different process lifetime.
+        actor.sources_discovered(
+            SourceMode::Application,
+            Ok(vec![application("process:42:200")]),
+        );
+        assert_eq!(lock(&actor.state).selected_source_id, "process:42:100");
+        actor.command(Command::Connect { device_id: None });
+        assert!(!actor.running);
+        assert!(actor.queue.is_empty());
+        assert_eq!(actor.global_error.as_ref().unwrap().code, "capture_sources");
+        actor.sources_discovered(SourceMode::Application, Ok(Vec::new()));
+        assert_eq!(lock(&actor.state).selected_source_id, "process:42:100");
+        assert!(actor.start_capture().is_err());
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_endpoint_scan_cannot_replace_the_application_scope() {
+        let mut actor = actor();
+        actor.update(|s| {
+            s.source_mode = SourceMode::Application;
+            s.selected_source_id = "process:42:100".into();
+            s.sources.clear();
+        });
+        actor.sources_discovered(
+            SourceMode::Endpoint,
+            Ok(vec![CaptureSource {
+                id: "speakers".into(),
+                name: "System output".into(),
+                is_default: true,
+            }]),
+        );
+        assert_eq!(lock(&actor.state).source_mode, SourceMode::Application);
+        assert_eq!(lock(&actor.state).selected_source_id, "process:42:100");
+        assert!(lock(&actor.state).sources.is_empty());
+        assert!(actor.source_scan.is_some());
+        shutdown(&mut actor).await;
+    }
+
     #[tokio::test]
     async fn repeated_connect_does_not_duplicate_an_auth_prompt_or_pending_connection() {
         let mut actor = actor();
@@ -2191,12 +2416,15 @@ mod tests {
         actor.discovery.take().unwrap().abort();
         actor.discovered(DiscoveryResult {
             devices: Ok(vec![device("new-device")]),
-            sources: Ok(vec![CaptureSource {
+        });
+        actor.sources_discovered(
+            SourceMode::Endpoint,
+            Ok(vec![CaptureSource {
                 id: "speakers".into(),
                 name: "Speakers".into(),
                 is_default: true,
             }]),
-        });
+        );
         assert!(actor.matches_auth(request));
         assert_eq!(actor.selected, ["one", "two"]);
         assert!(actor.devices.iter().any(|device| device.id == "new-device"));
@@ -2211,8 +2439,8 @@ mod tests {
         actor.routes.clear();
         actor.discovered(DiscoveryResult {
             devices: Ok(vec![device("one")]),
-            sources: Ok(Vec::new()),
         });
+        actor.sources_discovered(SourceMode::Endpoint, Ok(Vec::new()));
         actor.synchronize();
         let state = lock(&actor.state).clone();
         assert!(state.selected_device_ids.is_empty());
@@ -2222,12 +2450,15 @@ mod tests {
         assert_eq!(state.error.as_ref().unwrap().code, "capture_sources");
         actor.discovered(DiscoveryResult {
             devices: Ok(Vec::new()),
-            sources: Ok(vec![CaptureSource {
+        });
+        actor.sources_discovered(
+            SourceMode::Endpoint,
+            Ok(vec![CaptureSource {
                 id: "speakers".into(),
                 name: "Speakers".into(),
                 is_default: false,
             }]),
-        });
+        );
         assert_eq!(lock(&actor.state).selected_source_id, "speakers");
         assert!(!lock(&actor.state)
             .sources

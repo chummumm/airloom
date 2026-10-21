@@ -73,6 +73,17 @@ jobs:
       - name: Windows Rust tests
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         run: cargo test --workspace --locked
+      - name: Verify real Windows process capture lifecycle
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          # Only this disposable Windows runner is changed; no audio driver is installed.
+          Set-Service -Name AudioEndpointBuilder -StartupType Manual
+          Set-Service -Name Audiosrv -StartupType Manual
+          Start-Service -Name Audiosrv -ErrorAction Stop
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          cargo test -p airloom-capture --locked process_loopback_activation_and_lifetime -- --ignored --nocapture 2>&1 | Tee-Object -FilePath artifacts/process-capture-api.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Real Windows process capture lifecycle verification failed.' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

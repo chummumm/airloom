@@ -50,9 +50,9 @@
                         <TextBlock Text="声音投放" FontSize="12" Foreground="{ThemeResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
                 </Grid>
-                <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource SubtleButtonStyle}" Height="34" Padding="10,0" Click="OnOpenSettings"
+                <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource ToolbarButtonStyle}" Click="OnOpenSettings"
                         AutomationProperties.Name="设置" AutomationProperties.AutomationId="SettingsButton" ToolTipService.ToolTip="设置与更新">
-                    <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE713;" FontSize="16" /><TextBlock Text="设置" FontSize="13" /></StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE713;" Style="{StaticResource ButtonGlyphStyle}" /><TextBlock Text="设置" Style="{StaticResource ButtonLabelStyle}" /></StackPanel>
                 </Button>
             </Grid>
 
@@ -66,11 +66,15 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                         <Border Style="{StaticResource CardStyle}" Padding="16,12" AutomationProperties.AutomationId="SourcePanel">
                             <Grid RowSpacing="8" ColumnSpacing="12">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="76" /><ColumnDefinition Width="*" /><ColumnDefinition Width="154" /></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition Height="38" /><RowDefinition Height="Auto" MinHeight="36" /></Grid.RowDefinitions>
-                                <FontIcon Glyph="&#xE7F4;" FontSize="20" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="声音来源" FontSize="14" VerticalAlignment="Center" />
-                                <ComboBox x:Name="SourcePicker" Grid.Column="2" PlaceholderText="选择 Windows 播放设备" HorizontalAlignment="Stretch" Height="38" SelectionChanged="OnSourceChanged"
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="134" /><ColumnDefinition Width="*" /><ColumnDefinition Width="154" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="40" /><RowDefinition Height="Auto" MinHeight="36" /></Grid.RowDefinitions>
+                                <FontIcon x:Name="SourceGlyph" Glyph="&#xE7F4;" FontSize="20" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Center" />
+                                <ComboBox x:Name="SourceModePicker" Grid.Column="1" IsEnabled="False" HorizontalAlignment="Stretch" Height="40" SelectedIndex="0" SelectionChanged="OnSourceModeChanged"
+                                          AutomationProperties.Name="声音来源类型" AutomationProperties.AutomationId="SourceModePicker" ToolTipService.ToolTip="选择系统声音或指定应用；切换类型会停止当前投放。">
+                                    <ComboBoxItem Content="系统声音" Tag="endpoint" />
+                                    <ComboBoxItem Content="指定应用" Tag="application" />
+                                </ComboBox>
+                                <ComboBox x:Name="SourcePicker" Grid.Column="2" PlaceholderText="选择 Windows 播放设备" HorizontalAlignment="Stretch" Height="40" SelectionChanged="OnSourceChanged"
                                           AutomationProperties.Name="声音来源，Windows 播放设备" AutomationProperties.AutomationId="SourcePicker" ToolTipService.ToolTip="选择正在播放声音的 Windows 输出设备。" />
                                 <Grid Grid.Column="3" ColumnSpacing="8" VerticalAlignment="Center" HorizontalAlignment="Right">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -79,12 +83,12 @@
                                 </Grid>
                                 <TextBlock x:Name="CaptureStatusText" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="选择电脑正在播放声音的输出设备。" FontSize="12" Foreground="{ThemeResource MutedBrush}"
                                            TextWrapping="Wrap" MaxLines="2" LineHeight="18" VerticalAlignment="Center" AutomationProperties.AutomationId="CaptureStatusText" />
-                                <Button x:Name="SourceRetryButton" Grid.Row="1" Grid.Column="3" Content="重新扫描" Click="OnRefresh" Style="{StaticResource SubtleButtonStyle}" Padding="8,0"
-                                        HorizontalAlignment="Right" Visibility="Collapsed" AutomationProperties.Name="重新扫描 Windows 音频输出" AutomationProperties.AutomationId="SourceRetryButton" />
+                                <Button x:Name="SourceRetryButton" Grid.Row="1" IsEnabled="False" Width="104" Grid.Column="3" Content="刷新列表" Click="OnRefreshSources" Style="{StaticResource CompactButtonStyle}"
+                                        HorizontalAlignment="Right" AutomationProperties.Name="刷新声音来源列表" AutomationProperties.AutomationId="SourceRetryButton" />
                             </Grid>
                         </Border>
                         <InfoBar x:Name="ErrorBanner" Grid.Row="1" IsOpen="False" IsClosable="False" Severity="Error" Title="连接需要处理">
-                            <InfoBar.ActionButton><Button x:Name="RetryButton" Content="重试" Click="OnRetry" /></InfoBar.ActionButton>
+                            <InfoBar.ActionButton><Button x:Name="RetryButton" Content="重试" Click="OnRetry" Style="{StaticResource QuietButtonStyle}" /></InfoBar.ActionButton>
                         </InfoBar>
                         <Grid x:Name="WorkspaceGrid" Grid.Row="2" RowSpacing="16" VerticalAlignment="Stretch">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="ReceiverColumn" Width="0" /></Grid.ColumnDefinitions>
@@ -141,7 +145,7 @@
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="36" /></Grid.ColumnDefinitions>
                                         <StackPanel Spacing="5"><TextBlock Text="扬声器" FontSize="18" FontWeight="SemiBold" /><TextBlock x:Name="DeviceCount" Text="寻找同一网络中的设备" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextTrimming="CharacterEllipsis" /></StackPanel>
-                                        <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource SubtleButtonStyle}" Width="36" Height="36" Padding="0" Click="OnRefresh"
+                                        <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"
                                                 AutomationProperties.Name="重新发现扬声器" AutomationProperties.AutomationId="RefreshButton" ToolTipService.ToolTip="重新发现扬声器"><FontIcon Glyph="&#xE72C;" FontSize="16" /></Button>
                                     </Grid>
                                     <Grid Grid.Row="1" MinHeight="86">
@@ -158,7 +162,7 @@
                                     <Grid Grid.Row="2" BorderBrush="{ThemeResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="可同时选择多台" FontSize="12" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Center" />
-                                        <Button Grid.Column="1" Content="管理设备" Click="OnOpenSettings" Style="{StaticResource SubtleButtonStyle}" Padding="8,6" />
+                                        <Button Grid.Column="1" Content="管理设备" Click="OnOpenSettings" Style="{StaticResource QuietButtonStyle}" />
                                     </Grid>
                                 </Grid>
                             </Border>
@@ -170,12 +174,12 @@
                         AutomationProperties.AutomationId="TransportPanel" AutomationProperties.Name="音量与连接控制" AutomationProperties.AccessibilityView="Content">
                     <Grid RowSpacing="10" ColumnSpacing="24">
                         <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="88" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="186" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="152" /><ColumnDefinition Width="*" /><ColumnDefinition Width="186" /></Grid.ColumnDefinitions>
                         <StackPanel x:Name="TransportActions" Spacing="4" VerticalAlignment="Center">
-                            <Button x:Name="ConnectButton" Style="{StaticResource PrimaryButtonStyle}" Width="170" Height="48" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
-                                <StackPanel Orientation="Horizontal" Spacing="10"><ProgressRing x:Name="ConnectSpinner" Width="16" Height="16" IsActive="False" Visibility="Collapsed" Foreground="{ThemeResource PrimaryActionTextBrush}" /><FontIcon x:Name="ConnectGlyph" Glyph="&#xE768;" FontSize="16" Foreground="{ThemeResource MutedBrush}" /><TextBlock x:Name="ConnectLabel" Text="开始投放" FontSize="14" Foreground="{ThemeResource MutedBrush}" /></StackPanel>
+                            <Button x:Name="ConnectButton" Style="{StaticResource PrimaryButtonStyle}" Width="152" Height="44" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
+                                <StackPanel Orientation="Horizontal" Spacing="8"><ProgressRing x:Name="ConnectSpinner" Width="16" Height="16" IsActive="False" Visibility="Collapsed" Foreground="{ThemeResource PrimaryActionTextBrush}" /><FontIcon x:Name="ConnectGlyph" Glyph="&#xE768;" Style="{StaticResource ButtonGlyphStyle}" Foreground="{ThemeResource MutedBrush}" /><TextBlock x:Name="ConnectLabel" Text="开始投放" Style="{StaticResource ButtonLabelStyle}" Foreground="{ThemeResource MutedBrush}" /></StackPanel>
                             </Button>
-                            <Button x:Name="CancelAuthButton" Content="取消此设备" Click="OnCancelAuth" Visibility="Collapsed" Style="{StaticResource SubtleButtonStyle}" HorizontalAlignment="Stretch" />
+                            <Button x:Name="CancelAuthButton" Content="取消此设备" Click="OnCancelAuth" Visibility="Collapsed" Style="{StaticResource QuietButtonStyle}" HorizontalAlignment="Stretch" />
                         </StackPanel>
                         <Grid x:Name="VolumeSection" Grid.Column="1" RowSpacing="4" VerticalAlignment="Center">
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="32" /></Grid.RowDefinitions>
@@ -230,9 +234,9 @@
                                 <ToggleSwitch x:Name="LocalMuteToggle" Grid.Column="1" OnContent="" OffContent="" MinWidth="0" Width="52" IsEnabled="False" Toggled="OnMuteLocalChanged"
                                               AutomationProperties.Name="静音电脑输出" AutomationProperties.AutomationId="LocalMuteToggle" ToolTipService.ToolTip="静音所选 Windows 输出；断开后恢复。若采集无声，请先关闭。" />
                             </Grid>
-                            <Button x:Name="TestToneButton" Click="OnTestTone" Style="{StaticResource SubtleButtonStyle}" IsEnabled="False" Padding="0,4" HorizontalAlignment="Left"
+                            <Button x:Name="TestToneButton" Click="OnTestTone" Style="{StaticResource SecondaryButtonStyle}" IsEnabled="False" HorizontalAlignment="Left"
                                     AutomationProperties.Name="播放三秒测试音" AutomationProperties.AutomationId="TestToneButton">
-                                <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE994;" FontSize="14" /><TextBlock x:Name="TestToneLabel" Text="试播 3 秒" FontSize="12" /></StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE994;" Style="{StaticResource ButtonGlyphStyle}" /><TextBlock x:Name="TestToneLabel" Text="试播 3 秒" Style="{StaticResource ButtonLabelStyle}" /></StackPanel>
                             </Button>
                         </StackPanel>
                         <TextBlock x:Name="FooterMessage" Grid.Row="1" Grid.ColumnSpan="3" Text="关闭窗口后，声音投放会在托盘中继续。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextTrimming="CharacterEllipsis" MaxLines="1" />
@@ -244,7 +248,7 @@
                 <Grid.RowDefinitions><RowDefinition Height="70" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                 <Grid Padding="24,8,24,12" ColumnSpacing="14">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                    <Button x:Name="SettingsBackButton" Width="36" Height="36" Padding="0" Click="OnCloseSettings" Style="{StaticResource SubtleButtonStyle}" VerticalAlignment="Center"
+                    <Button x:Name="SettingsBackButton" Click="OnCloseSettings" Style="{StaticResource IconButtonStyle}" VerticalAlignment="Center"
                             AutomationProperties.Name="返回声音投放" AutomationProperties.AutomationId="SettingsBackButton" ToolTipService.ToolTip="返回声音投放"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
                     <TextBlock Grid.Column="1" Text="设置" FontSize="26" VerticalAlignment="Center" AutomationProperties.HeadingLevel="Level1" />
                     <TextBlock Grid.Column="2" Text="更改会自动保存" FontSize="12" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Center" />
@@ -260,11 +264,11 @@
                                     <StackPanel Spacing="12">
                                         <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <StackPanel Spacing="6"><TextBlock Text="应用更新" Style="{StaticResource SectionHeadingStyle}" /><TextBlock x:Name="CurrentVersionText" Text="Airloom" FontSize="12" Foreground="{ThemeResource MutedBrush}" /></StackPanel>
-                                            <Button x:Name="CheckUpdatesButton" Grid.Column="1" Content="检查更新" Click="OnCheckUpdates" MinHeight="36" AutomationProperties.AutomationId="CheckUpdatesButton" />
+                                            <Button x:Name="CheckUpdatesButton" Grid.Column="1" Content="检查更新" Click="OnCheckUpdates" Style="{StaticResource SecondaryButtonStyle}" AutomationProperties.AutomationId="CheckUpdatesButton" />
                                         </Grid>
                                         <TextBlock x:Name="UpdateStatusText" Text="检查是否有可用的新版本。" FontSize="13" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="UpdateStatusText" />
                                         <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Visibility="Collapsed" Foreground="{ThemeResource InkBrush}" AutomationProperties.Name="更新下载进度" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="InstallUpdateButton" Content="下载并安装" Click="OnInstallUpdate" Style="{StaticResource PrimaryButtonStyle}" Visibility="Collapsed" /><Button x:Name="CancelUpdateButton" Content="取消" Click="OnCancelUpdate" Visibility="Collapsed" Style="{StaticResource SubtleButtonStyle}" /><HyperlinkButton Content="版本说明" NavigateUri="https://github.com/chummumm/airloom/releases/latest" Foreground="{ThemeResource InkBrush}" Padding="0,6" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="InstallUpdateButton" Content="下载并安装" Click="OnInstallUpdate" Style="{StaticResource PrimaryButtonStyle}" Visibility="Collapsed" /><Button x:Name="CancelUpdateButton" Content="取消" Click="OnCancelUpdate" Visibility="Collapsed" Style="{StaticResource QuietButtonStyle}" /><HyperlinkButton Content="版本说明" NavigateUri="https://github.com/chummumm/airloom/releases/latest" Foreground="{ThemeResource InkBrush}" Padding="0,6" /></StackPanel>
                                         <TextBlock Text="更新包会在安装后自动清理。" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
                                     </StackPanel>
                                 </Border>
@@ -272,7 +276,7 @@
                                     <Grid RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                         <TextBlock Text="连接诊断" Style="{StaticResource SectionHeadingStyle}" />
                                         <StackPanel Grid.Row="1" Spacing="6"><TextBlock Text="遇到连接或声音问题？" FontSize="13" /><TextBlock Text="复制采集和连接状态，方便排查。不包含设备名称、地址或凭据。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" LineHeight="18" /></StackPanel>
-                                        <StackPanel Grid.Row="2" Spacing="6"><Button x:Name="CopyDiagnosticsButton" Content="复制诊断信息" Click="OnCopyDiagnostics" IsEnabled="False" MinHeight="36" HorizontalAlignment="Left" AutomationProperties.Name="复制诊断信息" AutomationProperties.AutomationId="CopyDiagnosticsButton" /><TextBlock x:Name="DiagnosticsCopyStatus" Text="复制后可粘贴到问题反馈中。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /></StackPanel>
+                                        <StackPanel Grid.Row="2" Spacing="6"><Button x:Name="CopyDiagnosticsButton" Content="复制诊断信息" Click="OnCopyDiagnostics" IsEnabled="False" Style="{StaticResource SecondaryButtonStyle}" HorizontalAlignment="Left" AutomationProperties.Name="复制诊断信息" AutomationProperties.AutomationId="CopyDiagnosticsButton" /><TextBlock x:Name="DiagnosticsCopyStatus" Text="复制后可粘贴到问题反馈中。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /></StackPanel>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Row="1" Style="{StaticResource SettingsGroupStyle}" Padding="20" VerticalAlignment="Top">
@@ -285,7 +289,7 @@
                                 </Border>
                                 <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SettingsGroupStyle}" Padding="20">
                                     <Grid RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Spacing="5"><TextBlock Text="设备显示" Style="{StaticResource SectionHeadingStyle}" /><TextBlock x:Name="VisibilitySummary" FontSize="12" Foreground="{ThemeResource MutedBrush}" /></StackPanel><Button Grid.Column="1" Content="重新发现" Click="OnRefresh" Style="{StaticResource SubtleButtonStyle}" /></Grid>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Spacing="5"><TextBlock Text="设备显示" Style="{StaticResource SectionHeadingStyle}" /><TextBlock x:Name="VisibilitySummary" FontSize="12" Foreground="{ThemeResource MutedBrush}" /></StackPanel><Button Grid.Column="1" Content="重新发现" Click="OnRefresh" Style="{StaticResource QuietButtonStyle}" /></Grid>
                                         <StackPanel Grid.Row="1" Spacing="8"><StackPanel x:Name="DeviceVisibilityList" Spacing="6" /><TextBlock x:Name="VisibilityEmptyText" Text="发现扬声器后，可在这里管理显示的设备。" FontSize="13" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" LineHeight="20" /></StackPanel>
                                         <TextBlock Grid.Row="2" Text="隐藏会断开该设备；离线设备也可恢复显示。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" LineHeight="18" />
                                     </Grid>
@@ -293,7 +297,7 @@
                                 <Border Grid.Row="2" Grid.ColumnSpan="2" Style="{StaticResource SettingsGroupStyle}" Padding="20,16">
                                     <Grid ColumnSpacing="20"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <StackPanel Spacing="6"><TextBlock Text="Airloom" FontSize="16" /><TextBlock Text="原生 Windows 音频投放 · 开源" FontSize="12" Foreground="{ThemeResource MutedBrush}" /><HyperlinkButton Content="查看 GitHub 项目" NavigateUri="https://github.com/chummumm/airloom" Foreground="{ThemeResource InkBrush}" Padding="0,4" HorizontalAlignment="Left" /></StackPanel>
-                                        <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center"><Button x:Name="ForgetButton" IsEnabled="False" Click="OnForgetCredentials" MinHeight="36"><TextBlock x:Name="ForgetLabel" Text="忘记设备凭据" MaxWidth="180" TextTrimming="CharacterEllipsis" FontSize="13" /></Button><Button Content="退出 Airloom" Click="OnExitClick" MinHeight="36" AutomationProperties.AutomationId="ExitButton" /></StackPanel>
+                                        <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center"><Button x:Name="ForgetButton" IsEnabled="False" Click="OnForgetCredentials" Style="{StaticResource SecondaryButtonStyle}"><TextBlock x:Name="ForgetLabel" Text="忘记设备凭据" MaxWidth="180" TextTrimming="CharacterEllipsis" Style="{StaticResource ButtonLabelStyle}" /></Button><Button Content="退出 Airloom" Click="OnExitClick" Style="{StaticResource QuietButtonStyle}" AutomationProperties.AutomationId="ExitButton" /></StackPanel>
                                     </Grid>
                                 </Border>
                             </Grid>

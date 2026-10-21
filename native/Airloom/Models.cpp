@@ -72,6 +72,9 @@ namespace airloom::native
                 result.selectedDeviceIds.push_back(item.GetString());
         }
         result.selectedSourceId = Text(json, L"selected_source_id");
+        result.sourceMode = Text(json, L"source_mode", L"endpoint");
+        result.sourcesRefreshing = Boolean(json, L"sources_refreshing");
+        result.sourceMessage = Text(json, L"source_message");
         result.volume = std::clamp(Number(json, L"volume", 0.75), 0.0, 1.0);
         result.muteLocal = Boolean(json, L"mute_local");
         result.elapsedSeconds = Counter(json, L"elapsed_seconds");
