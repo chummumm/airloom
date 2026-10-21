@@ -4,39 +4,39 @@
   "foreground_verified": true,
   "point_owner_verified": true,
   "thumb_start": {
-    "x": 365,
-    "y": 565
+    "x": 345,
+    "y": 578
   },
   "cursor_start": {
-    "x": 365,
-    "y": 565
+    "x": 345,
+    "y": 578
   },
-  "track_start": 311,
-  "track_end": 527,
+  "track_start": 258,
+  "track_end": 606,
   "moves": [
     {
-      "x": 387,
-      "y": 565,
+      "x": 380,
+      "y": 578,
       "value": 35
     },
     {
-      "x": 408,
-      "y": 565,
+      "x": 415,
+      "y": 578,
       "value": 45
     },
     {
-      "x": 430,
-      "y": 565,
+      "x": 449,
+      "y": 578,
       "value": 55
     },
     {
-      "x": 451,
-      "y": 565,
+      "x": 484,
+      "y": 578,
       "value": 65
     },
     {
-      "x": 473,
-      "y": 565,
+      "x": 519,
+      "y": 578,
       "value": 75
     }
   ],

@@ -57,7 +57,7 @@ Application-owned colors live in [App.xaml](native/Airloom/App.xaml). The defaul
 | `StageAudioBrush` | `#8BB6FB` | `#8BB6FB` | Actual waveform and levels |
 | `StageInsetBrush` | `#292929` | `#292929` | Instrument track |
 
-Do not apply the audio hue to navigation, a whole sidebar, every button or a card ground. The monochrome primary button inherits the native accent-button template with explicit normal, pointer, pressed and disabled resources. Native toggles also use monochrome on-state resources. This preserves recognizable platform behavior without introducing the system's blue accent into unrelated chrome.
+Do not apply the audio hue to navigation, a whole sidebar, every button or a card ground. The monochrome primary button inherits the native accent-button template with explicit normal, pointer, pressed and disabled resources. Native toggles also use monochrome on-state resources. This preserves recognizable platform behavior with monochrome working controls. Native focus indicators retain their platform focus color.
 
 No gradients, glass, glows or large resting shadows. Contrast comes from the instrument against the silver workspace, typography and careful alignment. The dark instrument is an intentional audio component, not a dark sidebar on a light app.
 
@@ -87,11 +87,17 @@ Focus, keyboard behavior, accessible names and status announcements remain nativ
 
 ## Verification
 
-New-design verification is **pending the 0.3.0 Windows build and visual review**. The committed 0.2.1 screenshots and its successful CI are baseline evidence, not proof of this new composition.
+Native layout, theme and active-waveform visual review passed for source `e80e6f9af8707216277fa8396dd351eaf33fad73` in [CI run 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973). The reviewed evidence comes from the actual WinUI executable, not a web rendering. The source-error/empty home was checked at 880 × 680, 1100 × 800 and 1600 × 1000; home and settings were checked in light and dark themes. The compact view exposes receivers before scrolling, the dock stays available, text fits its working slots, and the enabled native switches now use the intended monochrome resources.
 
-Required checks are actual WinUI startup and screenshots at 880 × 680, 1100 × 800 and 1600 × 1000; compact/wide receiver placement; persistent transport availability; volume 0/9/10/99/100 stability and real pointer drag; native settings/back/update/diagnostic actions; and full process/tray exit. Inspect light and dark themes and representative receiver/playback/authentication/error states using clearly identified UI-only fixtures where hardware is unavailable. Production must never contain fixture receivers or synthetic live data.
+The run's `native-smoke.json` records successful volume geometry and value retention at 0/9/10/99/100 across all three sizes, actual `SendInput` drag, settings/back, read-only update checking, restricted diagnostic copy and both theme selections. The native fixture checks also passed populated volume retention, the password dialog, cancelling only the challenged receiver and `active_waveform_mode_verified=true`. The animation-enabled 64-bar envelope is visible in both themes, stays inside the instrument guides and leaves the caption, meters and title unobscured.
 
-The [saved resource calculation](docs/design/contrast-check.json) checks 54 application-owned text/surface pairs, including the instrument, with a minimum ratio of 4.501:1. These calculations do not certify native rendering or high-contrast behavior. A web preview or web inspector cannot establish WinUI correctness. Update this section only when actual evidence is available.
+The `fixture-*` screenshots use the same WinUI executable with a CI-only replacement core DLL in an isolated temporary copy. They show three synthetic receivers, two selected streaming states, a third receiver's password challenge, populated settings and the compact view. Device names, levels, counts and authentication requests in those images are test data. The shipped core is checked for an unchanged hash; the replacement DLL and synthetic data are not distributed. These images establish presentation and interaction, not real discovery, AirPlay transport or acoustic output. No physical HomePod was connected to CI.
+
+**Release verification passed:** both CI jobs and all release gates passed in run 39573924973, including the independent updater lifecycle checks. The earlier window-caption readiness race was corrected in the test harness; no product lifecycle change was needed. The normal-animation fixture setting is applied only to the disposable CI desktop and restored afterward.
+
+Reduced-motion presentation was also visually reviewed in [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. The retained [light](docs/evidence/fixture-reduced-motion-home-light.png) and [dark](docs/evidence/fixture-reduced-motion-home-dark.png) captures show the explanatory baseline with numeric levels and meters retained. That earlier run passed UI smoke but failed the independent updater readiness test; it is reduced-motion evidence, not the final release gate.
+
+No high-contrast screenshot or complete receiver error/reconnect matrix was reviewed in this run. The [saved resource calculation](docs/design/contrast-check.json) checks 54 application-owned text/surface pairs, including the instrument, with a minimum ratio of 4.501:1. These calculations do not certify native rendering or high-contrast behavior. The user's 0.2.1 listening result remains a separate, attributed hardware observation.
 
 ## Direction provenance
 

@@ -21,7 +21,7 @@ The earlier layout and acknowledgement corrections remain valid, but geometric s
 - The core supports up to eight selected targets; one waiting for a password must not stop the others.
 - The source is an actual Windows playback endpoint, not a virtual sound card.
 - The most frequent actions are connect/disconnect, choose receivers and adjust shared volume.
-- True waveform samples and left/right levels are available, including a short diagnostic test tone.
+- A real 64-bin peak envelope and left/right levels are available, including a short diagnostic test tone.
 - Sample rate, elapsed session time and packet count support diagnosis, but do not prove acoustic output or latency.
 - Device names may be long; state transitions may occur while the person is dragging the slider.
 - Appearance and Windows startup are local preferences; reduced motion and high contrast remain meaningful.
@@ -44,16 +44,26 @@ The impeccable context launcher was attempted and unavailable; direct context re
 
 ## Acceptance evidence
 
-| Requirement | Evidence needed |
-| --- | --- |
-| A complete replacement composition | Actual first-screen screenshots visibly distinct from the rejected left-rail/white-card arrangement |
-| Audio behavior preserved | Audio/protocol regression checks; user's 0.2.1 audible baseline remains explicitly attributed |
-| Stable direct volume control | Slot/label/panel bounds at 0/9/10/99/100 and actual pointer drag with acknowledgement retention |
-| Responsive workspace | 880 × 680, 1100 × 800 and 1600 × 1000 native screenshots; receiver panel placement and dock availability |
-| Product identity | Airloom mark/name, real Windows source, genuine receiver states and instrument display |
-| Representative states | Empty, selected/playing, multiple devices, authentication and receiver/source error; UI-only fixtures clearly identified |
-| Theme quality | Actual light/dark captures; high contrast retains system resources |
-| Settings usability | Native settings/back, update check, diagnostic clipboard and device visibility interactions |
-| Exit differs from hiding | Existing real-process/tray and Restart Manager checks |
+The actual WinUI captures from [CI run 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973), source `e80e6f9af8707216277fa8396dd351eaf33fad73`, were visually reviewed. That run passed both CI jobs and every release gate, including all native UI smoke stages and the separate updater lifecycle checks.
 
-**New-design status: verification pending.** The previous release's successful CI and screenshots are baseline evidence only. New screenshots must come from the rebuilt native executable; a styled HTML image cannot replace this gate. Resource calculations and XML validity are useful prechecks, but do not certify rendering or interaction. HomePod output was confirmed by the user for 0.2.1; other models, firmware and stereo/multiroom behavior retain their separate hardware verification limits.
+| Requirement | Observed evidence and boundary |
+| --- | --- |
+| A complete replacement composition | Native size captures show the source strip, dark instrument, right-side or compact-first receivers and persistent dock; the rejected left navigation-like rail is gone |
+| Audio behavior preserved | The user's audible 0.2.1 baseline remains explicitly attributed; the CI desktop has no physical HomePod and the screenshots are not an audio test |
+| Stable direct volume control | Native smoke passed slot/label/panel bounds and value retention at 0/9/10/99/100 across three sizes, actual `SendInput` drag and populated-fixture volume changes |
+| Responsive workspace | 880 × 680, 1100 × 800 and 1600 × 1000 native captures; compact receiver actions are visible before scroll and the transport stays available |
+| Product identity | Airloom mark/name, native source selector, per-receiver status and distinct instrument; populated images label their synthetic source data |
+| Representative states | Real unavailable-source/empty-discovery state plus synthetic three-device, two-streaming and password-dialog states; receiver error/reconnect states are not part of this screenshot set |
+| Theme quality | Actual light/dark home and settings captures; enabled switches and primary controls are monochrome and readable; high-contrast rendering was not captured |
+| Settings usability | Native settings/back, read-only update check and diagnostic clipboard passed; populated visibility rows fit, without claiming a new offline hide/restore interaction test |
+| Motion and signal display | Final native light/dark captures show the animation-enabled 64-bar envelope without clipping or overlap; separately retained reduced-motion captures keep numeric levels and meters visible |
+| Password interaction | Target name, password input, unchecked remember option, pairing-code action and cancel fit in the native dialog; fixture cancellation preserved the other two selected receivers |
+| Exit differs from hiding | Final CI passed the independent updater/process lifecycle gate after a bounded test-only window-caption readiness correction; prior release remains separately attributed baseline evidence |
+
+The `fixture-*` images come from the same native executable with a CI-only replacement core DLL in a separate temporary archive copy. Receiver identities, signal levels, counts and authentication challenges are synthetic. The smoke checks the shipped core hash remains unchanged; fixture data and the replacement DLL are not shipped. This establishes native presentation and interaction, not real discovery, audio transport, hearing a test tone or multiroom synchronization.
+
+**Visual verdict:** the final light/dark, compact, populated-settings and authentication frames pass the reviewed presentation checks. No blocking clipping, unreadable state, inaccessible initial receiver action or obscured dialog action was found. The monochrome resource-order correction is visibly effective. The 64 blue envelope bars stay within the instrument guides and leave its caption, meters and title clear. Native proof records `active_waveform_mode_verified=true`; the CI-only normal-animation setting is restored after capture. Both jobs and the independent lifecycle checks passed in the final build.
+
+Reduced-motion presentation remains documented by [the light capture](../../evidence/fixture-reduced-motion-home-light.png) and [the dark capture](../../evidence/fixture-reduced-motion-home-dark.png) from [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. That run passed UI smoke, while its independent updater test failed during window-caption readiness and was subsequently corrected in the test harness. It is retained for reduced-motion evidence rather than used as the final release gate.
+
+Resource calculations and XML validity remain prechecks rather than rendering or interaction proof. HomePod output was confirmed by the user for 0.2.1; other models, firmware and stereo/multiroom behavior retain their separate hardware verification limits.
