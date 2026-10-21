@@ -13,6 +13,8 @@ int main()
 {
     Check(Version::Parse("v0.2.0") > Version::Parse("0.1.99"), "minor comparison");
     Check(Version::Parse("1.10.0") > Version::Parse("1.9.99"), "numeric comparison");
+    Check(Version::Parse("0.4.10") > Version::Parse("0.4.9"), "two-digit patch comparison");
+    Check(Version::Parse("0.5.0") > Version::Parse("0.4.10"), "patch-ten rollover comparison");
     for (auto invalid : {"", "v", "1.2", "1.2.3.4", "-1.2.3", "1.2.3-preview.1", "1.2.3/evil", "1000000.2.3"})
         Check(!Version::Parse(invalid), "unstable or malformed version accepted");
     Check(InstallerName(*Version::Parse("v0.2.0")) == "Airloom-0.2.0-setup-x64.exe", "installer name");

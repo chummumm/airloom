@@ -1,856 +1,888 @@
 {
-  "volume_measurements": [
-    {
-      "window_width": 880,
-      "window_height": 680,
-      "volume": 0,
-      "bounds": {
-        "DeviceRail": {
-          "x": 32,
-          "y": 49,
-          "width": 816,
-          "height": 90
-        },
-        "PageContent": {
-          "x": 32,
-          "y": -318,
-          "width": 816,
-          "height": 803
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 155,
-          "width": 816,
-          "height": 330
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 505,
-          "width": 816,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 562,
-          "width": 370,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 565,
-          "y": 538,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 864,
-      "composition": "compact",
-      "slider_visual_bounds": {
-        "x": 247,
-        "y": 562,
-        "width": 368,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 880,
-      "window_height": 680,
-      "volume": 9,
-      "bounds": {
-        "DeviceRail": {
-          "x": 32,
-          "y": 49,
-          "width": 816,
-          "height": 90
-        },
-        "PageContent": {
-          "x": 32,
-          "y": -318,
-          "width": 816,
-          "height": 803
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 155,
-          "width": 816,
-          "height": 330
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 505,
-          "width": 816,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 562,
-          "width": 370,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 565,
-          "y": 538,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 864,
-      "composition": "compact",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 562,
-        "width": 366,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 880,
-      "window_height": 680,
-      "volume": 10,
-      "bounds": {
-        "DeviceRail": {
-          "x": 32,
-          "y": 49,
-          "width": 816,
-          "height": 90
-        },
-        "PageContent": {
-          "x": 32,
-          "y": -318,
-          "width": 816,
-          "height": 803
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 155,
-          "width": 816,
-          "height": 330
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 505,
-          "width": 816,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 562,
-          "width": 370,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 565,
-          "y": 538,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 864,
-      "composition": "compact",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 562,
-        "width": 366,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 880,
-      "window_height": 680,
-      "volume": 99,
-      "bounds": {
-        "DeviceRail": {
-          "x": 32,
-          "y": 49,
-          "width": 816,
-          "height": 90
-        },
-        "PageContent": {
-          "x": 32,
-          "y": -318,
-          "width": 816,
-          "height": 803
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 155,
-          "width": 816,
-          "height": 330
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 505,
-          "width": 816,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 562,
-          "width": 370,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 565,
-          "y": 538,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 864,
-      "composition": "compact",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 562,
-        "width": 366,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 880,
-      "window_height": 680,
-      "volume": 100,
-      "bounds": {
-        "DeviceRail": {
-          "x": 32,
-          "y": 49,
-          "width": 816,
-          "height": 90
-        },
-        "PageContent": {
-          "x": 32,
-          "y": -318,
-          "width": 816,
-          "height": 803
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 155,
-          "width": 816,
-          "height": 330
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 505,
-          "width": 816,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 562,
-          "width": 370,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 565,
-          "y": 538,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 864,
-      "composition": "compact",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 562,
-        "width": 368,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1100,
-      "window_height": 800,
-      "volume": 0,
-      "bounds": {
-        "DeviceRail": {
-          "x": 748,
-          "y": 205,
-          "width": 320,
-          "height": 400
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1036,
-          "height": 540
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 696,
-          "height": 400
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 625,
-          "width": 1036,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 682,
-          "width": 590,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 785,
-          "y": 658,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1084,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 247,
-        "y": 682,
-        "width": 588,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1100,
-      "window_height": 800,
-      "volume": 9,
-      "bounds": {
-        "DeviceRail": {
-          "x": 748,
-          "y": 205,
-          "width": 320,
-          "height": 400
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1036,
-          "height": 540
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 696,
-          "height": 400
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 625,
-          "width": 1036,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 682,
-          "width": 590,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 785,
-          "y": 658,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1084,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 682,
-        "width": 586,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1100,
-      "window_height": 800,
-      "volume": 10,
-      "bounds": {
-        "DeviceRail": {
-          "x": 748,
-          "y": 205,
-          "width": 320,
-          "height": 400
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1036,
-          "height": 540
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 696,
-          "height": 400
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 625,
-          "width": 1036,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 682,
-          "width": 590,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 785,
-          "y": 658,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1084,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 682,
-        "width": 586,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1100,
-      "window_height": 800,
-      "volume": 99,
-      "bounds": {
-        "DeviceRail": {
-          "x": 748,
-          "y": 205,
-          "width": 320,
-          "height": 400
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1036,
-          "height": 540
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 696,
-          "height": 400
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 625,
-          "width": 1036,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 682,
-          "width": 590,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 785,
-          "y": 658,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1084,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 682,
-        "width": 586,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1100,
-      "window_height": 800,
-      "volume": 100,
-      "bounds": {
-        "DeviceRail": {
-          "x": 748,
-          "y": 205,
-          "width": 320,
-          "height": 400
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1036,
-          "height": 540
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 696,
-          "height": 400
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 625,
-          "width": 1036,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 682,
-          "width": 590,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 785,
-          "y": 658,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1084,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 682,
-        "width": 588,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1600,
-      "window_height": 1000,
-      "volume": 0,
-      "bounds": {
-        "DeviceRail": {
-          "x": 1248,
-          "y": 205,
-          "width": 320,
-          "height": 600
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1536,
-          "height": 740
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 1196,
-          "height": 600
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 825,
-          "width": 1536,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 882,
-          "width": 1090,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 1285,
-          "y": 858,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1584,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 247,
-        "y": 882,
-        "width": 1088,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1600,
-      "window_height": 1000,
-      "volume": 9,
-      "bounds": {
-        "DeviceRail": {
-          "x": 1248,
-          "y": 205,
-          "width": 320,
-          "height": 600
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1536,
-          "height": 740
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 1196,
-          "height": 600
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 825,
-          "width": 1536,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 882,
-          "width": 1090,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 1285,
-          "y": 858,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1584,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 882,
-        "width": 1086,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1600,
-      "window_height": 1000,
-      "volume": 10,
-      "bounds": {
-        "DeviceRail": {
-          "x": 1248,
-          "y": 205,
-          "width": 320,
-          "height": 600
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1536,
-          "height": 740
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 1196,
-          "height": 600
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 825,
-          "width": 1536,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 882,
-          "width": 1090,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 1285,
-          "y": 858,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1584,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 882,
-        "width": 1086,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1600,
-      "window_height": 1000,
-      "volume": 99,
-      "bounds": {
-        "DeviceRail": {
-          "x": 1248,
-          "y": 205,
-          "width": 320,
-          "height": 600
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1536,
-          "height": 740
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 1196,
-          "height": 600
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 825,
-          "width": 1536,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 882,
-          "width": 1090,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 1285,
-          "y": 858,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1584,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 882,
-        "width": 1086,
-        "height": 32
-      }
-    },
-    {
-      "window_width": 1600,
-      "window_height": 1000,
-      "volume": 100,
-      "bounds": {
-        "DeviceRail": {
-          "x": 1248,
-          "y": 205,
-          "width": 320,
-          "height": 600
-        },
-        "PageContent": {
-          "x": 32,
-          "y": 65,
-          "width": 1536,
-          "height": 740
-        },
-        "SignalPanel": {
-          "x": 32,
-          "y": 205,
-          "width": 1196,
-          "height": 600
-        },
-        "TransportPanel": {
-          "x": 32,
-          "y": 825,
-          "width": 1536,
-          "height": 147
-        },
-        "VolumeSliderHost": {
-          "x": 247,
-          "y": 882,
-          "width": 1090,
-          "height": 32
-        },
-        "VolumeValue": {
-          "x": 1285,
-          "y": 858,
-          "width": 52,
-          "height": 20
-        }
-      },
-      "workspace_width_dip": 1584,
-      "composition": "wide",
-      "slider_visual_bounds": {
-        "x": 249,
-        "y": 882,
-        "width": 1088,
-        "height": 32
-      }
-    }
-  ],
-  "pointer_input": {
-    "method": "SendInput",
-    "dpi": 96,
-    "foreground_verified": true,
-    "point_owner_verified": true,
-    "thumb_start": {
-      "x": 345,
-      "y": 578
-    },
-    "cursor_start": {
-      "x": 345,
-      "y": 578
-    },
-    "track_start": 258,
-    "track_end": 606,
-    "moves": [
-      {
-        "x": 380,
-        "y": 578,
-        "value": 35
-      },
-      {
-        "x": 415,
-        "y": 578,
-        "value": 45
-      },
-      {
-        "x": 449,
-        "y": 578,
-        "value": 55
-      },
-      {
-        "x": 484,
-        "y": 578,
-        "value": 65
-      },
-      {
-        "x": 519,
-        "y": 578,
-        "value": 75
-      }
-    ],
-    "final_value": 75,
-    "failure": null,
-    "button_down_verified": true
-  },
-  "pointer_drag_verified": true,
-  "diagnostics_copy_verified": true,
-  "update_status": "当前已是最新版本。",
-  "adaptive_layout_verified": true,
-  "compact_receivers_visible_at_top": true,
-  "update_check_verified": true,
-  "distribution": "portable-zip",
-  "hwnd": 852372,
-  "fixture_states_verified": true,
-  "result": "window-opened",
-  "fixture_evidence": {
-    "verified": true,
-    "data_source": "CI-only replacement DLL in a separate temporary archive copy",
-    "synthetic_data": true,
-    "real_audio_or_receiver_claim": false,
-    "themes": [
-      "light",
-      "dark"
-    ],
-    "errors": [],
-    "receivers": 3,
-    "initially_streaming": 2,
-    "password_dialog_verified": true,
-    "per_receiver_cancel_verified": true,
-    "populated_volume_retained": true,
-    "compact_receivers_visible_at_top": true,
-    "active_waveform_mode_verified": true
-  },
-  "desktop_height": 1050,
-  "volume_layout_verified": true,
-  "process": "Airloom.exe",
-  "verification_errors": [],
-  "note": "Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.",
-  "settings_verified": true,
-  "returned_home": true,
-  "themes_verified": true,
-  "desktop_width": 1680,
-  "themes": [
-    "light",
-    "dark"
-  ]
+    "volume_measurements":  [
+                                {
+                                    "window_width":  880,
+                                    "window_height":  680,
+                                    "volume":  0,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  32,
+                                                                      "y":  49,
+                                                                      "width":  816,
+                                                                      "height":  90
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  -320,
+                                                                       "width":  816,
+                                                                       "height":  805
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  155,
+                                                                       "width":  816,
+                                                                       "height":  330
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  505,
+                                                                          "width":  816,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  562,
+                                                                            "width":  388,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  565,
+                                                                       "y":  538,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  864,
+                                    "composition":  "compact",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  229,
+                                                                 "y":  562,
+                                                                 "width":  386,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  880,
+                                    "window_height":  680,
+                                    "volume":  9,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  32,
+                                                                      "y":  49,
+                                                                      "width":  816,
+                                                                      "height":  90
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  -320,
+                                                                       "width":  816,
+                                                                       "height":  805
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  155,
+                                                                       "width":  816,
+                                                                       "height":  330
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  505,
+                                                                          "width":  816,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  562,
+                                                                            "width":  388,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  565,
+                                                                       "y":  538,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  864,
+                                    "composition":  "compact",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  562,
+                                                                 "width":  384,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  880,
+                                    "window_height":  680,
+                                    "volume":  10,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  32,
+                                                                      "y":  49,
+                                                                      "width":  816,
+                                                                      "height":  90
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  -320,
+                                                                       "width":  816,
+                                                                       "height":  805
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  155,
+                                                                       "width":  816,
+                                                                       "height":  330
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  505,
+                                                                          "width":  816,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  562,
+                                                                            "width":  388,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  565,
+                                                                       "y":  538,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  864,
+                                    "composition":  "compact",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  562,
+                                                                 "width":  384,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  880,
+                                    "window_height":  680,
+                                    "volume":  99,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  32,
+                                                                      "y":  49,
+                                                                      "width":  816,
+                                                                      "height":  90
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  -320,
+                                                                       "width":  816,
+                                                                       "height":  805
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  155,
+                                                                       "width":  816,
+                                                                       "height":  330
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  505,
+                                                                          "width":  816,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  562,
+                                                                            "width":  388,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  565,
+                                                                       "y":  538,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  864,
+                                    "composition":  "compact",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  562,
+                                                                 "width":  384,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  880,
+                                    "window_height":  680,
+                                    "volume":  100,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  32,
+                                                                      "y":  49,
+                                                                      "width":  816,
+                                                                      "height":  90
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  -320,
+                                                                       "width":  816,
+                                                                       "height":  805
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  155,
+                                                                       "width":  816,
+                                                                       "height":  330
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  505,
+                                                                          "width":  816,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  562,
+                                                                            "width":  388,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  565,
+                                                                       "y":  538,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  864,
+                                    "composition":  "compact",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  562,
+                                                                 "width":  386,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1100,
+                                    "window_height":  800,
+                                    "volume":  0,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  748,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  398
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1036,
+                                                                       "height":  540
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  696,
+                                                                       "height":  398
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  625,
+                                                                          "width":  1036,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  682,
+                                                                            "width":  608,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  785,
+                                                                       "y":  658,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1084,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  229,
+                                                                 "y":  682,
+                                                                 "width":  606,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1100,
+                                    "window_height":  800,
+                                    "volume":  9,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  748,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  398
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1036,
+                                                                       "height":  540
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  696,
+                                                                       "height":  398
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  625,
+                                                                          "width":  1036,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  682,
+                                                                            "width":  608,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  785,
+                                                                       "y":  658,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1084,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  682,
+                                                                 "width":  604,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1100,
+                                    "window_height":  800,
+                                    "volume":  10,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  748,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  398
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1036,
+                                                                       "height":  540
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  696,
+                                                                       "height":  398
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  625,
+                                                                          "width":  1036,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  682,
+                                                                            "width":  608,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  785,
+                                                                       "y":  658,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1084,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  682,
+                                                                 "width":  604,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1100,
+                                    "window_height":  800,
+                                    "volume":  99,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  748,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  398
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1036,
+                                                                       "height":  540
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  696,
+                                                                       "height":  398
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  625,
+                                                                          "width":  1036,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  682,
+                                                                            "width":  608,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  785,
+                                                                       "y":  658,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1084,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  682,
+                                                                 "width":  604,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1100,
+                                    "window_height":  800,
+                                    "volume":  100,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  748,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  398
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1036,
+                                                                       "height":  540
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  696,
+                                                                       "height":  398
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  625,
+                                                                          "width":  1036,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  682,
+                                                                            "width":  608,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  785,
+                                                                       "y":  658,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1084,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  682,
+                                                                 "width":  606,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1600,
+                                    "window_height":  1000,
+                                    "volume":  0,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  1248,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  598
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1536,
+                                                                       "height":  740
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  1196,
+                                                                       "height":  598
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  825,
+                                                                          "width":  1536,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  882,
+                                                                            "width":  1108,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  1285,
+                                                                       "y":  858,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1584,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  229,
+                                                                 "y":  882,
+                                                                 "width":  1106,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1600,
+                                    "window_height":  1000,
+                                    "volume":  9,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  1248,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  598
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1536,
+                                                                       "height":  740
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  1196,
+                                                                       "height":  598
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  825,
+                                                                          "width":  1536,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  882,
+                                                                            "width":  1108,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  1285,
+                                                                       "y":  858,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1584,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  882,
+                                                                 "width":  1104,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1600,
+                                    "window_height":  1000,
+                                    "volume":  10,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  1248,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  598
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1536,
+                                                                       "height":  740
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  1196,
+                                                                       "height":  598
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  825,
+                                                                          "width":  1536,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  882,
+                                                                            "width":  1108,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  1285,
+                                                                       "y":  858,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1584,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  882,
+                                                                 "width":  1104,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1600,
+                                    "window_height":  1000,
+                                    "volume":  99,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  1248,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  598
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1536,
+                                                                       "height":  740
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  1196,
+                                                                       "height":  598
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  825,
+                                                                          "width":  1536,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  882,
+                                                                            "width":  1108,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  1285,
+                                                                       "y":  858,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1584,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  882,
+                                                                 "width":  1104,
+                                                                 "height":  32
+                                                             }
+                                },
+                                {
+                                    "window_width":  1600,
+                                    "window_height":  1000,
+                                    "volume":  100,
+                                    "bounds":  {
+                                                   "DeviceRail":  {
+                                                                      "x":  1248,
+                                                                      "y":  207,
+                                                                      "width":  320,
+                                                                      "height":  598
+                                                                  },
+                                                   "PageContent":  {
+                                                                       "x":  32,
+                                                                       "y":  65,
+                                                                       "width":  1536,
+                                                                       "height":  740
+                                                                   },
+                                                   "SignalPanel":  {
+                                                                       "x":  32,
+                                                                       "y":  207,
+                                                                       "width":  1196,
+                                                                       "height":  598
+                                                                   },
+                                                   "TransportPanel":  {
+                                                                          "x":  32,
+                                                                          "y":  825,
+                                                                          "width":  1536,
+                                                                          "height":  147
+                                                                      },
+                                                   "VolumeSliderHost":  {
+                                                                            "x":  229,
+                                                                            "y":  882,
+                                                                            "width":  1108,
+                                                                            "height":  32
+                                                                        },
+                                                   "VolumeValue":  {
+                                                                       "x":  1285,
+                                                                       "y":  858,
+                                                                       "width":  52,
+                                                                       "height":  20
+                                                                   }
+                                               },
+                                    "workspace_width_dip":  1584,
+                                    "composition":  "wide",
+                                    "slider_visual_bounds":  {
+                                                                 "x":  231,
+                                                                 "y":  882,
+                                                                 "width":  1106,
+                                                                 "height":  32
+                                                             }
+                                }
+                            ],
+    "pointer_input":  {
+                          "method":  "SendInput",
+                          "dpi":  96,
+                          "foreground_verified":  true,
+                          "point_owner_verified":  true,
+                          "thumb_start":  {
+                                              "x":  332,
+                                              "y":  578
+                                          },
+                          "cursor_start":  {
+                                               "x":  332,
+                                               "y":  578
+                                           },
+                          "track_start":  240,
+                          "track_end":  606,
+                          "moves":  [
+                                        {
+                                            "x":  368,
+                                            "y":  578,
+                                            "value":  35
+                                        },
+                                        {
+                                            "x":  405,
+                                            "y":  578,
+                                            "value":  45
+                                        },
+                                        {
+                                            "x":  441,
+                                            "y":  578,
+                                            "value":  55
+                                        },
+                                        {
+                                            "x":  478,
+                                            "y":  578,
+                                            "value":  65
+                                        },
+                                        {
+                                            "x":  514,
+                                            "y":  578,
+                                            "value":  75
+                                        }
+                                    ],
+                          "final_value":  75,
+                          "failure":  null,
+                          "button_down_verified":  true
+                      },
+    "pointer_drag_verified":  true,
+    "diagnostics_copy_verified":  true,
+    "update_status":  "当前已是最新版本。",
+    "adaptive_layout_verified":  true,
+    "compact_receivers_visible_at_top":  true,
+    "update_check_verified":  true,
+    "distribution":  "portable-zip",
+    "hwnd":  197056,
+    "fixture_states_verified":  true,
+    "result":  "window-opened",
+    "fixture_evidence":  {
+                             "verified":  true,
+                             "data_source":  "CI-only replacement DLL in a separate temporary archive copy",
+                             "synthetic_data":  true,
+                             "real_audio_or_receiver_claim":  false,
+                             "themes":  [
+                                            "light",
+                                            "dark"
+                                        ],
+                             "errors":  [
+
+                                        ],
+                             "receivers":  3,
+                             "initially_streaming":  2,
+                             "password_dialog_verified":  true,
+                             "per_receiver_cancel_verified":  true,
+                             "populated_volume_retained":  true,
+                             "compact_receivers_visible_at_top":  true,
+                             "active_waveform_mode_verified":  true,
+                             "application_source_ui_verified":  true,
+                             "button_pointer_interaction_verified":  true,
+                             "application_source_ui":  {
+                                                           "verified":  true,
+                                                           "themes":  [
+                                                                          "light",
+                                                                          "dark"
+                                                                      ],
+                                                           "errors":  [
+
+                                                                      ],
+                                                           "explicit_selection_verified":  true,
+                                                           "mode_switch_stops_playback_verified":  true,
+                                                           "source_refresh_retains_selection_verified":  true,
+                                                           "local_mute_disabled_verified":  true,
+                                                           "active_waveform_mode_verified":  true,
+                                                           "button_pointer_interaction_verified":  true,
+                                                           "button_input":  {
+                                                                                "pointer_method":  "Checked SendInput hover, left-button down, and left-button up",
+                                                                                "focus_method":  "UIA SetFocus with HasKeyboardFocus verification",
+                                                                                "focus_verified":  true,
+                                                                                "physical_press_verified":  true,
+                                                                                "stable_bounds_verified":  true,
+                                                                                "height_dip":  44
+                                                                            },
+                                                           "synthetic_application_count":  3,
+                                                           "selected_application":  "Microsoft Edge · 测试应用"
+                                                       }
+                         },
+    "desktop_height":  1050,
+    "volume_layout_verified":  true,
+    "process":  "Airloom.exe",
+    "verification_errors":  [
+
+                            ],
+    "note":  "Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated states, application-source controls, button input, and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio capture or transport. No physical HomePod was connected to CI.",
+    "settings_verified":  true,
+    "returned_home":  true,
+    "themes_verified":  true,
+    "desktop_width":  1680,
+    "themes":  [
+                   "light",
+                   "dark"
+               ]
 }

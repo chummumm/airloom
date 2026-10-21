@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <locale>
 #include <memory>
@@ -31,8 +32,16 @@ namespace
         bool testTone{};
         bool authentication{};
         bool applicationMode{};
+        bool sourcesRefreshing{};
+        bool applicationListChanged{};
+        bool stereoGroup{};
+        bool stereoSecondOnline{true};
         std::string sourceId{"fixture-default"};
+        std::string eventDirectory;
         unsigned sourceRefreshes{};
+        unsigned sourceSelections{};
+        unsigned playbackCommands{};
+        unsigned eventIndex{};
         unsigned frame{};
     };
 
@@ -40,6 +49,10 @@ namespace
         "fixture-living-room", "fixture-study", "fixture-bedroom"};
     constexpr std::array<char const*, 3> DeviceNames{
         "客厅 HomePod", "书房 HomePod mini", "卧室 · 窗边的 HomePod"};
+    constexpr char StereoId[] = "stereo:12345678-1234-5678-9abc-123456789abc";
+    constexpr char StereoName[] = "客厅立体声 · 测试组合";
+    constexpr std::array<char const*, 2> StereoMemberNames{
+        "客厅 HomePod A · 测试成员", "客厅 HomePod B · 测试成员"};
     struct Source { char const* id; char const* name; };
     constexpr std::array<Source, 2> EndpointSources{{
         {"fixture-default", "扬声器 · Realtek USB Audio"},
@@ -50,10 +63,14 @@ namespace
         {"process:4200:133700000000000000", "Microsoft Edge · 测试应用"},
         {"process:4201:133700000000000001", "Spotify · 测试应用"},
         {"process:4202:133700000000000002", "VLC media player · 测试应用"}}};
+    constexpr std::array<Source, 3> ChangedApplicationSources{{
+        ApplicationSources[1], ApplicationSources[0],
+        {"process:4203:133700000000000003", "Audacity · 新发现测试应用"}}};
 
     std::span<Source const> Sources(Fixture const& fixture)
     {
-        if (fixture.applicationMode) return ApplicationSources;
+        if (fixture.applicationMode)
+            return fixture.applicationListChanged ? std::span<Source const>(ChangedApplicationSources) : std::span<Source const>(ApplicationSources);
         return EndpointSources;
     }
 
@@ -75,6 +92,7 @@ namespace
     void ConnectReceiver(Fixture& fixture, size_t index)
     {
         if (!fixture.selected[index] || !SelectedSource(fixture)) return;
+        if (fixture.stereoGroup && index == 1 && !fixture.stereoSecondOnline) return;
         if (index == 2) fixture.authentication = true;
         else fixture.playing[index] = true;
     }
@@ -88,9 +106,38 @@ namespace
 
     std::string Environment(char const* name)
     {
-        std::array<char, 64> value{};
+        std::array<char, 4096> value{};
         auto length = GetEnvironmentVariableA(name, value.data(), static_cast<DWORD>(value.size()));
         return length > 0 && length < value.size() ? std::string(value.data(), length) : std::string{};
+    }
+
+    // The smoke driver publishes one immutable numbered event file at a time.
+    // These controls exist only in this replacement DLL, never in the engine or
+    // release command schema. Acknowledgements let UIA observe changes without
+    // moving focus away from the open source popup.
+    void ApplyFixtureEvent(Fixture& fixture)
+    {
+        if (fixture.eventDirectory.empty()) return;
+        auto const index = fixture.eventIndex + 1;
+        std::ifstream input(fixture.eventDirectory + "/event-" + std::to_string(index) + ".txt");
+        std::string action;
+        if (!std::getline(input, action)) return;
+        if (action == "source_refreshing") fixture.sourcesRefreshing = true;
+        else if (action == "applications_changed")
+        {
+            fixture.applicationListChanged = true;
+            fixture.sourcesRefreshing = false;
+        }
+        else if (action == "native_stereo") fixture.stereoGroup = true;
+        else if (action == "stereo_partial")
+        {
+            fixture.stereoSecondOnline = false;
+            fixture.playing[1] = false;
+        }
+        else return;
+        fixture.eventIndex = index;
+        std::ofstream acknowledgement(fixture.eventDirectory + "/ack-" + std::to_string(index) + ".txt");
+        acknowledgement << action;
     }
 
     // Commands come only from the application under test. The fixture needs a
@@ -115,7 +162,13 @@ namespace
 
     std::string Snapshot(Fixture& fixture)
     {
-        auto const streaming = static_cast<unsigned>(std::count(fixture.playing.begin(), fixture.playing.end(), true));
+        ApplyFixtureEvent(fixture);
+        auto const physicalStreaming = static_cast<unsigned>(std::count(fixture.playing.begin(), fixture.playing.end(), true));
+        bool const groupSelected = fixture.selected[0] || fixture.selected[1];
+        bool const groupStreaming = fixture.playing[0] && fixture.playing[1] && fixture.stereoSecondOnline;
+        auto const streaming = fixture.stereoGroup ? static_cast<unsigned>(groupStreaming) + static_cast<unsigned>(fixture.playing[2]) : physicalStreaming;
+        auto const groupState = !fixture.stereoSecondOnline && groupSelected ? "error" : groupStreaming ? "streaming" : "idle";
+        auto const sessionState = streaming ? "streaming" : fixture.stereoGroup && groupSelected && !fixture.stereoSecondOnline ? "error" : "idle";
         auto const mode = fixture.applicationMode ? "application" : "endpoint";
         auto const source = SelectedSource(fixture);
         auto const sourceName = source ? source->name : "";
@@ -124,11 +177,11 @@ namespace
         std::ostringstream json;
         json.imbue(std::locale::classic());
         json << std::fixed << std::setprecision(4)
-            << "{\"version\":1,\"state\":\"" << (streaming ? "streaming" : "idle")
+            << "{\"version\":1,\"state\":\"" << sessionState
             << "\",\"status_message\":\"界面测试数据 · 未连接真实扬声器\",\"volume\":" << fixture.volume
             << ",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
             << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
-            << ",\"source_mode\":\"" << mode << "\",\"sources_refreshing\":false,\"source_message\":\""
+            << ",\"source_mode\":\"" << mode << "\",\"sources_refreshing\":" << (fixture.sourcesRefreshing ? "true" : "false") << ",\"source_message\":\""
             << (fixture.applicationMode ? "只采集所选应用及其子进程；同一浏览器的多个标签页会一起采集。"
                 : "采集所选 Windows 输出设备上的全部应用声音。")
             << "\",\"selected_source_id\":\"" << fixture.sourceId
@@ -137,16 +190,38 @@ namespace
         std::string firstId;
         for (size_t index = 0; index < DeviceIds.size(); ++index)
         {
-            if (!fixture.selected[index]) continue;
+            if (fixture.stereoGroup && index == 1) continue;
+            auto const logicalId = fixture.stereoGroup && index == 0 ? StereoId : DeviceIds[index];
+            if (!(fixture.stereoGroup && index == 0 ? groupSelected : fixture.selected[index])) continue;
             if (!first) json << ',';
-            json << '"' << DeviceIds[index] << '"';
-            if (first) firstId = DeviceIds[index];
+            json << '"' << logicalId << '"';
+            if (first) firstId = logicalId;
             first = false;
         }
         json << "],\"selected_device_id\":\"" << firstId << "\",\"devices\":[";
         for (size_t index = 0; index < DeviceIds.size(); ++index)
         {
+            if (fixture.stereoGroup && index == 1) continue;
             if (index != 0) json << ',';
+            if (fixture.stereoGroup && index == 0)
+            {
+                json << "{\"id\":\"" << StereoId << "\",\"name\":\"" << StereoName
+                    << "\",\"kind\":\"native_stereo\",\"model\":\"HomePod\",\"expected_members\":2,\"group_complete\":"
+                    << (fixture.stereoSecondOnline ? "true" : "false") << ",\"online\":" << (fixture.stereoSecondOnline ? "true" : "false")
+                    << ",\"selected\":" << (groupSelected ? "true" : "false") << ",\"state\":\"" << groupState
+                    << "\",\"status_message\":\"界面测试组合 · 实机同步未验证\",\"members\":[";
+                for (size_t memberIndex = 0; memberIndex < 2; ++memberIndex)
+                {
+                    if (memberIndex != 0) json << ',';
+                    bool const online = memberIndex == 0 || fixture.stereoSecondOnline;
+                    json << "{\"id\":\"" << DeviceIds[memberIndex] << "\",\"name\":\"" << StereoMemberNames[memberIndex]
+                        << "\",\"online\":" << (online ? "true" : "false") << ",\"state\":\""
+                        << (fixture.playing[memberIndex] ? "streaming" : "idle")
+                        << "\",\"status_message\":\"界面测试成员\"}";
+                }
+                json << "]}";
+                continue;
+            }
             bool const auth = index == 2 && fixture.authentication && fixture.selected[index];
             bool const playing = fixture.playing[index];
             json << "{\"id\":\"" << DeviceIds[index] << "\",\"name\":\"" << DeviceNames[index]
@@ -179,11 +254,11 @@ namespace
             json << (streaming ? std::abs(std::sin(phase)) * envelope : 0.0);
         }
         ++fixture.frame;
-        json << "],\"metrics\":{\"sample_rate\":44100,\"packets_sent\":" << packetsPerReceiver * streaming
+        json << "],\"metrics\":{\"sample_rate\":44100,\"packets_sent\":" << packetsPerReceiver * physicalStreaming
             << "},\"capture\":{\"state\":\"" << (streaming ? "signal" : "idle")
             << "\",\"message\":\"界面测试信号 · 非真实音频\",\"source_name\":\"" << sourceName << "\"},"
             << "\"diagnostics\":{\"schema_version\":1,\"app_version\":\"ui-fixture\",\"fixture\":true,"
-            << "\"session_state\":\"" << (streaming ? "streaming" : "idle")
+            << "\"session_state\":\"" << sessionState
             << "\",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
             << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
             << ",\"capture\":{\"source_mode\":\"" << mode << "\",\"state\":\"" << (streaming ? "signal" : "idle")
@@ -193,7 +268,7 @@ namespace
         {
             if (!fixture.selected[index]) continue;
             if (!first) json << ',';
-            json << "{\"slot\":" << index << ",\"state\":\""
+            json << "{\"slot\":" << index + 1 << ",\"state\":\""
                 << (fixture.playing[index] ? "streaming" : index == 2 && fixture.authentication ? "auth_required" : "idle") << "\"}";
             first = false;
         }
@@ -202,7 +277,15 @@ namespace
         json << "],\"fixture_state\":{\"source_id\":\"" << fixture.sourceId
             << "\",\"source_count\":" << Sources(fixture).size()
             << ",\"refresh_count\":" << fixture.sourceRefreshes
-            << ",\"streaming_receivers\":" << streaming
+            << ",\"source_selection_commands\":" << fixture.sourceSelections
+            << ",\"playback_commands\":" << fixture.playbackCommands
+            << ",\"automatic_events\":" << fixture.eventIndex
+            << ",\"streaming_receivers\":" << physicalStreaming
+            << ",\"streaming_targets\":" << streaming
+            << ",\"volume\":" << fixture.volume
+            << ",\"native_stereo\":" << (fixture.stereoGroup ? "true" : "false")
+            << ",\"group_complete\":" << (fixture.stereoSecondOnline ? "true" : "false")
+            << ",\"group_state\":\"" << groupState << "\""
             << ",\"auth_pending\":" << (fixture.authentication ? "true" : "false") << "}}";
         if (fixture.authentication)
         {
@@ -219,7 +302,9 @@ extern "C" __declspec(dllexport) void* __cdecl airloom_create()
     try
     {
         if (Environment("AIRLOOM_UI_FIXTURE") != "1") return nullptr;
-        return std::make_unique<Fixture>().release();
+        auto fixture = std::make_unique<Fixture>();
+        fixture->eventDirectory = Environment("AIRLOOM_UI_FIXTURE_EVENTS");
+        return fixture.release();
     }
     catch (...) { return nullptr; }
 }
@@ -265,6 +350,7 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
         else if (type == "refresh_sources") ++fixture.sourceRefreshes;
         else if (type == "select_source")
         {
+            ++fixture.sourceSelections;
             auto const id = Field(json, "source_id");
             for (auto const& entry : Sources(fixture))
             {
@@ -277,13 +363,18 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
                 break;
             }
         }
-        else if (type == "connect") StartPlayback(fixture);
+        else if (type == "connect")
+        {
+            ++fixture.playbackCommands;
+            StartPlayback(fixture);
+        }
         else if (type == "toggle_device")
         {
+            ++fixture.playbackCommands;
             auto const id = Field(json, "device_id");
             for (size_t index = 0; index < DeviceIds.size(); ++index)
             {
-                if (id != DeviceIds[index]) continue;
+                if (id != DeviceIds[index] && !(fixture.stereoGroup && id == StereoId && index < 2)) continue;
                 auto const selected = Field(json, "selected");
                 bool const enabled = selected.empty() ? !fixture.selected[index] : selected == "true";
                 if (enabled == fixture.selected[index]) continue;
@@ -300,6 +391,7 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
         }
         else if (type == "disconnect")
         {
+            ++fixture.playbackCommands;
             if (!Field(json, "request_id").empty())
             {
                 fixture.playing[2] = false;

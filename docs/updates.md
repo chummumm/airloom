@@ -6,6 +6,13 @@ installer. Installation begins only after the user selects that button.
 
 ## Release selection and verification
 
+Starting with 0.4.1, releases advance the patch component through 10 before
+incrementing the minor component: `0.4.9 -> 0.4.10 -> 0.5.0`. Published tags are
+not renumbered. `scripts/check-release-version.py` rejects skipped, repeated or
+backward releases against GitHub Latest, and verifies that the installer,
+manifest, executable resources and update UI agree with Cargo.toml. The client
+continues to compare the three integer components, not decimal or text values.
+
 `UpdateService` performs network work off the XAML thread. It queries the fixed
 public GitHub endpoint for `chummumm/airloom/releases/latest`, accepts published
 non-prerelease numeric versions, and compares major/minor/patch numerically.

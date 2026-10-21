@@ -187,6 +187,53 @@ impl Drop for ControlCancellation {
     }
 }
 
+#[derive(Clone, Copy)]
+struct GroupAnchor {
+    timestamp: u32,
+    local_ns: u64,
+    due: Instant,
+}
+
+/// A native pair still receives the complete stereo stream at each member.
+/// This object aligns those streams; it does not create or alter an Apple pair.
+struct NativeGroupTimeline {
+    clock_id: u64,
+    anchor: Mutex<Option<GroupAnchor>>,
+    failed: AtomicBool,
+}
+impl NativeGroupTimeline {
+    fn anchor(&self, clock: &timing::Clock) -> Result<GroupAnchor> {
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::SessionLost(
+                "native stereo group must reconnect together".into(),
+            ));
+        }
+        if clock.master_id.load(Ordering::Acquire) != self.clock_id
+            || clock.following.load(Ordering::Acquire)
+        {
+            self.failed.store(true, Ordering::Release);
+            return Err(Error::SessionLost(
+                "native stereo group clock changed".into(),
+            ));
+        }
+        let mut anchor = self
+            .anchor
+            .lock()
+            .map_err(|_| protocol("group timeline lock poisoned"))?;
+        // Establish the epoch only when the first complete PCM packet exists.
+        // Capture activation may take time after both network sessions are ready.
+        // Both members must receive the identical first PCM block from the core.
+        Ok(*anchor.get_or_insert_with(|| {
+            let lead = Duration::from_millis(50);
+            GroupAnchor {
+                timestamp: u32::from_le_bytes(crypto::random()),
+                local_ns: clock.local_ns() + lead.as_nanos() as u64,
+                due: Instant::now() + lead,
+            }
+        }))
+    }
+}
+
 pub struct Sender {
     connection: Arc<AsyncMutex<Connection>>,
     transport: Arc<UdpSocket>,
@@ -208,9 +255,15 @@ pub struct Sender {
     credentials: Option<PairingCredentials>,
     stopped: Arc<AtomicBool>,
     session_diagnostics: SenderDiagnostics,
+    receiver_id: String,
+    native_stereo_id: Option<String>,
+    native_group: Option<Arc<NativeGroupTimeline>>,
 }
 impl Drop for Sender {
     fn drop(&mut self) {
+        if let Some(group) = &self.native_group {
+            group.failed.store(true, Ordering::Release);
+        }
         self.stopped.store(true, Ordering::Release);
         for task in &self.tasks {
             task.abort();
@@ -470,6 +523,9 @@ impl Sender {
             credentials: options.credentials.clone(),
             stopped: Arc::new(AtomicBool::new(false)),
             session_diagnostics,
+            receiver_id: device.id.clone(),
+            native_stereo_id: device.native_stereo().map(|group| group.id),
+            native_group: None,
         };
         if ptp {
             sender
@@ -480,6 +536,79 @@ impl Sender {
                 .await?;
         }
         Ok(sender)
+    }
+
+    /// Prepare exactly two fresh native HomePod-pair members for common playback.
+    /// This is experimental transport compatibility, not a verified acoustic sync
+    /// guarantee. No Apple group settings or receiver channel roles are modified.
+    /// The caller must feed the same complete stereo blocks to both members and
+    /// stop/reconnect the whole group if either member fails or drops a block.
+    pub fn prepare_native_group(senders: &mut [&mut Self]) -> Result<()> {
+        if senders.len() != 2 {
+            return Err(Error::InvalidArgument(
+                "a native stereo group requires exactly two members".into(),
+            ));
+        }
+        let group_id = senders[0].native_stereo_id.as_deref().ok_or_else(|| {
+            Error::Unsupported("receiver does not advertise a valid native stereo identity".into())
+        })?;
+        if senders[0].receiver_id == senders[1].receiver_id {
+            return Err(Error::InvalidArgument(
+                "native stereo members must be different devices".into(),
+            ));
+        }
+        let first_clock = &senders[0].timing.as_ref().ok_or(Error::Stopped)?.clock;
+        let common_latency = senders
+            .iter()
+            .map(|sender| sender.latency_frames)
+            .max()
+            .unwrap();
+        for sender in senders.iter() {
+            sender.check_health()?;
+            if sender.native_stereo_id.as_deref() != Some(group_id) {
+                return Err(Error::InvalidArgument(
+                    "receivers do not advertise the same native stereo identity".into(),
+                ));
+            }
+            if sender.native_group.is_some()
+                || sender.counters.packets.load(Ordering::Acquire) != 0
+                || !sender.pending.is_empty()
+            {
+                return Err(Error::InvalidArgument(
+                    "native stereo requires fresh, idle sender sessions".into(),
+                ));
+            }
+            let clock = &sender.timing.as_ref().ok_or(Error::Stopped)?.clock;
+            if !sender.ptp || !first_clock.shares_sender_clock(clock) {
+                return Err(Error::Unsupported(
+                    "native stereo members require the same sender-owned PTP clock".into(),
+                ));
+            }
+            let stream = &sender.session_diagnostics.stream;
+            let maximum = stream
+                .receiver_latency_max_frames
+                .filter(|frames| *frames != 0)
+                .unwrap_or_else(|| {
+                    (stream.requested_latency_ms * SAMPLE_RATE as u64 / 1000)
+                        .max(SAMPLE_RATE as u64 * 2) as u32
+                });
+            if common_latency > maximum {
+                return Err(Error::Unsupported(
+                    "native stereo members have incompatible latency windows".into(),
+                ));
+            }
+        }
+        let group = Arc::new(NativeGroupTimeline {
+            clock_id: first_clock.master_id.load(Ordering::Acquire),
+            anchor: Mutex::new(None),
+            failed: AtomicBool::new(false),
+        });
+        for sender in senders.iter_mut() {
+            sender.latency_frames = common_latency;
+            sender.session_diagnostics.stream.effective_latency_frames = common_latency;
+            sender.native_group = Some(group.clone());
+        }
+        Ok(())
     }
 
     /// Feed interleaved 44.1kHz/16-bit stereo PCM. The caller must supply silence
@@ -496,9 +625,24 @@ impl Sender {
         self.pending.extend(samples);
         while self.pending.len() >= FRAMES_PER_PACKET * CHANNELS {
             self.check_health()?;
+            if self.next_packet.is_none() {
+                if let Some(group) = &self.native_group {
+                    let timing = self.timing.as_ref().ok_or(Error::Stopped)?;
+                    let anchor = group.anchor(&timing.clock)?;
+                    self.encoder.timestamp = anchor.timestamp;
+                    self.anchor = Some((anchor.timestamp, anchor.local_ns));
+                    self.next_packet = Some(anchor.due);
+                }
+            }
             let mut due = self.next_packet.unwrap_or_else(Instant::now);
             let now = Instant::now();
             if now > due + Duration::from_millis(200) {
+                if let Some(group) = &self.native_group {
+                    group.failed.store(true, Ordering::Release);
+                    return Err(Error::SessionLost(
+                        "native stereo member fell behind; reconnect the whole group".into(),
+                    ));
+                }
                 // A suspended process must not burst stale audio or let the media
                 // clock stay seconds behind. Discard stale caller backlog, keep
                 // packet/key counters, and advance the RTP timeline by elapsed time.
@@ -602,6 +746,9 @@ impl Sender {
         }
     }
     pub async fn stop(&mut self) -> Result<()> {
+        if let Some(group) = &self.native_group {
+            group.failed.store(true, Ordering::Release);
+        }
         if self.stopped.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -698,6 +845,22 @@ impl Sender {
     fn check_health(&self) -> Result<()> {
         if self.stopped.load(Ordering::Acquire) {
             return Err(Error::Stopped);
+        }
+        if let Some(group) = &self.native_group {
+            if group.failed.load(Ordering::Acquire) {
+                return Err(Error::SessionLost(
+                    "native stereo group must reconnect together".into(),
+                ));
+            }
+            let clock = &self.timing.as_ref().ok_or(Error::Stopped)?.clock;
+            if clock.master_id.load(Ordering::Acquire) != group.clock_id
+                || clock.following.load(Ordering::Acquire)
+            {
+                group.failed.store(true, Ordering::Release);
+                return Err(Error::SessionLost(
+                    "native stereo group clock changed".into(),
+                ));
+            }
         }
         if let Some(failure) = self
             .failure

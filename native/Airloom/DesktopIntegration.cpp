@@ -286,7 +286,19 @@ namespace airloom::native
             if (identifier.empty() || identifier.size() > 1024 || name.GetString().size() > 1024) continue;
             if (std::any_of(result.begin(), result.end(), [&identifier](HiddenDevice const& device)
                 { return device.id == identifier; })) continue;
-            result.push_back({identifier, name.GetString()});
+            HiddenDevice hidden{identifier, name.GetString()};
+            if (object.HasKey(L"member_ids") && object.GetNamedValue(L"member_ids").ValueType() == JsonValueType::Array)
+            {
+                for (auto const& member : object.GetNamedArray(L"member_ids"))
+                {
+                    if (member.ValueType() != JsonValueType::String || hidden.memberIds.size() >= 256) continue;
+                    auto const memberId = member.GetString();
+                    if (memberId.empty() || memberId.size() > 1024 || memberId == identifier ||
+                        std::find(hidden.memberIds.begin(), hidden.memberIds.end(), memberId) != hidden.memberIds.end()) continue;
+                    hidden.memberIds.push_back(memberId);
+                }
+            }
+            result.push_back(std::move(hidden));
         }
         return result;
     }
@@ -303,6 +315,18 @@ namespace airloom::native
             JsonObject item;
             item.Insert(L"id", JsonValue::CreateStringValue(device.id));
             item.Insert(L"name", JsonValue::CreateStringValue(device.name));
+            if (!device.memberIds.empty())
+            {
+                if (device.memberIds.size() > 256) throw winrt::hresult_invalid_argument(L"隐藏组合的成员记录过多。");
+                JsonArray members;
+                for (auto const& memberId : device.memberIds)
+                {
+                    if (memberId.empty() || memberId.size() > 1024)
+                        throw winrt::hresult_invalid_argument(L"隐藏组合的成员标识格式无效。");
+                    members.Append(JsonValue::CreateStringValue(memberId));
+                }
+                item.Insert(L"member_ids", members);
+            }
             array.Append(item);
         }
         auto const value = array.Stringify();

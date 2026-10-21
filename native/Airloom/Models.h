@@ -4,12 +4,25 @@
 
 namespace airloom::native
 {
+    struct DeviceMember
+    {
+        winrt::hstring id;
+        winrt::hstring name;
+        bool online{};
+        winrt::hstring state{L"idle"};
+        winrt::hstring statusMessage;
+    };
+
     struct Device
     {
         winrt::hstring id;
         winrt::hstring name;
         winrt::hstring model;
         winrt::hstring address;
+        winrt::hstring kind{L"device"};
+        std::vector<DeviceMember> members;
+        uint32_t expectedMembers{1};
+        bool groupComplete{true};
         bool passwordRequired{};
         bool online{true};
         bool selected{};

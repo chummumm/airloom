@@ -9,7 +9,11 @@ description = "Driverless Windows audio capture and local credential storage for
 crossbeam-channel = "0.5.15"
 rubato = { version = "0.16.2", default-features = false }
 thiserror = "2.0.17"
+tokio = { version = "1.48", features = ["sync"] }
 zeroize = "1.8.2"
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["macros", "rt", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-core = "0.62.2"

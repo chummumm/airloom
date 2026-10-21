@@ -30,8 +30,9 @@ endpoint capture and process capture.
 ## Application capture (0.4.0)
 
 `enumerate_applications()` lists nonexpired Core Audio sessions, including paused
-sessions. An app may need to play once before it has a selectable audio session;
-the UI provides a dedicated **刷新列表** action. Windows system sounds, Airloom
+sessions. An app may need to play once before it has a selectable audio session.
+The event subscription below updates the list automatically, and the UI also
+provides a dedicated **刷新列表** action. Windows system sounds, Airloom
 itself, inaccessible processes and shared system hosts are excluded. Processes
 are grouped only through older ancestors with the same full executable path, so
 a browser audio subprocess can resolve to its browser root without ascending
@@ -78,6 +79,65 @@ protected media and uncommon application models require separate validation.
 The **电脑静音** control is disabled in app mode. Endpoint mute would also affect
 other applications, so the capture API rejects that operation. Local app playback
 continues; the app's original output routing is not changed.
+
+## Source list notifications (0.4.1)
+
+`watch_sources() -> Result<SourceChanges>` starts a dedicated MTA worker and
+registers Windows notifications before collecting the first snapshot. Startup
+may block on a Windows API, so an async caller starts it with `spawn_blocking`.
+The handle has three operations:
+
+- `recv().await` returns the first snapshot immediately, then waits for a change
+  or completion of a manual refresh. It is cancellation safe and keeps only the
+  latest snapshot when changes arrive faster than the caller consumes them.
+- `snapshot()` reads the last completed snapshot without calling Windows.
+- `refresh()` requests one explicit re-enumeration. Completion is published even
+  when the contents are unchanged, allowing the UI to clear its refresh state.
+
+`SourceSnapshot` contains `endpoints`, `applications`, `endpoint_error`, and
+`application_error`. A failed session manager does not hide usable endpoints or
+the applications on another endpoint. Consumers display the error for the scope
+they are showing. The one-shot enumeration functions remain available for an
+initial/manual fallback; the running subscription's application list comes from
+its own retained sessions.
+
+The worker uses `IMMNotificationClient` for device addition, removal, state,
+default-device and property changes. For each active playback endpoint it
+registers `IAudioSessionNotification` before getting the session enumerator and
+calling `GetCount`, which enables new-session delivery. It retains every
+`OnSessionCreated` control and merges it with the initial enumeration using the
+session instance ID. Microsoft explicitly warns that an enumerator may not know
+about a session delivered by a callback. Re-enumeration therefore never replaces
+the worker's retained list. Each session also has an `IAudioSessionEvents`
+subscription for state, disconnection, display-name and grouping changes. Paused
+sessions remain selectable; expired or disconnected sessions are removed. See
+[session enumeration][session-enumeration], [session registration][session-registration]
+and [session events][session-events].
+
+Process exits use Windows thread-pool waits on the exact PID/creation-time handle
+with a **NULL timeout**. The callback fires when the handle is signaled. It is
+disarmed and drained before its process handle or context is released. There is
+no source-list interval, inactivity timeout, periodic recheck, or automatic
+retry. Re-enumeration happens only in response to a relevant Windows event or
+the user's refresh action. Dirty flags and a bounded wake token merge notification
+bursts without a debounce timer. Session volume changes do not refresh the list.
+The operating-system wait contract is documented in [SetThreadpoolWait][process-wait]
+and [CloseThreadpoolWait][close-process-wait].
+
+Callbacks enqueue or signal work and return; they do not enumerate, unregister,
+wait for a worker, or release the final retained session reference. All
+registration, unregistration, and final COM object release happens on the MTA
+worker. A shutdown gate stops new callback writers before that worker drains
+queued session references. Dropping `SourceChanges` requests cleanup and waits
+at most one second. If a Windows COM call has stalled, the worker retains its
+objects until it can finish; the callback module is pinned until full process
+exit, so detached cleanup cannot execute unloaded code. This does not keep the
+process alive or prevent the updater replacing files after process exit.
+[Device notification requirements][device-events] describe the callback rules.
+
+Source-list changes do not reroute an existing capture or automatically select
+another application. Non-Windows hosts return `UnsupportedPlatform` for the
+subscription, as they do for capture.
 
 ## Audio contract
 
@@ -190,6 +250,10 @@ The library deliberately returns `UnsupportedPlatform` for capture and secret
 storage on non-Windows hosts. Portable tests cover integer decoding, stereo
 mapping, invalid/silent buffers, resampling rate and channel separation, level
 measurement, credential namespace separation, and mute-restoration ownership.
+They also cover source notification coalescing, callback shutdown gating, latest
+snapshot delivery and cancellation. Ordinary Windows tests exercise callback
+reference retention/release, notification routing, and real process-handle exit
+notifications without requiring an audio endpoint.
 Windows-specific code must also pass an MSVC-target compile check:
 
 ```text
@@ -207,7 +271,12 @@ The separate ignored `process_loopback_activation_and_lifetime` integration test
 uses the real Windows API and an owned silent process to check activation,
 process identity, stop, mute refusal and target exit. It is run explicitly in
 Windows CI. It does not prove audible isolation between two simultaneously
-playing applications. That check, browser child-process behavior and a real
+playing applications. The ignored `source_notifications_start_refresh_and_stop`
+test registers the real Windows device callback, receives an initial snapshot,
+completes unchanged manual refreshes, drops the subscription, and registers again.
+It can run after starting the Windows Audio service without a physical endpoint;
+it does not establish delivery of real application-session changes on hardware.
+That check, browser child-process behavior and a real
 HomePod listening test remain required hardware validation. Automatic endpoint
 migration, automatic app relaunch/reselection and exclusive/protected playback
 remain outside this implementation.
@@ -220,3 +289,9 @@ remain outside this implementation.
 [credential]: https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw
 
 [activation]: https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync
+[session-enumeration]: https://learn.microsoft.com/en-us/windows/win32/api/audiopolicy/nn-audiopolicy-iaudiosessionenumerator
+[session-registration]: https://learn.microsoft.com/en-us/windows/win32/api/audiopolicy/nf-audiopolicy-iaudiosessionmanager2-registersessionnotification
+[session-events]: https://learn.microsoft.com/en-us/windows/win32/api/audiopolicy/nn-audiopolicy-iaudiosessionevents
+[device-events]: https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient
+[process-wait]: https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-setthreadpoolwait
+[close-process-wait]: https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-closethreadpoolwait

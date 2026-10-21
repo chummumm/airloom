@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use windows::core::{implement, Interface, Ref, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
-    E_OUTOFMEMORY, FILETIME, HMODULE, S_OK, WAIT_FAILED, WAIT_TIMEOUT,
+    E_OUTOFMEMORY, FILETIME, HANDLE, HMODULE, S_OK, WAIT_FAILED, WAIT_TIMEOUT,
 };
 use windows::Win32::Media::Audio::{
     eRender, ActivateAudioInterfaceAsync, AudioSessionStateExpired,
@@ -204,9 +204,7 @@ pub(crate) fn enumerate_applications() -> Result<Vec<CaptureSource>> {
         .name("airloom-applications".into())
         .spawn(|| {
             let _apartment = ComApartment::initialize()?;
-            let parents = parent_snapshot()?;
-            let mut metadata = BTreeMap::new();
-            let mut applications: BTreeMap<ApplicationId, String> = BTreeMap::new();
+            let mut controls = Vec::new();
             let devices = unsafe { enumerator()?.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) }
                 .map_err(|error| failure("Find application audio endpoints", error))?;
             let count = unsafe { devices.GetCount() }
@@ -230,59 +228,68 @@ pub(crate) fn enumerate_applications() -> Result<Vec<CaptureSource>> {
                     let Ok(session) = (unsafe { sessions.GetSession(index) }) else {
                         continue;
                     };
-                    // Keep paused/inactive sessions selectable; only expired ones
-                    // disappear. The app may need to play once to create a session.
-                    let Ok(state) = (unsafe { session.GetState() }) else {
-                        continue;
-                    };
-                    if state == AudioSessionStateExpired {
-                        continue;
-                    }
                     let Ok(control) = session.cast::<IAudioSessionControl2>() else {
                         continue;
                     };
-                    if unsafe { control.IsSystemSoundsSession() } == S_OK {
-                        continue;
-                    }
-                    let Ok(pid) = (unsafe { control.GetProcessId() }) else {
-                        continue;
-                    };
-                    let Some(root) = application_root(pid, &parents, &mut metadata) else {
-                        continue;
-                    };
-                    // Recheck the root before publishing a choice; selection will
-                    // check the same lifetime again and retain its process handle.
-                    if ApplicationProcess::open(&root.id.source_id()).is_err() {
-                        continue;
-                    }
-                    let display_name = unsafe { session.GetDisplayName() }
-                        .ok()
-                        .and_then(|value| allocated_string(value).ok())
-                        .filter(|name| !name.trim().is_empty() && !name.starts_with('@'));
-                    applications.entry(root.id).or_insert_with(|| {
-                        display_name.unwrap_or_else(|| executable_name(&root.image_path).to_owned())
-                    });
+                    controls.push(control);
                 }
             }
-            let mut sources: Vec<_> = applications
-                .into_iter()
-                .map(|(id, name)| CaptureSource {
-                    id: id.source_id(),
-                    name: format!("{name} · {}", id.process_id),
-                    is_default: false,
-                })
-                .collect();
-            sources.sort_by(|a, b| {
-                a.name
-                    .to_lowercase()
-                    .cmp(&b.name.to_lowercase())
-                    .then(a.id.cmp(&b.id))
-            });
-            Ok(sources)
+            sources_from_sessions(&controls)
         })
         .map_err(CaptureError::WorkerStart)?
         .join()
         .map_err(|_| CaptureError::WorkerPanicked)?
+}
+
+/// Both one-shot enumeration and the live watcher use the same identity and
+/// same-executable grouping policy. The watcher supplies its retained controls,
+/// including sessions received only through OnSessionCreated.
+pub(super) fn sources_from_sessions<'a>(
+    controls: impl IntoIterator<Item = &'a IAudioSessionControl2>,
+) -> Result<Vec<CaptureSource>> {
+    let parents = parent_snapshot()?;
+    let mut metadata = BTreeMap::new();
+    let mut applications: BTreeMap<ApplicationId, String> = BTreeMap::new();
+    for control in controls {
+        // Paused/inactive sessions remain selectable; expired ones do not.
+        let Ok(state) = (unsafe { control.GetState() }) else {
+            continue;
+        };
+        if state == AudioSessionStateExpired || unsafe { control.IsSystemSoundsSession() } == S_OK {
+            continue;
+        }
+        let Ok(pid) = (unsafe { control.GetProcessId() }) else {
+            continue;
+        };
+        let Some(root) = application_root(pid, &parents, &mut metadata) else {
+            continue;
+        };
+        if ApplicationProcess::open(&root.id.source_id()).is_err() {
+            continue;
+        }
+        let display_name = unsafe { control.GetDisplayName() }
+            .ok()
+            .and_then(|value| allocated_string(value).ok())
+            .filter(|name| !name.trim().is_empty() && !name.starts_with('@'));
+        applications.entry(root.id).or_insert_with(|| {
+            display_name.unwrap_or_else(|| executable_name(&root.image_path).to_owned())
+        });
+    }
+    let mut sources: Vec<_> = applications
+        .into_iter()
+        .map(|(id, name)| CaptureSource {
+            id: id.source_id(),
+            name: format!("{name} · {}", id.process_id),
+            is_default: false,
+        })
+        .collect();
+    sources.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then(a.id.cmp(&b.id))
+    });
+    Ok(sources)
 }
 
 pub(super) struct ApplicationProcess {
@@ -291,6 +298,10 @@ pub(super) struct ApplicationProcess {
 }
 
 impl ApplicationProcess {
+    pub(super) fn handle(&self) -> HANDLE {
+        self.handle.0
+    }
+
     pub(super) fn open(source_id: &str) -> Result<Self> {
         let expected = ApplicationId::parse(source_id)?;
         let handle = open_process(expected.process_id)?;

@@ -63,6 +63,13 @@ impl Clock {
         self.epoch_ns
             .saturating_add(self.epoch.elapsed().as_nanos() as u64)
     }
+    pub(crate) fn shares_sender_clock(&self, other: &Self) -> bool {
+        self.epoch_ns == other.epoch_ns
+            && self.epoch == other.epoch
+            && self.master_id.load(Ordering::Acquire) == other.master_id.load(Ordering::Acquire)
+            && !self.following.load(Ordering::Acquire)
+            && !other.following.load(Ordering::Acquire)
+    }
     fn follow(&self, id: u64, offset: i64) {
         let previous = self.offset_ns.load(Ordering::Relaxed);
         let delta = offset as i128 - previous as i128;

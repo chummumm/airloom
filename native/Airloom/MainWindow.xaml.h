@@ -56,6 +56,7 @@ namespace winrt::Airloom::implementation
         void FinishVolumeInteraction();
         void ShowSettings(bool visible);
         bool IsDeviceHidden(hstring const& id) const;
+        bool IsDeviceHidden(airloom::native::Device const& device) const;
         void SetDeviceHidden(hstring const& id, hstring const& name, bool hidden);
         void ApplyTheme();
         void AnimateStateChange();
@@ -71,6 +72,7 @@ namespace winrt::Airloom::implementation
         struct DeviceRow
         {
             hstring id;
+            Microsoft::UI::Xaml::UIElement root{nullptr};
             Microsoft::UI::Xaml::Controls::Button button{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock name{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock detail{nullptr};
@@ -78,6 +80,30 @@ namespace winrt::Airloom::implementation
             Microsoft::UI::Xaml::Controls::FontIcon marker{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem retry{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem hide{nullptr};
+            Microsoft::UI::Xaml::Controls::Border groupSurface{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock groupNote{nullptr};
+            Microsoft::UI::Xaml::Controls::Button memberToggle{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock memberSummary{nullptr};
+            Microsoft::UI::Xaml::Controls::FontIcon memberChevron{nullptr};
+            Microsoft::UI::Xaml::Controls::StackPanel memberPanel{nullptr};
+            bool membersExpanded{};
+        };
+
+        struct SourceRow
+        {
+            hstring id;
+            hstring name;
+            Microsoft::UI::Xaml::Controls::ComboBoxItem item{nullptr};
+        };
+
+        struct VisibilityRow
+        {
+            hstring id;
+            hstring name;
+            Microsoft::UI::Xaml::Controls::Border root{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock title{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock detail{nullptr};
+            Microsoft::UI::Xaml::Controls::Button toggle{nullptr};
         };
 
         airloom::native::EngineBridge m_engine;
@@ -86,6 +112,8 @@ namespace winrt::Airloom::implementation
         airloom::native::Snapshot m_snapshot;
         std::vector<airloom::native::HiddenDevice> m_hiddenDevices;
         std::vector<DeviceRow> m_deviceRows;
+        std::vector<SourceRow> m_sourceRows;
+        std::vector<VisibilityRow> m_visibilityRows;
         std::vector<Microsoft::UI::Xaml::Shapes::Line> m_waveformBars;
         airloom::native::UpdateSnapshot m_lastUpdate;
         Microsoft::UI::Xaml::DispatcherTimer m_pollTimer{nullptr};
@@ -102,6 +130,7 @@ namespace winrt::Airloom::implementation
         bool m_highContrast{};
         bool m_devicesRendered{};
         bool m_sourcesRendered{};
+        bool m_sourcesPending{};
         bool m_forceDeviceRender{};
         bool m_settingsOpen{};
         bool m_visibilityRendered{};

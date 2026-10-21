@@ -32,6 +32,19 @@ pub struct DeviceView {
     pub error: Option<AppError>,
     pub packets_sent: u64,
     pub timing_exchanges: u64,
+    pub kind: &'static str,
+    pub members: Vec<DeviceMemberView>,
+    pub expected_members: usize,
+    pub group_complete: bool,
+}
+
+#[derive(Clone, Serialize)]
+pub struct DeviceMemberView {
+    pub id: String,
+    pub name: String,
+    pub online: bool,
+    pub state: Phase,
+    pub status_message: String,
 }
 
 #[derive(Clone, Serialize)]

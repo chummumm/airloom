@@ -1,46 +1,46 @@
 {
-  "method": "SendInput",
-  "dpi": 96,
-  "foreground_verified": true,
-  "point_owner_verified": true,
-  "thumb_start": {
-    "x": 345,
-    "y": 578
-  },
-  "cursor_start": {
-    "x": 345,
-    "y": 578
-  },
-  "track_start": 258,
-  "track_end": 606,
-  "moves": [
-    {
-      "x": 380,
-      "y": 578,
-      "value": 35
-    },
-    {
-      "x": 415,
-      "y": 578,
-      "value": 45
-    },
-    {
-      "x": 449,
-      "y": 578,
-      "value": 55
-    },
-    {
-      "x": 484,
-      "y": 578,
-      "value": 65
-    },
-    {
-      "x": 519,
-      "y": 578,
-      "value": 75
-    }
-  ],
-  "final_value": 75,
-  "failure": null,
-  "button_down_verified": true
+    "method":  "SendInput",
+    "dpi":  96,
+    "foreground_verified":  true,
+    "point_owner_verified":  true,
+    "thumb_start":  {
+                        "x":  332,
+                        "y":  578
+                    },
+    "cursor_start":  {
+                         "x":  332,
+                         "y":  578
+                     },
+    "track_start":  240,
+    "track_end":  606,
+    "moves":  [
+                  {
+                      "x":  368,
+                      "y":  578,
+                      "value":  35
+                  },
+                  {
+                      "x":  405,
+                      "y":  578,
+                      "value":  45
+                  },
+                  {
+                      "x":  441,
+                      "y":  578,
+                      "value":  55
+                  },
+                  {
+                      "x":  478,
+                      "y":  578,
+                      "value":  65
+                  },
+                  {
+                      "x":  514,
+                      "y":  578,
+                      "value":  75
+                  }
+              ],
+    "final_value":  75,
+    "failure":  null,
+    "button_down_verified":  true
 }

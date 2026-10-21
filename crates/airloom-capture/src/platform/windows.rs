@@ -2,8 +2,11 @@
 
 #[path = "applications.rs"]
 mod applications;
+#[path = "source_watch.rs"]
+mod source_watch;
 
 pub(crate) use applications::enumerate_applications;
+pub(crate) use source_watch::SourceWatch;
 
 use crate::mute_policy::MuteOwnership;
 use crate::pipeline::{levels, Encoding, NativeFormat, StereoResampler};

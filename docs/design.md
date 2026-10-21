@@ -4,7 +4,7 @@ Airloom's desktop shell is **WinUI 3, C++/WinRT and XAML**. Capture, discovery, 
 
 ## Home and settings
 
-The 0.3.0 home is a compact audio workspace: a source-and-status strip above a dark instrument display, an adjacent receiver panel when space permits, and a persistent transport dock below. The window header carries the Airloom identity and settings action. Source information explains which Windows output is captured. Selected-target text summarizes real selections; receiver rows show their individual states. The instrument displays real left/right levels, the peak envelope, sample rate, elapsed transfer time and packet count. A short test tone helps isolate capture problems.
+The 0.4.0 home retains the compact audio workspace introduced in 0.3.0: a source-and-status strip above a dark instrument display, an adjacent receiver panel when space permits, and a persistent transport dock below. The window header carries the Airloom identity and settings action. Source information now distinguishes the shared mix of a Windows output from a selected application's process tree. Selected-target text summarizes real selections; receiver rows show their individual states. The instrument displays real left/right levels, the peak envelope, sample rate, elapsed transfer time and packet count. A short test tone helps isolate capture problems.
 
 `PageContent` binds its width and minimum height to the workspace scroll viewport. Home and settings reserve scrollbar space. At 1050 effective pixels of actual root content width, the receiver panel occupies a bounded 320-pixel column beside the signal; narrower windows put receivers above the instrument, keeping selection visible on opening. `TransportPanel` is a separate row outside that scroll viewer, so connecting, changing volume and muting the local output remain available while the workspace scrolls. The native window initially opens at 1120 × 780 effective pixels, clamped to the monitor work area, with an 880 × 680 minimum tracking size and a 48-pixel title region.
 
@@ -14,7 +14,34 @@ The silver ground, neutral surfaces, monochrome controls and one blue signal hue
 
 Settings is a separate native view with compact groups. Update status/actions and diagnostics occupy the first row; appearance/startup and receiver visibility follow, with application actions below. Labels stay inside their groups beside the related controls. Hiding a selected receiver explicitly deselects it before persisting its visibility. Hidden IDs and display names remain local so offline receivers can be restored. Discovery never silently chooses a first target.
 
-Unavailable Windows outputs are explained once beside the source picker, with the full actionable message and a native rescan button. Long source errors can wrap rather than losing their recovery instruction. They are not repeated in the global connection banner or signal description. Session, authentication and network errors retain the banner; settings shows errors from its local actions rather than repeating a source failure above the update controls.
+Unavailable Windows outputs and application-selection guidance are explained once beside the source picker, with the full actionable message and a native refresh button. Long source errors can wrap rather than losing their recovery instruction. They are not repeated in the global connection banner or signal description. Session, authentication and network errors retain the banner; settings shows errors from its local actions rather than repeating a source failure above the update controls.
+
+## Native button hierarchy (0.4.0)
+
+[App.xaml](../native/Airloom/App.xaml) owns the button styles. `PrimaryButtonStyle` derives from WinUI's `AccentButtonStyle` and has a 44-pixel minimum height, 10-pixel radius and 18 × 10 padding. `SecondaryButtonStyle` derives from `DefaultButtonStyle`, with a 40-pixel minimum height, 8-pixel radius and 14 × 8 padding. `CompactButtonStyle` reduces secondary actions to 36 pixels with 12 × 6 padding. `QuietButtonStyle` derives from the framework's own `SubtleButtonStyle`, retaining a transparent resting surface and no normal outline. The 36 × 36 `IconButtonStyle` and padded `ToolbarButtonStyle` derive from Quiet.
+
+The app does not shadow the framework's `SubtleButtonStyle` or copy a control template. Normal, pointer, pressed and disabled brushes use the template's verified resource keys in the existing final merged resource dictionary. App-owned semantic brushes remain available through the root theme dictionaries for C++ lookup. High contrast maps control states to system colors. The native template contract is defined in [WinUI 1.8.1 Button resources](https://github.com/microsoft/microsoft-ui-xaml/blob/winui3/release/1.8.1/src/controls/dev/CommonStyles/Button_themeresources.xaml).
+
+Labels use 14-pixel semibold Segoe and glyphs use 16 pixels with an 8-pixel gap. Their content styles do not set a local foreground, preserving native state inheritance. Route controls retain the existing snapshot-aware foreground update. All button styles retain native system focus visuals, and the template supplies pointer/press feedback without an application-owned animation layer.
+
+The primary dock action is 152 × 44 pixels. Its icon, label and loading indicator use the same reserved content region; the authentication action remains inside the existing 88-pixel action row. Settings, test tone, refresh, hide/restore and diagnostics use the corresponding hierarchy rather than independent padding and heights. The source refresh button is 104 pixels wide so changing from **刷新列表** to **正在刷新…** cannot move its edge. These dimensions were checked in the final 0.4.0 native UI run below.
+
+## Explicit sound-source scope (0.4.0)
+
+`SourceModePicker` selects `endpoint` (**系统声音**) or `application` (**指定应用**). It reserves a 134-pixel column before the flexible `SourcePicker`; status keeps a separate 154-pixel column. Both selectors and the 104-pixel refresh action remain in the source strip at the minimum 880 × 680 window. Source scope and refresh start disabled until a valid core snapshot enables them. Their accessible names and tooltips describe the active scope.
+
+Endpoint mode keeps the existing shared-output loopback path. Application mode uses Windows process loopback for the explicitly selected process and its children. App choices come from eligible nonexpired Core Audio sessions, including paused sessions. An application may need to play once before appearing; the empty-state instruction and **刷新列表** action provide that recovery. Process IDs distinguish instances in the list, while the source identity binds PID to process creation time. The [capture implementation and platform limits](windows-audio.md) are documented separately.
+
+The scope rules are explicit:
+
+- Switching between system and application modes stops the current route, retains receiver selection, clears the source choice and refreshes sources for the new mode. It does not resume a different scope automatically.
+- Application enumeration never chooses an app on the person's behalf. Connecting requires an available source of the selected kind. A late scan for the previous scope cannot replace the current list.
+- Changing to a valid source within the current scope preserves selected receivers and can restart an already active route around the new capture session.
+- An exited or unavailable app never falls back to another app or the system mix. A restarted process has a new identity and must be selected again.
+- Process-tree capture is not tab selection: tabs in one browser instance may be captured together. The source explanation makes that boundary visible.
+- Application mode sets local mute off and disables **电脑静音**. Local playback continues; the app's output routing is unchanged. The core also rejects endpoint mute in this scope.
+
+Source enumeration runs outside the UI dispatcher. `sources_refreshing` controls the dedicated refresh state and `source_message` supplies the scope-specific guidance. Source rows are rebuilt only when scope, selection, refresh state or source data changes; routine level snapshots do not reset an open picker. No application name or process ID is added to copied diagnostics.
 
 ## Volume stability
 
@@ -47,7 +74,9 @@ Windows animation preferences govern decorative fades, the spinner and waveform.
 
 ## Multiple receivers and authentication
 
-The core supports eight selected receivers. Selection and state are separate fields. Adding a target while another streams starts only the new target; removing one stops only that target. Retry can address a failed receiver. Changing source preserves selected receivers and reconnects active routes around the replacement capture session.
+The core supports eight selected receivers. Selection and state are separate fields. Adding a target while another streams starts only the new target; removing one stops only that target. Retry can address a failed receiver. Changing a source within the same scope preserves selected receivers and reconnects active routes around the replacement capture session; changing scope follows the explicit stop-and-select rules above.
+
+Each independent target receives the complete stereo stream. This does not implement Apple's native HomePod stereo pairing or a software left/right assignment. Existing Apple stereo pairs are not yet verified with real hardware. The interface must not present an unimplemented grouping switch; [stereo.md](stereo.md) records the support boundary and required hardware evidence.
 
 | Receiver state | Interface behavior |
 | --- | --- |
@@ -76,9 +105,13 @@ void  airloom_free_string(char* json_utf8);
 
 The UI accepts snapshot schema version 1, validates types and finite numbers, limits decoded lists, and rejects incompatible or oversized responses. `selected_device_id` remains a legacy first-selection field; `selected_device_ids` contains all selections. Devices expose selection, state, status, optional error and counters. `capture` is separate; `test_tone_active` reports the tone. Definitions live in [model.rs](../crates/airloom-core/src/model.rs) and [Models.cpp](../native/Airloom/Models.cpp).
 
+The additive 0.4.0 source fields are `source_mode`, `sources_refreshing` and `source_message`; source entries carry their `kind`. The native model defaults absent `source_mode` to `endpoint`. These fields describe scope and readiness without exposing process handles across the ABI.
+
 | Command | Fields beyond `type` |
 | --- | --- |
 | `refresh` | None |
+| `refresh_sources` | None; refresh the current source scope |
+| `select_source_mode` | `mode`: `endpoint` or `application` |
 | `toggle_device` | `device_id`, explicit `selected` |
 | `select_device` | Legacy single-target `device_id` |
 | `select_source` | `source_id` |
@@ -111,27 +144,37 @@ Theme, waveform and visibility preferences live under `HKCU\Software\Airloom`; p
 
 ## Verification
 
-[Windows smoke](../scripts/smoke-windows.ps1) operates the real WinUI executable from the portable archive with .NET UI Automation. [CI run 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973), source `e80e6f9af8707216277fa8396dd351eaf33fad73`, passed both CI jobs and every release gate, including the complete native UI smoke and independent updater lifecycle checks. Its actual screenshots were reviewed for layout, typography, light/dark resources, the active waveform, multi-device presentation and authentication.
+### 0.4.0 source and release gates
 
-The `native-smoke.json` artifact records successful settings/back navigation, read-only update checking, restricted diagnostic clipboard content, light/dark selection, 15 volume measurements (0/9/10/99/100 at 880 × 680, 1100 × 800 and 1600 × 1000), acknowledgement retention and a real `SendInput` mouse drag. The compact receiver panel is visible on opening, the wide receiver panel follows the 1050-effective-pixel breakpoint, and the dock remains outside the scrolling workspace. The disposable CI desktop was expanded to a supported display mode for on-screen captures and restored afterward.
+Source `7c5133e006ec0be13017ec21084680518c95082f` passed both jobs and every gate in [CI 39583891772](https://github.com/chummumm/airloom/actions/runs/39583891772). This includes regular tests, the explicitly invoked Windows process-loopback API test, native build and packaging, the complete native UI smoke, and independent updater/process lifecycle checks. The screenshots reviewed and stored for 0.4.0 come from that run's final artifact.
 
-The reviewed `native-home-light.png`, `native-home-dark.png`, native settings captures and size captures use the shipped core. They document the runner's real unavailable-output/empty-discovery state. Source recovery text remains readable, controls do not recenter with the volume value, and native switches and primary-button states now use the intended neutral palette. The populated settings groups and password dialog also fit without a blocking text or action truncation.
+[Windows smoke](../scripts/smoke-windows.ps1) operates the real WinUI executable from the portable archive through .NET UI Automation and checked `SendInput`. It records 15 volume measurements at 0/9/10/99/100 across 880 × 680, 1100 × 800 and 1600 × 1000, acknowledgement retention, actual pointer drag, settings/back navigation, read-only update checking, restricted diagnostic clipboard content and both themes. At 880 × 680 the first two receiver rows and persistent dock are visible before scrolling. The management footer can be partially clipped at the ordinary outer scroll boundary, matching the preceding layout; the dock does not overlap the scroll viewer.
 
-The separately named `fixture-*` screenshots are native UI evidence with synthetic data. [UiFixture.cpp](../scripts/fixtures/UiFixture.cpp) is compiled by the smoke script as a replacement `airloom_core.dll` in another temporary archive copy; production source and the shipped core do not acquire a fixture mode. The smoke checks that the shipped core's hash is unchanged. The fixture supplies three receivers, two initial streaming states, levels and counts, then a third receiver's password challenge. The smoke verifies populated volume retention, the native password dialog and that cancelling the challenged receiver leaves the other two selected. Its diagnostic object explicitly identifies fixture data. No physical HomePod was connected to CI, and none of these values establishes real network or acoustic behavior.
+### Native presentation and interaction
 
-The final fixture temporarily enables Windows animations on the disposable CI desktop and restores the prior setting afterward. `active_waveform_mode_verified=true` is recorded in the native proof. The actual light/dark screenshots show all 64 envelope bars inside the instrument, with no overlap into the caption, meters or header. The final settings, compact receiver-first view and password dialog were rechecked; no blocking clipping or obscured action was found.
+Final light/dark application home and settings, native unavailable-output layouts, compact populated home and dark button states were inspected directly. Source names, primary/secondary labels and instrument text fit without a new blocking truncation. The 64 envelope bars stay inside their guides. The primary button retains its 44-pixel height and stable bounds through physical hover, press and release, with visibly distinct dark-theme resting, hover and pressed fills.
 
-Reduced-motion evidence is retained separately as [fixture-reduced-motion-home-light.png](evidence/fixture-reduced-motion-home-light.png) and [fixture-reduced-motion-home-dark.png](evidence/fixture-reduced-motion-home-dark.png), from [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. Those captures show the reduced-motion explanation with levels and meters retained. That earlier run passed UI smoke but failed the updater test's window-caption readiness check; the final successful run supersedes it for release verification.
+The source fixture starts with two streaming receivers in system mode. Switching to app mode stops capture and transmission, clears the source selection and disables playback until an explicit app is chosen. A physical primary-button click starts the selected synthetic app. Refresh preserves that selection and playback; returning to system mode stops the route while preserving receivers. Local mute is cleared and disabled in app mode. These outcomes are checked through the real native command path and fixture diagnostics.
 
-High-contrast rendering, receiver failure/reconnect presentation and the complete hardware state matrix were not established by these screenshots. Settings visibility rows were inspected visually; this result does not claim a new offline hide/restore interaction test.
+`SetFocus` plus `HasKeyboardFocus` verifies **UIA logical focus**. The corresponding screenshot has no visible ring change and does not establish keyboard-focus-ring rendering. Standard native focus templates remain in place; no additional keyboard test is claimed.
 
-Stable automation IDs include `HomeView`, `DeviceRail`, `HomeScrollViewer`, `PageContent`, `SourcePanel`, `SignalPanel`, `TransportPanel`, `VolumeSliderHost`, `VolumeSlider`, `VolumeValue`, `SettingsButton`, `SettingsView`, `SettingsBackButton`, `UpdateStatusText`, `CheckUpdatesButton` and `CopyDiagnosticsButton`.
+The password and per-receiver cancellation checks passed UIA interaction: the native dialog is found, cancel is invoked, and the other two receivers remain streaming. The final `fixture-auth-dark.png` capture itself shows the ordinary home view, not the modal. It is retained with its actual provenance and is not presented as password-dialog visual proof.
 
-**Full release verification passed in run 39573924973.** The bounded test-only fix waits for the native window caption to become ready before the updater lifecycle assertions; both CI jobs and the lifecycle gate then passed. UI results remain separate from process/tray/updater results even though both passed in this build. XML validity, Windows compile, native interaction, visual review and audible output remain distinct claims.
+[UiFixture.cpp](../scripts/fixtures/UiFixture.cpp) runs only as a replacement core DLL in an isolated temporary copy of the real portable app. The shipped core hash is checked unchanged. Its three app choices, three receivers, initial two streams, signal levels and password challenge are synthetic and not shipped. The awaiting-selection frame contains available synthetic apps; empty/ended-app screens were not visually verified. Neither the fixture nor packet counts prove real capture isolation, receiver transport or acoustic output.
 
-For the regression baseline, [0.2.1 CI run 39549954880](https://github.com/chummumm/airloom/actions/runs/39549954880), source `852bc217fa0b44e40dc3256564d951f39b1cb2d0`, passed the prior native release checks: volume geometry/value retention, actual `SendInput` drag, settings/back, live update check, restricted diagnostic copy and real process/tray/Restart Manager exit. The user subsequently reported audible HomePod playback with 0.2.1 on 2026-10-21. That is a user-reported listening result for their setup, not a CI listening test or a claim of universal receiver compatibility.
+Source automation IDs exercised by this flow include `SourceModePicker`, `SourcePicker` and `SourceRetryButton`. Existing IDs include `HomeView`, `DeviceRail`, `HomeScrollViewer`, `PageContent`, `SourcePanel`, `SignalPanel`, `TransportPanel`, `VolumeSliderHost`, `VolumeSlider`, `VolumeValue`, `SettingsButton`, `SettingsView`, `SettingsBackButton`, `UpdateStatusText`, `CheckUpdatesButton` and `CopyDiagnosticsButton`.
 
-The [resource contrast calculation](design/contrast-check.json) covers the new opaque light/dark text and instrument resources; it is not a rendered accessibility audit. No web inspector has certified this XAML interface. Other receiver models, mixed authentication, stereo groups, multiroom synchronization, quiet/active capture and endpoint-mute recovery retain their appropriate hardware verification boundaries.
+### Real Windows API and hardware boundaries
+
+`process_loopback_activation_and_lifetime` creates its own silent process and checks activation, stale identity rejection, finite exact-zero received samples, refusal of endpoint mute, bounded cancellation, restarting the client and reporting target exit. The process path uses float32 capture and retains the strict sample assertion. The final run's [process-capture-api.txt](evidence/process-capture-api.txt) records successful completion. [windows-audio.md](windows-audio.md) owns the capture contract.
+
+That test does not play two applications simultaneously or connect a physical HomePod. Audible app isolation, browser child-process behavior, other application models, native HomePod stereo and multiroom synchronization require hardware validation. High-contrast rendering, the complete receiver error/reconnect matrix and new offline hide/restore interactions are outside this screenshot claim. The [resource contrast calculation](design/contrast-check.json) is a calculation for application-owned surfaces, not a rendered native accessibility audit. No web inspector has certified this XAML interface.
+
+### Historical evidence
+
+The 0.3.0 shell passed [CI 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973), source `e80e6f9af8707216277fa8396dd351eaf33fad73`. Reduced-motion captures are retained separately as [light](evidence/fixture-reduced-motion-home-light.png) and [dark](evidence/fixture-reduced-motion-home-dark.png) from [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. That earlier run passed UI smoke but failed an updater readiness assertion later corrected in the harness; it is historical reduced-motion evidence, not the current release gate.
+
+The user reported audible HomePod playback with 0.2.1 on 2026-10-21 after its [verified build](https://github.com/chummumm/airloom/actions/runs/39549954880), source `852bc217fa0b44e40dc3256564d951f39b1cb2d0`. That remains an attributed listening result for their setup, not a CI listening test or a claim of universal compatibility.
 
 ## Build and platform references
 

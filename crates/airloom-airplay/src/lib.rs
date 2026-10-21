@@ -16,7 +16,7 @@ mod tlv;
 pub use diagnostics::{
     ReceiverDiagnostics, SenderDiagnostics, StreamDiagnostics, TransportDiagnostics,
 };
-pub use discovery::{discover, Device};
+pub use discovery::{discover, Device, DiscoveryWatcher, NativeStereoInfo};
 pub use pairing::{pair, PairingCredentials, PairingSession};
 pub use sender::{ConnectOptions, Sender, SenderMetrics, TimingMode, VolumeControl};
 pub use timing::TimingDiagnostics;

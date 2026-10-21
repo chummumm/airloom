@@ -823,6 +823,166 @@ async fn ptp_encrypted_nonzero_audio_has_a_valid_receiver_playback_anchor() {
     // timing hub does; separate #[tokio::test] runtimes would share127.0.0.1
     // until the earlier runtime destroyed its sockets underneath the other.
     followed_receiver_starts_its_clock_only_after_session_and_peers_are_established().await;
+    native_stereo_members_share_full_pcm_and_one_render_timeline().await;
+}
+
+async fn native_stereo_members_share_full_pcm_and_one_render_timeline() {
+    async fn member(ip: &str) -> (Receiver, JoinHandle<()>) {
+        let ip: IpAddr = ip.parse().unwrap();
+        let event = UdpSocket::bind(SocketAddr::new(ip, 319)).await.unwrap();
+        let general = UdpSocket::bind(SocketAddr::new(ip, 320)).await.unwrap();
+        let timing_task = tokio::spawn(async move {
+            let mut event_buffer = [0u8; 2048];
+            let mut general_buffer = [0u8; 2048];
+            loop {
+                tokio::select! {
+                    received = event.recv_from(&mut event_buffer) => {
+                        let (size, source) = received.unwrap();
+                        if size < 44 || event_buffer[0] & 15 != 0 { continue; }
+                        // The full PTP wire profile is checked by the enclosing
+                        // test. This peer replies to each Sync with Delay_Req.
+                        let mut delay = [0u8; 44];
+                        delay[0] = 0x11;
+                        delay[1] = 2;
+                        delay[2..4].copy_from_slice(&44u16.to_be_bytes());
+                        delay[6..8].copy_from_slice(&0x0408u16.to_be_bytes());
+                        delay[20..28].copy_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes());
+                        delay[28..30].copy_from_slice(&0x8005u16.to_be_bytes());
+                        delay[30..32].copy_from_slice(&event_buffer[30..32]);
+                        event.send_to(&delay, source).await.unwrap();
+                    }
+                    received = general.recv_from(&mut general_buffer) => { received.unwrap(); }
+                }
+            }
+        });
+        let mut receiver = start_receiver_with_info(
+            ip,
+            PASSWORD,
+            false,
+            1,
+            Some(plist([
+                ("model", Value::String("AudioAccessory5,1".into())),
+                ("features", integer((1u64 << 41) | (1u64 << 48))),
+            ])),
+        )
+        .await;
+        receiver
+            .device
+            .txt
+            .insert("tsid".into(), "EAFA36AA-9785-54B2-A537-D9EE2A55CF1C".into());
+        (receiver, timing_task)
+    }
+    let (one, timing_one) = member("127.0.0.24").await;
+    let (two, timing_two) = member("127.0.0.25").await;
+    let mut config_one = options(PASSWORD);
+    config_one.timing = TimingMode::Ptp;
+    config_one.latency = Duration::from_millis(500);
+    let mut config_two = options(PASSWORD);
+    config_two.timing = TimingMode::Ptp;
+    config_two.latency = Duration::from_millis(900);
+    let (sender_one, sender_two) = tokio::join!(
+        Sender::connect(one.device, config_one),
+        Sender::connect(two.device, config_two),
+    );
+    let mut sender_one = sender_one.unwrap();
+    let mut sender_two = sender_two.unwrap();
+    let offer_one = one.offer.await.unwrap();
+    let offer_two = two.offer.await.unwrap();
+    offer_one.event_ack.await.unwrap();
+    offer_two.event_ack.await.unwrap();
+    Sender::prepare_native_group(&mut [&mut sender_one, &mut sender_two]).unwrap();
+    assert_eq!(sender_one.metrics().negotiated_latency_ms, 900);
+    assert_eq!(sender_two.metrics().negotiated_latency_ms, 900);
+    assert!(Sender::prepare_native_group(&mut [&mut sender_one, &mut sender_two]).is_err());
+    let pcm: Vec<i16> = (0..FRAMES_PER_PACKET * 2)
+        .flat_map(|frame| [frame as i16 * 17, -(frame as i16) * 31])
+        .collect();
+    let (sent_one, sent_two) = tokio::join!(sender_one.send_pcm(&pcm), async {
+        // Unequal task scheduling must not move the second member's first frame.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sender_two.send_pcm(&pcm).await
+    });
+    sent_one.unwrap();
+    sent_two.unwrap();
+    async fn received_audio(data: &UdpSocket, key: &[u8; 32], expected: &[i16]) -> u32 {
+        let mut buffer = [0u8; 2048];
+        let mut first = None;
+        for (index, chunk) in expected.chunks(FRAMES_PER_PACKET * CHANNELS).enumerate() {
+            let (size, _) = timeout(Duration::from_secs(1), data.recv_from(&mut buffer))
+                .await
+                .unwrap()
+                .unwrap();
+            let timestamp = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
+            let origin = *first.get_or_insert(timestamp);
+            assert_eq!(
+                timestamp,
+                origin.wrapping_add(index as u32 * FRAMES_PER_PACKET as u32)
+            );
+            let nonce: [u8; 8] = buffer[size - 8..size].try_into().unwrap();
+            let payload = crypto::open(
+                key,
+                &crypto::named_nonce(&nonce),
+                &buffer[4..12],
+                &buffer[12..size - 8],
+            )
+            .unwrap();
+            assert_eq!(
+                decode_uncompressed_stereo_frame(&payload),
+                chunk,
+                "each member receives both original channels"
+            );
+        }
+        first.unwrap()
+    }
+    let first_one = received_audio(&one.data, &offer_one.key, &pcm).await;
+    let first_two = received_audio(&two.data, &offer_two.key, &pcm).await;
+    assert_eq!(
+        first_one, first_two,
+        "the two first PCM frames share an RTP position"
+    );
+    async fn first_render_time(control: &UdpSocket, timestamp: u32) -> (u64, u64) {
+        let mut buffer = [0u8; 2048];
+        let (size, _) = timeout(Duration::from_secs(1), control.recv_from(&mut buffer))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(size, 28);
+        let rendering = u32::from_be_bytes(buffer[4..8].try_into().unwrap()).wrapping_sub(11025);
+        let lead = timestamp.wrapping_sub(rendering) as u64;
+        let master_ns = u64::from_be_bytes(buffer[8..16].try_into().unwrap());
+        (
+            master_ns + lead * 1_000_000_000 / SAMPLE_RATE as u64,
+            u64::from_be_bytes(buffer[20..28].try_into().unwrap()),
+        )
+    }
+    let (render_one, clock_one) = first_render_time(&one.control, first_one).await;
+    let (render_two, clock_two) = first_render_time(&two.control, first_two).await;
+    assert_eq!(clock_one, clock_two);
+    assert!(
+        render_one.abs_diff(render_two) <= 50_000,
+        "wire mappings must agree within sample rounding"
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(matches!(
+        sender_one.send_pcm(&pcm).await,
+        Err(Error::SessionLost(_))
+    ));
+    assert!(matches!(
+        sender_two.send_pcm(&pcm).await,
+        Err(Error::SessionLost(_))
+    ));
+    assert_eq!(
+        sender_one.metrics().reanchors,
+        0,
+        "a group member must not independently drop/reanchor audio"
+    );
+    sender_one.stop().await.unwrap();
+    sender_two.stop().await.unwrap();
+    assert!(one.task.await.unwrap().event_ack);
+    assert!(two.task.await.unwrap().event_ack);
+    timing_one.abort();
+    timing_two.abort();
+    let _ = tokio::join!(timing_one, timing_two);
 }
 
 async fn followed_receiver_starts_its_clock_only_after_session_and_peers_are_established() {

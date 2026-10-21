@@ -6,6 +6,8 @@
 
 mod application;
 pub mod credentials;
+mod source_changes;
+pub use source_changes::{watch_sources, SourceChanges, SourceSnapshot};
 
 #[cfg(any(windows, test))]
 mod mute_policy;

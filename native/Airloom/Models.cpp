@@ -88,6 +88,22 @@ namespace airloom::native
             device.name = Text(object, L"name", L"AirPlay 扬声器");
             device.model = Text(object, L"model");
             device.address = Text(object, L"address");
+            device.kind = Text(object, L"kind", L"device");
+            device.expectedMembers = static_cast<uint32_t>(std::clamp(Number(object, L"expected_members",
+                device.kind == L"native_stereo" ? 2.0 : 1.0), 1.0, 256.0));
+            device.groupComplete = Boolean(object, L"group_complete", device.kind != L"native_stereo");
+            for (auto const& memberValue : Array(object, L"members"))
+            {
+                if (memberValue.ValueType() != JsonValueType::Object || device.members.size() >= 256) continue;
+                auto const memberObject = memberValue.GetObject();
+                DeviceMember member;
+                member.id = Text(memberObject, L"id");
+                member.name = Text(memberObject, L"name", L"HomePod");
+                member.online = Boolean(memberObject, L"online");
+                member.state = Text(memberObject, L"state", L"idle");
+                member.statusMessage = Text(memberObject, L"status_message");
+                if (!member.id.empty()) device.members.push_back(std::move(member));
+            }
             device.passwordRequired = Boolean(object, L"password_required");
             device.online = Boolean(object, L"online", true);
             device.selected = Boolean(object, L"selected", result.IsSelected(device.id));
@@ -162,6 +178,6 @@ namespace airloom::native
     size_t Snapshot::StreamingCount() const noexcept
     {
         return static_cast<size_t>(std::count_if(devices.begin(), devices.end(), [](Device const& device)
-            { return device.state == L"streaming"; }));
+            { return device.state == L"streaming" && (device.kind != L"native_stereo" || device.groupComplete); }));
     }
 }

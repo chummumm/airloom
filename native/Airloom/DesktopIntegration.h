@@ -47,6 +47,7 @@ namespace airloom::native
     {
         winrt::hstring id;
         winrt::hstring name;
+        std::vector<winrt::hstring> memberIds{};
     };
 
     class Preferences final

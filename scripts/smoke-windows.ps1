@@ -567,6 +567,28 @@ function Get-NativeSelectionNames([string] $Id) {
     return @($Selection.Current.GetSelection() | ForEach-Object { $_.Current.Name })
 }
 
+function Find-NativeOption([string] $Name) {
+    $NameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $KindCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $Condition = [System.Windows.Automation.AndCondition]::new($NameCondition, $KindCondition)
+    $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+    $Option = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
+    if ($null -ne $Option) { return $Option }
+    # A native ComboBox popup can have a separate HWND; remain process-scoped.
+    $ProcessCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $Process.Id)
+    $Roots = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Children, $ProcessCondition)
+    foreach ($Root in $Roots) {
+        $Option = $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
+        if ($null -ne $Option) { return $Option }
+    }
+    return $null
+}
+
 function Select-NativeOption([string] $Id, [string] $Name) {
     $Picker = Wait-NativeId $Id
     if (-not $Picker.Current.IsEnabled -or $Picker.Current.IsOffscreen -or $Picker.Current.BoundingRectangle.IsEmpty) {
@@ -574,29 +596,10 @@ function Select-NativeOption([string] $Id, [string] $Name) {
     }
     $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $Expansion.Expand()
-    $NameCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty, $Name)
-    $KindCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::ListItem)
-    $Condition = [System.Windows.Automation.AndCondition]::new($NameCondition, $KindCondition)
     $Deadline = [DateTime]::UtcNow.AddSeconds(3)
     $Option = $null
     do {
-        $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
-        $Option = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
-        if ($null -eq $Option) {
-            # A native ComboBox popup may have its own top-level HWND. Search
-            # only UIA roots owned by this launched process, never other apps.
-            $ProcessCondition = [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $Process.Id)
-            $Roots = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-                [System.Windows.Automation.TreeScope]::Children, $ProcessCondition)
-            foreach ($Root in $Roots) {
-                $Option = $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
-                if ($null -ne $Option) { break }
-            }
-        }
+        $Option = Find-NativeOption $Name
         if ($null -ne $Option) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $Deadline)
@@ -776,6 +779,96 @@ function Invoke-FixtureConnectPointer([string] $Theme) {
     }
 }
 
+function Send-FixtureEvent([string] $Action) {
+    $script:FixtureEventIndex += 1
+    $EventPath = Join-Path $script:FixtureEventDirectory "event-$($script:FixtureEventIndex).txt"
+    $AcknowledgementPath = Join-Path $script:FixtureEventDirectory "ack-$($script:FixtureEventIndex).txt"
+    $StagingPath = "$EventPath.pending"
+    [System.IO.File]::WriteAllText($StagingPath, $Action, [System.Text.UTF8Encoding]::new($false))
+    # Publish an immutable file, so the DLL cannot read half of an event.
+    Move-Item -LiteralPath $StagingPath -Destination $EventPath
+    $Deadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        if ((Test-Path -LiteralPath $AcknowledgementPath) -and
+            [System.IO.File]::ReadAllText($AcknowledgementPath) -eq $Action) {
+            Start-Sleep -Milliseconds 250
+            return
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $Deadline)
+    throw "The isolated fixture did not acknowledge automatic event '$Action'."
+}
+
+function Assert-NativeIdAbsent([string] $Id) {
+    $Condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+    $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+    if ($null -ne $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)) {
+        throw "Unexpected native control '$Id' remained in the current view."
+    }
+}
+
+function Test-SourceEventFixture([string] $Theme, $BeforeEvents) {
+    $Picker = Wait-NativeId 'SourcePicker'
+    $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $Selection = [System.Windows.Automation.SelectionPattern]$Picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+    $Expansion.Expand()
+    Start-Sleep -Milliseconds 150
+    $SelectedOptions = @($Selection.Current.GetSelection())
+    if ($SelectedOptions.Count -ne 1) { throw 'Automatic source test requires one explicitly selected application.' }
+    $ChosenOption = $SelectedOptions[0]
+    $ChosenIdentity = $ChosenOption.GetRuntimeId() -join ','
+    $ChosenOption.SetFocus()
+    Start-Sleep -Milliseconds 100
+    if (-not $ChosenOption.Current.HasKeyboardFocus) { throw 'The selected source popup item did not receive keyboard focus.' }
+    try {
+        foreach ($FixtureAction in @('source_refreshing', 'applications_changed')) {
+            Send-FixtureEvent $FixtureAction
+            $CurrentOptions = @($Selection.Current.GetSelection())
+            if ($Expansion.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Expanded -or
+                $CurrentOptions.Count -ne 1 -or ($CurrentOptions[0].GetRuntimeId() -join ',') -ne $ChosenIdentity -or
+                -not $ChosenOption.Current.HasKeyboardFocus -or
+                $ChosenOption.Current.Name -ne 'Microsoft Edge · 测试应用') {
+                throw "Automatic event '$FixtureAction' replaced the selected item, stole focus, changed selection, or closed the source popup."
+            }
+            $ShouldBeRefreshing = $FixtureAction -eq 'source_refreshing'
+            if ((Wait-NativeId 'SourceRetryButton').Current.IsEnabled -eq $ShouldBeRefreshing) {
+                throw "Automatic event '$FixtureAction' did not render the source refresh status independently."
+            }
+        }
+        if ($null -eq (Find-NativeOption 'VLC media player · 测试应用') -or
+            $null -ne (Find-NativeOption 'Audacity · 新发现测试应用')) {
+            throw 'The source popup applied structural changes before the interaction finished.'
+        }
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-source-events-dropdown-$Theme.png")
+    } finally { $Expansion.Collapse() }
+    Start-Sleep -Milliseconds 250
+    $Expansion.Expand()
+    Start-Sleep -Milliseconds 150
+    try {
+        $CurrentOptions = @($Selection.Current.GetSelection())
+        if ($null -eq (Find-NativeOption 'Audacity · 新发现测试应用') -or
+            $null -ne (Find-NativeOption 'VLC media player · 测试应用') -or
+            $CurrentOptions.Count -ne 1 -or ($CurrentOptions[0].GetRuntimeId() -join ',') -ne $ChosenIdentity) {
+            throw 'Closing the source popup did not reconcile the new list while reusing the selected native item.'
+        }
+    } finally { $Expansion.Collapse() }
+    $AfterEvents = Read-FixtureDiagnostics
+    if ($AfterEvents.fixture_state.source_id -ne $BeforeEvents.fixture_state.source_id -or
+        $AfterEvents.fixture_state.streaming_receivers -ne 2 -or
+        $AfterEvents.fixture_state.automatic_events -ne ($BeforeEvents.fixture_state.automatic_events + 2) -or
+        $AfterEvents.fixture_state.source_selection_commands -ne $BeforeEvents.fixture_state.source_selection_commands -or
+        $AfterEvents.fixture_state.playback_commands -ne $BeforeEvents.fixture_state.playback_commands) {
+        throw 'Source-list-only events selected another application or issued a playback command.'
+    }
+    return [ordered]@{
+        verified = $true; synthetic_events = $true; real_notifications_claim = $false
+        refreshing_preserves_selection_verified = $true; popup_interaction_preserved_verified = $true
+        incremental_item_identity_verified = $true; deferred_list_update_verified = $true
+        no_playback_commands_verified = $true; event_count = 2
+    }
+}
+
 function Test-ApplicationSourceFixture([string] $Theme) {
     Set-HomeScroll 0
     $LocalMute = Wait-NativeId 'LocalMuteToggle'
@@ -833,6 +926,7 @@ function Test-ApplicationSourceFixture([string] $Theme) {
         (Wait-NativeId 'LocalMuteToggle').Current.IsEnabled) {
         throw 'Refreshing application sources changed the explicit selection/playback, skipped the core command, or enabled local mute.'
     }
+    $SourceEventProof = Test-SourceEventFixture $Theme $AfterRefresh
     $ApplicationThemes = Test-NativeThemes 'fixture-application' $true
     $script:FixtureThemeErrors = @($script:FixtureThemeErrors) + @($ApplicationThemes.errors)
 
@@ -850,16 +944,118 @@ function Test-ApplicationSourceFixture([string] $Theme) {
         source_refresh_retains_selection_verified = $true; local_mute_disabled_verified = $true
         active_waveform_mode_verified = $ApplicationThemes.active_waveform_mode_verified
         button_pointer_interaction_verified = $true; button_input = $ButtonProof
+        source_event_ui = $SourceEventProof
         synthetic_application_count = 3; selected_application = $BrowserName
+    }
+}
+
+function Test-NativeStereoFixture([string] $Theme) {
+    $GroupId = 'stereo:12345678-1234-5678-9abc-123456789abc'
+    # First hide a physical member through the real settings UI, then let the
+    # fixture report that the same two identities belong to a native group.
+    Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-living-room')
+    Start-Sleep -Milliseconds 250
+    Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+    Set-SettingsScroll 100
+    Invoke-NativeButton (Wait-NativeId 'DeviceVisibility:fixture-study')
+    Start-Sleep -Milliseconds 250
+    Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+    Send-FixtureEvent 'native_stereo'
+    Assert-NativeIdAbsent "Receiver:$GroupId"
+    Assert-NativeIdAbsent 'Receiver:fixture-living-room'
+    Assert-NativeIdAbsent 'Receiver:fixture-study'
+    Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+    Set-SettingsScroll 100
+    $RestoreGroup = Wait-NativeId "DeviceVisibility:$GroupId"
+    if (-not $RestoreGroup.Current.Name.StartsWith('恢复显示 ')) {
+        throw 'A previously hidden physical member reappeared as an unhidden native group.'
+    }
+    Assert-NativeIdAbsent 'DeviceVisibility:fixture-study'
+    Invoke-NativeButton $RestoreGroup
+    Start-Sleep -Milliseconds 250
+    $HiddenPreference = Get-ItemProperty -LiteralPath $ThemeSettingsPath -Name HiddenDevices
+    $RemainingHidden = @($HiddenPreference.HiddenDevices | ConvertFrom-Json)
+    if (@($RemainingHidden | Where-Object { $_.id -in @($GroupId, 'fixture-living-room', 'fixture-study') }).Count -ne 0) {
+        throw 'Restoring the native group did not clear both group and member hidden identities.'
+    }
+    Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+    Set-HomeScroll 0
+    $GroupButton = Wait-NativeId "Receiver:$GroupId"
+    $GroupIdentity = $GroupButton.GetRuntimeId() -join ','
+    if (-not $GroupButton.Current.Name.Contains('原生立体声，兼容性验证')) {
+        throw 'The native stereo card omitted its compatibility-verification boundary.'
+    }
+    Invoke-NativeButton $GroupButton
+    Start-Sleep -Milliseconds 250
+    Invoke-NativeButton (Wait-NativeId 'ConnectButton')
+    Start-Sleep -Milliseconds 350
+    if ((Wait-NativeId 'VolumeHeading').Current.Name -ne '组合音量' -or
+        -not (Wait-NativeId 'TestToneButton').Current.Name.Contains('测试左右声道')) {
+        throw 'Selecting a native group did not expose group volume and the channel-verification test tone.'
+    }
+    Invoke-NativeButton (Wait-NativeId "ReceiverMembers:$GroupId")
+    Start-Sleep -Milliseconds 200
+    foreach ($MemberId in @('fixture-living-room', 'fixture-study')) {
+        $Member = Wait-NativeId "ReceiverMember:$MemberId"
+        if ($Member.Current.IsOffscreen -or -not $Member.Current.Name.Contains('传输中')) {
+            throw "The expanded group did not expose the connected member '$MemberId'."
+        }
+    }
+    $GroupSlider = Wait-NativeId 'VolumeSlider'
+    $Range = [System.Windows.Automation.RangeValuePattern]$GroupSlider.GetCurrentPattern(
+        [System.Windows.Automation.RangeValuePattern]::Pattern)
+    $Range.SetValue(73)
+    Start-Sleep -Milliseconds 350
+    $GroupDiagnostics = Read-FixtureDiagnostics
+    if ($GroupDiagnostics.fixture_state.native_stereo -ne $true -or
+        $GroupDiagnostics.fixture_state.group_complete -ne $true -or
+        $GroupDiagnostics.fixture_state.streaming_targets -ne 1 -or
+        $GroupDiagnostics.fixture_state.streaming_receivers -ne 2 -or
+        [Math]::Abs($GroupDiagnostics.fixture_state.volume - 0.73) -gt 0.001) {
+        throw 'The logical group or its existing global-volume command did not match the synthetic two-member state.'
+    }
+    $GroupThemes = Test-NativeThemes 'fixture-native-stereo' $true
+    $script:FixtureThemeErrors = @($script:FixtureThemeErrors) + @($GroupThemes.errors)
+    Send-FixtureEvent 'stereo_partial'
+    $GroupButton = Wait-NativeId "Receiver:$GroupId"
+    if (($GroupButton.GetRuntimeId() -join ',') -ne $GroupIdentity -or
+        -not $GroupButton.Current.Name.Contains('成员暂缺') -or $GroupButton.Current.Name.Contains('正在传输') -or
+        (Wait-NativeId 'TestToneButton').Current.IsEnabled -or
+        -not (Wait-NativeId 'ReceiverMember:fixture-study').Current.Name.Contains('离线') -or
+        (Wait-NativeId 'ReceiverMember:fixture-study').Current.IsOffscreen) {
+        throw 'A missing member replaced the group card, collapsed its details, or left the partial group labelled as streaming.'
+    }
+    Save-NativeScreenshot (Join-Path $EvidencePath "fixture-native-stereo-partial-$Theme.png")
+    $PartialDiagnostics = Read-FixtureDiagnostics
+    if ($PartialDiagnostics.fixture_state.group_complete -ne $false -or
+        $PartialDiagnostics.fixture_state.group_state -eq 'streaming' -or
+        $PartialDiagnostics.fixture_state.streaming_targets -ne 0 -or
+        $PartialDiagnostics.fixture_state.streaming_receivers -ne 1) {
+        throw 'The partial-group fixture did not preserve the surviving member while rejecting a complete streaming group.'
+    }
+    return [ordered]@{
+        verified = $GroupThemes.verified; themes = $GroupThemes.themes; errors = $GroupThemes.errors
+        synthetic_data = $true; real_stereo_sync_claim = $false
+        logical_group_card_verified = $true; member_status_verified = $true
+        partial_group_not_streaming_verified = $true; group_volume_verified = $true
+        hidden_member_migration_verified = $true; selected_group_id = $GroupId
     }
 }
 
 function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     $PriorEnabled = $env:AIRLOOM_UI_FIXTURE
+    $PriorEvents = $env:AIRLOOM_UI_FIXTURE_EVENTS
+    $script:FixtureEventDirectory = Join-Path $FixtureDirectory 'fixture-events'
+    $script:FixtureEventIndex = 0
+    New-Item -ItemType Directory -Path $script:FixtureEventDirectory -Force | Out-Null
     try {
         $env:AIRLOOM_UI_FIXTURE = '1'
+        $env:AIRLOOM_UI_FIXTURE_EVENTS = $script:FixtureEventDirectory
         Start-NativeApplication (Join-Path $FixtureDirectory 'Airloom.exe')
-    } finally { $env:AIRLOOM_UI_FIXTURE = $PriorEnabled }
+    } finally {
+        $env:AIRLOOM_UI_FIXTURE = $PriorEnabled
+        $env:AIRLOOM_UI_FIXTURE_EVENTS = $PriorEvents
+    }
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
     Start-Sleep -Milliseconds 400
     foreach ($Id in @('Receiver:fixture-living-room', 'Receiver:fixture-study', 'Receiver:fixture-bedroom')) {
@@ -897,7 +1093,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
         throw 'Cancelling one fixture authentication request changed the other selected receivers.'
     }
     $FixtureDiagnostics = Read-FixtureDiagnostics
-    $CancelledRoutes = @($FixtureDiagnostics.receivers | Where-Object { $_.slot -eq 2 -and $_.state -eq 'idle' })
+    $CancelledRoutes = @($FixtureDiagnostics.receivers | Where-Object { $_.slot -eq 3 -and $_.state -eq 'idle' })
     if ($FixtureDiagnostics.fixture_state.auth_pending -ne $false -or $CancelledRoutes.Count -ne 1 -or
         $FixtureDiagnostics.fixture_state.streaming_receivers -ne 2) {
         throw 'Cancelling one authentication request failed to stop just its route and preserve the other two streams.'
@@ -905,16 +1101,21 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-bedroom')
     Start-Sleep -Milliseconds 350
     $ApplicationProof = Test-ApplicationSourceFixture $FixtureTheme
+    $StereoProof = Test-NativeStereoFixture $FixtureTheme
     return [ordered]@{
-        verified = ($ThemeProof.verified -and $ApplicationProof.verified); data_source = 'CI-only replacement DLL in a separate temporary archive copy'
+        verified = ($ThemeProof.verified -and $ApplicationProof.verified -and $StereoProof.verified); data_source = 'CI-only replacement DLL in a separate temporary archive copy'
         synthetic_data = $true; real_audio_or_receiver_claim = $false
-        themes = $ThemeProof.themes; errors = @($ThemeProof.errors) + @($ApplicationProof.errors); receivers = 3; initially_streaming = 2
+        themes = $ThemeProof.themes; errors = @($ThemeProof.errors) + @($ApplicationProof.errors) + @($StereoProof.errors); receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
         populated_volume_retained = $true; compact_receivers_visible_at_top = $true
         active_waveform_mode_verified = $ThemeProof.active_waveform_mode_verified
         application_source_ui_verified = $ApplicationProof.verified
         button_pointer_interaction_verified = $ApplicationProof.button_pointer_interaction_verified
         application_source_ui = $ApplicationProof
+        source_event_ui_verified = $ApplicationProof.source_event_ui.verified
+        source_event_ui = $ApplicationProof.source_event_ui
+        native_stereo_ui_verified = $StereoProof.verified
+        native_stereo_ui = $StereoProof
     }
 }
 
@@ -965,6 +1166,7 @@ Expand-Archive -LiteralPath $ArchivePath -DestinationPath $SmokeRoot
 $AppPath = Join-Path $SmokeRoot 'Airloom.exe'
 $ThemeSettingsPath = 'HKCU:\Software\Airloom'
 $SavedTheme = Get-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
+$SavedHiddenDevices = Get-ItemProperty -LiteralPath $ThemeSettingsPath -Name HiddenDevices -ErrorAction SilentlyContinue
 $ShippedCoreHash = (Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash
 $StartupTracePath = [System.IO.Path]::GetFullPath((Join-Path $EvidencePath 'native-startup.txt'))
 $PriorStartupTrace = $env:AIRLOOM_STARTUP_TRACE
@@ -1084,6 +1286,11 @@ try {
         New-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -Value $SavedTheme.Theme -PropertyType DWord -Force | Out-Null
     } else {
         Remove-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $SavedHiddenDevices) {
+        New-ItemProperty -LiteralPath $ThemeSettingsPath -Name HiddenDevices -Value $SavedHiddenDevices.HiddenDevices -PropertyType String -Force | Out-Null
+    } else {
+        Remove-ItemProperty -LiteralPath $ThemeSettingsPath -Name HiddenDevices -ErrorAction SilentlyContinue
     }
     try { [AirloomUiProbe]::RestoreFixtureMotion() } finally { [AirloomUiProbe]::RestoreDisplay() }
 }

@@ -1,13 +1,14 @@
 use crate::model::{
-    self, AppError, AuthPrompt, CaptureView, Command, DeviceView, Levels, Metrics, Phase, Snapshot,
-    SourceMode, SourceView,
+    self, AppError, AuthPrompt, CaptureView, Command, DeviceMemberView, DeviceView, Levels,
+    Metrics, Phase, Snapshot, SourceMode, SourceView,
 };
 use airloom_airplay::{
-    AuthenticationKind, ConnectOptions, Device, Error as AirplayError, PairingCredentials,
-    PairingSession, Sender, SenderMetrics,
+    AuthenticationKind, ConnectOptions, Device, DiscoveryWatcher, Error as AirplayError,
+    PairingCredentials, PairingSession, Sender, SenderMetrics,
 };
 use airloom_capture::{
     credentials, AudioChunk, CaptureConfig, CaptureInfo, CaptureSource, CaptureStream,
+    SourceChanges, SourceSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -22,7 +23,6 @@ use tokio::task::JoinHandle as Task;
 use zeroize::Zeroizing;
 
 const CREDENTIAL_SERVICE: &str = "Airloom";
-const DISCOVERY_WINDOW: Duration = Duration::from_secs(4);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
 const BLOCK_FRAMES: usize = 441;
 const BLOCK_PERIOD: Duration = Duration::from_millis(10);
@@ -116,6 +116,7 @@ struct ActiveTarget {
 struct MediaBlock {
     samples: Arc<[i16]>,
     captured_at: Instant,
+    sequence: u64,
 }
 
 impl ActiveTarget {
@@ -214,6 +215,7 @@ async fn run_target(
             }
         }
     }));
+    let mut next_sequence = None;
     loop {
         let block = tokio::select! {
             biased;
@@ -223,6 +225,14 @@ async fn run_target(
             },
             block = audio.recv() => match block { Some(block) => block, None => break },
         };
+        if next_sequence.is_some_and(|expected| expected != block.sequence) {
+            let _ = events.send(TargetFailure {
+                identity: identity.clone(),
+                message: "音频帧不连续，正在重新同步设备。".into(),
+            });
+            break;
+        }
+        next_sequence = Some(block.sequence.wrapping_add(1));
         if block.captured_at.elapsed() > MEDIA_MAX_AGE {
             let _ = events.send(TargetFailure {
                 identity: identity.clone(),
@@ -260,6 +270,7 @@ struct Route {
     retries: u8,
     retry_at: Option<Instant>,
     session: Option<ActiveTarget>,
+    prepared: Option<Sender>,
     cleanup: Option<Task<()>>,
     last_metrics: SenderMetrics,
 }
@@ -278,6 +289,7 @@ impl Default for Route {
             retries: 0,
             retry_at: None,
             session: None,
+            prepared: None,
             cleanup: None,
             last_metrics: SenderMetrics::default(),
         }
@@ -461,10 +473,14 @@ impl CaptureBuffer {
 
 struct TestTone {
     position: usize,
+    stereo_channels: bool,
 }
 impl TestTone {
-    fn new() -> Self {
-        Self { position: 0 }
+    fn new(stereo_channels: bool) -> Self {
+        Self {
+            position: 0,
+            stereo_channels,
+        }
     }
     fn remaining_ms(&self) -> u32 {
         (TEST_TONE_FRAMES.saturating_sub(self.position) * 1000
@@ -479,11 +495,27 @@ impl TestTone {
             let fade = (self.position as f32 / FADE_FRAMES as f32)
                 .min((TEST_TONE_FRAMES - self.position) as f32 / FADE_FRAMES as f32)
                 .min(1.0);
-            let phase = std::f64::consts::TAU * 440.0 * self.position as f64
-                / airloom_airplay::SAMPLE_RATE as f64;
+            let rate = airloom_airplay::SAMPLE_RATE as usize;
+            let left_end = rate * 14 / 10;
+            let right_start = rate * 16 / 10;
+            let frequency = if self.stereo_channels && self.position >= right_start {
+                660.0
+            } else {
+                440.0
+            };
+            let phase = std::f64::consts::TAU * frequency * self.position as f64 / rate as f64;
             let tone = phase.sin() as f32 * 0.12;
-            for sample in pair {
-                *sample = *sample * (1.0 - fade) + tone * fade;
+            for (channel, sample) in pair.iter_mut().enumerate() {
+                let channel_fade = if !self.stereo_channels {
+                    1.0
+                } else if channel == 0 && self.position < left_end {
+                    ((left_end - self.position) as f32 / FADE_FRAMES as f32).min(1.0)
+                } else if channel == 1 && self.position >= right_start {
+                    ((self.position - right_start) as f32 / FADE_FRAMES as f32).min(1.0)
+                } else {
+                    0.0
+                };
+                *sample = *sample * (1.0 - fade) + tone * fade * channel_fade;
             }
             self.position += 1;
         }
@@ -515,6 +547,37 @@ struct SourceScanResult {
     sources: airloom_capture::Result<Vec<CaptureSource>>,
 }
 
+#[derive(Clone)]
+struct NativeGroup {
+    id: String,
+    name: String,
+    members: Vec<String>,
+}
+
+fn native_groups(devices: &[Device]) -> BTreeMap<String, NativeGroup> {
+    let mut groups = BTreeMap::<String, NativeGroup>::new();
+    for device in devices {
+        let Some(info) = device.native_stereo() else {
+            continue;
+        };
+        let id = format!("stereo:{}", info.id);
+        let group = groups.entry(id.clone()).or_insert_with(|| NativeGroup {
+            id,
+            name: info
+                .name
+                .clone()
+                .unwrap_or_else(|| "HomePod 立体声组合".into()),
+            members: Vec::new(),
+        });
+        group.members.push(device.id.clone());
+    }
+    for group in groups.values_mut() {
+        group.members.sort();
+        group.members.dedup();
+    }
+    groups
+}
+
 struct Actor {
     state: Arc<Mutex<Snapshot>>,
     shutdown: Arc<AtomicBool>,
@@ -524,8 +587,12 @@ struct Actor {
     selected: Vec<String>,
     routes: BTreeMap<String, Route>,
     running: bool,
-    discovery: Option<Task<DiscoveryResult>>,
+    discovery: Option<Task<airloom_airplay::Result<DiscoveryWatcher>>>,
+    discovery_watch: Option<DiscoveryWatcher>,
+    source_watch_start: Option<Task<airloom_capture::Result<SourceChanges>>>,
+    source_watch: Option<SourceChanges>,
     source_scan: Option<Task<SourceScanResult>>,
+    media_sequence: u64,
     work: Option<ConnectionWork>,
     queue: VecDeque<ConnectionRequest>,
     pairing: Option<(String, PairingSession)>,
@@ -568,7 +635,11 @@ impl Actor {
             routes,
             running: false,
             discovery: None,
+            discovery_watch: None,
+            source_watch_start: None,
+            source_watch: None,
             source_scan: None,
+            media_sequence: 0,
             work: None,
             queue: VecDeque::new(),
             pairing: None,
@@ -649,7 +720,7 @@ impl Actor {
         } else {
             "可选择一个或多个设备开始投放。".into()
         };
-        let views = self
+        let physical_views = self
             .devices
             .iter()
             .map(|device| {
@@ -676,8 +747,18 @@ impl Actor {
                     error: route.and_then(|route| route.error.clone()),
                     packets_sent: metrics.packets_sent,
                     timing_exchanges: metrics.timing_exchanges,
+                    kind: "device",
+                    members: Vec::new(),
+                    expected_members: 1,
+                    group_complete: true,
                 }
             })
+            .collect();
+        let views = self.grouped_views(physical_views);
+        let selected_targets: Vec<_> = views
+            .iter()
+            .filter(|view| view.selected)
+            .map(|view| view.id.clone())
             .collect();
         let packets = self
             .routes
@@ -707,8 +788,8 @@ impl Actor {
             s.state = phase;
             s.status_message = status;
             s.devices = views;
-            s.selected_device_ids = self.selected.clone();
-            s.selected_device_id = self.selected.first().cloned().unwrap_or_default();
+            s.selected_device_id = selected_targets.first().cloned().unwrap_or_default();
+            s.selected_device_ids = selected_targets;
             s.auth = self.auth.clone();
             s.error = error;
             s.metrics.packets_sent = packets;
@@ -716,6 +797,151 @@ impl Actor {
             s.test_tone_remaining_ms = self.test_tone.as_ref().map_or(0, TestTone::remaining_ms);
             s.diagnostics = Some(model::Diagnostics::from_snapshot(s, receiver_diagnostics));
         });
+    }
+
+    fn grouped_views(&self, views: Vec<DeviceView>) -> Vec<DeviceView> {
+        let mut views: BTreeMap<_, _> = views
+            .into_iter()
+            .map(|view| (view.id.clone(), view))
+            .collect();
+        let mut targets = Vec::new();
+        for group in native_groups(&self.devices).into_values() {
+            let members: Vec<_> = group
+                .members
+                .iter()
+                .filter_map(|id| views.remove(id))
+                .collect();
+            let complete = members.len() == 2 && members.iter().all(|member| member.online);
+            let selected = members.iter().any(|member| member.selected);
+            let all_selected = members.iter().all(|member| member.selected);
+            let state = if complete
+                && all_selected
+                && members
+                    .iter()
+                    .all(|member| member.state == Phase::Streaming)
+            {
+                Phase::Streaming
+            } else if members
+                .iter()
+                .any(|member| member.state == Phase::AuthRequired)
+            {
+                Phase::AuthRequired
+            } else if members.iter().any(|member| member.state == Phase::Error) {
+                Phase::Error
+            } else if members
+                .iter()
+                .any(|member| member.state == Phase::Reconnecting)
+            {
+                Phase::Reconnecting
+            } else if members
+                .iter()
+                .any(|member| matches!(member.state, Phase::Connecting | Phase::Streaming))
+            {
+                Phase::Connecting
+            } else {
+                Phase::Idle
+            };
+            let message = match state {
+                Phase::Streaming => "正在向原生立体声组合发送声音；兼容性待实机确认。".into(),
+                Phase::AuthRequired => "组合成员需要验证，请完成密码或配对。".into(),
+                Phase::Error => members
+                    .iter()
+                    .find_map(|member| member.error.as_ref().map(|error| error.message.clone()))
+                    .unwrap_or_else(|| "组合连接需要处理。".into()),
+                Phase::Reconnecting => "正在恢复整个组合，等待两台重新同步…".into(),
+                Phase::Connecting => "等待组合中的两台设备就绪…".into(),
+                _ if group.members.len() > 2 => {
+                    "组合信息存在冲突，请在家庭 App 检查后刷新。".into()
+                }
+                _ if !complete => "组合不完整，等待另一台 HomePod 上线。".into(),
+                _ if selected && !all_selected => "组合成员已变化，请重新连接整个组合。".into(),
+                _ => "使用家庭 App 已建立的组合；原生兼容性验证。".into(),
+            };
+            targets.push(DeviceView {
+                id: group.id,
+                name: group.name,
+                model: "HomePod 原生立体声".into(),
+                address: members
+                    .iter()
+                    .map(|member| member.address.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                password_required: members.iter().any(|member| member.password_required),
+                online: complete,
+                remembered: members.iter().any(|member| member.remembered),
+                selected,
+                state,
+                status_message: message,
+                error: members.iter().find_map(|member| member.error.clone()),
+                packets_sent: members.iter().map(|member| member.packets_sent).sum(),
+                timing_exchanges: members.iter().map(|member| member.timing_exchanges).sum(),
+                kind: "native_stereo",
+                members: members
+                    .into_iter()
+                    .map(|member| DeviceMemberView {
+                        id: member.id,
+                        name: member.name,
+                        online: member.online,
+                        state: member.state,
+                        status_message: member.status_message,
+                    })
+                    .collect(),
+                expected_members: 2,
+                group_complete: complete,
+            });
+        }
+        targets.extend(views.into_values());
+        targets.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        targets
+    }
+
+    fn target_members(&self, id: &str) -> Option<Vec<String>> {
+        if let Some(group) = native_groups(&self.devices).remove(id) {
+            Some(group.members)
+        } else {
+            self.known_device(id).map(|_| vec![id.into()])
+        }
+    }
+
+    fn related_members(&self, id: &str) -> Vec<String> {
+        native_groups(&self.devices)
+            .into_values()
+            .find(|group| group.id == id || group.members.iter().any(|member| member == id))
+            .map(|group| group.members)
+            .unwrap_or_else(|| vec![id.into()])
+    }
+
+    fn target_selected(&self, id: &str) -> bool {
+        self.target_members(id)
+            .is_some_and(|members| members.iter().any(|member| self.selected.contains(member)))
+    }
+
+    fn selected_targets(&self) -> Vec<String> {
+        let groups = native_groups(&self.devices);
+        let mut targets = Vec::new();
+        for id in &self.selected {
+            let target = groups
+                .values()
+                .find(|group| group.members.contains(id))
+                .map(|group| group.id.clone())
+                .unwrap_or_else(|| id.clone());
+            if !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        targets
+    }
+
+    fn member_available(&self, id: &str) -> bool {
+        self.online.contains(id)
+            || self
+                .routes
+                .get(id)
+                .is_some_and(|route| route.session.is_some() || route.prepared.is_some())
     }
 
     fn error(&mut self, code: &str, message: impl Into<String>) {
@@ -736,6 +962,7 @@ impl Actor {
     }
 
     async fn run(mut self, mut commands: mpsc::Receiver<Command>) {
+        self.source_watch_start = Some(tokio::task::spawn_blocking(airloom_capture::watch_sources));
         self.refresh();
         self.synchronize();
         let mut tick = tokio::time::interval(BLOCK_PERIOD);
@@ -757,8 +984,49 @@ impl Actor {
                 } => {
                     self.discovery = None;
                     match result {
-                        Ok(result) => self.discovered(result),
+                        Ok(Ok(watcher)) => self.discovery_watch = Some(watcher),
+                        Ok(Err(error)) => self.error("discovery", user_error(&error)),
                         Err(_) => self.error("discovery_worker", "设备扫描中断，请重新扫描。"),
+                    }
+                },
+                result = async {
+                    match &mut self.discovery_watch {
+                        Some(watcher) => watcher.next().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if result.is_err() {
+                        self.discovery_watch = None;
+                    }
+                    self.discovered(DiscoveryResult { devices: result });
+                },
+                result = async {
+                    match &mut self.source_watch_start {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.source_watch_start = None;
+                    match result {
+                        Ok(Ok(watcher)) => self.source_watch = Some(watcher),
+                        _ => self.refresh_sources(),
+                    }
+                },
+                result = async {
+                    match &mut self.source_watch {
+                        Some(watcher) => watcher.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match result {
+                        Ok(snapshot) => self.source_snapshot(snapshot),
+                        Err(error) => {
+                            self.source_watch = None;
+                            self.update(|s| {
+                                s.sources_refreshing = false;
+                                s.source_message = format!("声音来源自动更新已停止：{}。可使用刷新按钮。", capture_error_message(&error));
+                            });
+                        }
                     }
                 },
                 result = async {
@@ -808,6 +1076,11 @@ impl Actor {
         if let Some(task) = self.source_scan.take() {
             task.abort();
         }
+        if let Some(task) = self.source_watch_start.take() {
+            task.abort();
+        }
+        self.discovery_watch = None;
+        self.source_watch = None;
         for route in self.routes.values_mut() {
             if let Some(task) = route.cleanup.take() {
                 let _ = task.await;
@@ -816,17 +1089,37 @@ impl Actor {
     }
 
     fn refresh(&mut self) {
-        self.refresh_sources();
+        self.request_source_refresh();
         if self.discovery.is_none() {
-            self.discovery = Some(tokio::spawn(async {
-                DiscoveryResult {
-                    devices: airloom_airplay::discover(DISCOVERY_WINDOW).await,
-                }
-            }));
+            self.discovery_watch = None;
+            self.discovery = Some(tokio::task::spawn_blocking(DiscoveryWatcher::start));
         }
     }
 
+    fn request_source_refresh(&mut self) {
+        if cfg!(windows) && self.source_watch.is_none() && self.source_watch_start.is_none() {
+            self.source_watch_start =
+                Some(tokio::task::spawn_blocking(airloom_capture::watch_sources));
+        }
+        self.refresh_sources();
+    }
+
     fn refresh_sources(&mut self) {
+        if let Some(watcher) = &self.source_watch {
+            match watcher.refresh() {
+                Ok(()) => self.update(|s| s.sources_refreshing = true),
+                Err(error) => self.update(|s| {
+                    s.sources_refreshing = false;
+                    s.source_message =
+                        format!("无法刷新声音来源：{}", capture_error_message(&error));
+                }),
+            }
+            return;
+        }
+        if self.source_watch_start.is_some() {
+            self.update(|s| s.sources_refreshing = true);
+            return;
+        }
         if self.source_scan.is_some() {
             return;
         }
@@ -841,6 +1134,20 @@ impl Actor {
             .unwrap_or(Err(airloom_capture::CaptureError::WorkerPanicked));
             SourceScanResult { mode, sources }
         }));
+    }
+
+    fn source_snapshot(&mut self, snapshot: SourceSnapshot) {
+        let mode = lock(&self.state).source_mode;
+        let (sources, error) = match mode {
+            SourceMode::Endpoint => (snapshot.endpoints, snapshot.endpoint_error),
+            SourceMode::Application => (snapshot.applications, snapshot.application_error),
+        };
+        self.sources_discovered(mode, Ok(sources));
+        if let Some(error) = error {
+            self.update(|s| {
+                s.source_message = format!("声音来源更新未完成：{error}。可点刷新重试。")
+            });
+        }
     }
 
     fn sources_discovered(
@@ -903,10 +1210,10 @@ impl Actor {
             s.source_message = match mode {
                 SourceMode::Endpoint => "采集所选 Windows 输出设备上的全部应用声音。".into(),
                 SourceMode::Application if !s.selected_source_id.is_empty() && !found => {
-                    "应用已结束或不再可用，请刷新后重新选择。".into()
+                    "应用已结束或不再可用，请重新选择；列表会自动更新。".into()
                 }
                 SourceMode::Application if s.sources.is_empty() => {
-                    "先让目标应用播放一段声音，再点刷新列表。".into()
+                    "让目标应用播放一段声音，它会自动出现在列表中。".into()
                 }
                 SourceMode::Application => {
                     "只采集所选应用及其子进程；同一浏览器的多个标签页会一起采集。".into()
@@ -937,13 +1244,38 @@ impl Actor {
                 }
                 // A short mDNS scan is not proof an active receiver vanished.
                 for existing in &self.devices {
-                    if self.selected.contains(&existing.id)
+                    if (self.selected.contains(&existing.id) || existing.native_stereo().is_some())
                         && !devices.iter().any(|device| device.id == existing.id)
                     {
                         devices.push(existing.clone());
                     }
                 }
+                let updated_groups = native_groups(&devices);
+                for group in native_groups(&self.devices).into_values() {
+                    let membership_changed = updated_groups
+                        .get(&group.id)
+                        .is_none_or(|updated| updated.members != group.members);
+                    let in_use = group.members.iter().any(|id| {
+                        self.routes.get(id).is_some_and(|route| {
+                            route.wanted || route.session.is_some() || route.prepared.is_some()
+                        })
+                    });
+                    if membership_changed && in_use {
+                        self.fail_members(
+                            &group.members,
+                            "native_group_changed",
+                            "原生立体声组合信息发生变化，已停止整组，请刷新后重新连接。",
+                        );
+                    }
+                }
                 self.devices = devices;
+                if self
+                    .global_error
+                    .as_ref()
+                    .is_some_and(|error| error.code == "discovery")
+                {
+                    self.global_error = None;
+                }
                 // Discovery never opts a user into a hidden or newly found target.
             }
             Err(error) if self.active_count() == 0 => self.error("discovery", user_error(&error)),
@@ -956,28 +1288,70 @@ impl Actor {
     }
 
     fn select(&mut self, id: &str, selected: bool) {
-        if self.known_device(id).is_none() {
+        let Some(members) = self.target_members(id) else {
             return;
-        }
+        };
+        let members = if selected {
+            members
+        } else {
+            self.related_members(id)
+        };
         if selected {
-            if self.selected.iter().any(|selected| selected == id) {
-                return;
-            }
-            if self.selected.len() >= MAX_SELECTED_DEVICES {
+            let added = members
+                .iter()
+                .filter(|member| !self.selected.contains(member))
+                .count();
+            if self.selected.len() + added > MAX_SELECTED_DEVICES {
                 self.error("device_limit", "当前最多可同时选择 8 台设备。");
                 return;
             }
-            self.selected.push(id.into());
-            self.routes.entry(id.into()).or_default();
+            for member in &members {
+                if !self.selected.contains(member) {
+                    self.selected.push(member.clone());
+                }
+                self.routes.entry(member.clone()).or_default();
+            }
             if self.running {
-                self.request_connect(id, false, false);
+                self.connect_target(id);
             }
         } else {
-            self.stop_route(id);
-            self.selected.retain(|selected| selected != id);
+            for member in &members {
+                self.stop_route(member);
+            }
+            self.selected.retain(|selected| !members.contains(selected));
             if self.selected.is_empty() {
                 self.running = false;
             }
+        }
+    }
+
+    fn connect_target(&mut self, id: &str) {
+        let Some(members) = self.target_members(id) else {
+            return;
+        };
+        if id.starts_with("stereo:")
+            && (members.len() != 2 || members.iter().any(|member| !self.member_available(member)))
+        {
+            if let Some(member) = members.first() {
+                self.device_error(
+                    member,
+                    "stereo_incomplete",
+                    "原生立体声组合不完整，请让两台 HomePod 上线后重试。".into(),
+                );
+            }
+            return;
+        }
+        for member in members {
+            if let Some(route) = self.routes.get_mut(&member) {
+                route.retries = 0;
+            }
+            self.request_connect(&member, false, false);
+        }
+    }
+
+    fn stop_target(&mut self, id: &str) {
+        for member in self.related_members(id) {
+            self.stop_route(&member);
         }
     }
 
@@ -1018,6 +1392,10 @@ impl Actor {
             route.last_metrics = SenderMetrics::default();
             if let Some(session) = route.session.take() {
                 route.cleanup = Some(tokio::spawn(session.shutdown()));
+            } else if let Some(mut sender) = route.prepared.take() {
+                route.cleanup = Some(tokio::spawn(async move {
+                    let _ = tokio::time::timeout(Duration::from_millis(750), sender.stop()).await;
+                }));
             }
         }
         if self.active_count() == 0 {
@@ -1075,7 +1453,7 @@ impl Actor {
             return;
         }
         let route = self.routes.entry(id.into()).or_default();
-        if route.session.is_some() && !pair {
+        if (route.session.is_some() || route.prepared.is_some()) && !pair {
             return;
         }
         route.wanted = true;
@@ -1136,7 +1514,7 @@ impl Actor {
     fn command(&mut self, command: Command) {
         match command {
             Command::Refresh {} => self.refresh(),
-            Command::RefreshSources {} => self.refresh_sources(),
+            Command::RefreshSources {} => self.request_source_refresh(),
             Command::SelectSourceMode { mode } => {
                 if lock(&self.state).source_mode == mode {
                     return;
@@ -1153,11 +1531,15 @@ impl Actor {
                         s.mute_local = false;
                     }
                 });
-                self.refresh_sources();
+                if let Some(watcher) = &self.source_watch {
+                    self.source_snapshot(watcher.snapshot());
+                } else {
+                    self.refresh_sources();
+                }
             }
 
             Command::SelectDevice { device_id } => {
-                if self.known_device(&device_id).is_none() {
+                if self.target_members(&device_id).is_none() {
                     return;
                 }
                 self.stop_all();
@@ -1169,7 +1551,7 @@ impl Actor {
                 device_id,
                 selected,
             } => {
-                let selected = selected.unwrap_or_else(|| !self.selected.contains(&device_id));
+                let selected = selected.unwrap_or_else(|| !self.target_selected(&device_id));
                 self.select(&device_id, selected);
             }
             Command::SelectSource { source_id } => {
@@ -1193,8 +1575,9 @@ impl Actor {
                 self.clear_error_after_stop();
                 if resume {
                     self.running = true;
-                    for id in self.selected.clone() {
-                        self.request_connect(&id, false, false);
+                    let targets = self.selected_targets();
+                    for id in targets {
+                        self.connect_target(&id);
                     }
                 }
             }
@@ -1212,7 +1595,7 @@ impl Actor {
                 }
                 if device_id
                     .as_ref()
-                    .is_some_and(|id| self.known_device(id).is_none())
+                    .is_some_and(|id| self.target_members(id).is_none())
                 {
                     self.error("no_device", "设备已不在发现列表中，请重新扫描。");
                     return;
@@ -1221,28 +1604,18 @@ impl Actor {
                 self.running = true;
                 if let Some(id) = device_id {
                     self.select(&id, true);
-                    if let Some(route) = self.routes.get_mut(&id) {
-                        route.retries = 0;
-                    }
-                    self.request_connect(&id, false, false);
                 } else {
                     if self.selected.is_empty() {
                         self.running = false;
                         self.error("no_device", "请先选择一个或多个已发现的 AirPlay 设备。");
                     }
-                    for id in self.selected.clone() {
-                        if self.work.as_ref().is_some_and(|work| work.device_id == id)
-                            || self
-                                .auth
-                                .as_ref()
-                                .is_some_and(|prompt| prompt.device_id == id)
-                        {
-                            continue;
+                    for id in self.selected_targets() {
+                        if id.starts_with("stereo:") {
+                            // A deliberate Play action adopts all currently known members.
+                            self.select(&id, true);
+                        } else {
+                            self.connect_target(&id);
                         }
-                        if let Some(route) = self.routes.get_mut(&id) {
-                            route.retries = 0;
-                        }
-                        self.request_connect(&id, false, false);
                     }
                 }
             }
@@ -1253,14 +1626,26 @@ impl Actor {
                 let Some(id) = self.command_target(device_id, request_id) else {
                     return;
                 };
+                let members = self.related_members(&id);
+                let Some(pair_id) = self
+                    .target_members(&id)
+                    .and_then(|members| members.into_iter().next())
+                else {
+                    return;
+                };
                 self.select(&id, true);
-                self.stop_route(&id);
-                if let Some(route) = self.routes.get_mut(&id) {
+                self.stop_target(&id);
+                if let Some(route) = self.routes.get_mut(&pair_id) {
                     route.access = Access::default();
                     route.access_loaded = true;
                 }
                 self.running = true;
-                self.request_connect(&id, true, true);
+                self.request_connect(&pair_id, true, true);
+                for member in members {
+                    if member != pair_id {
+                        self.request_connect(&member, false, false);
+                    }
+                }
             }
             Command::Disconnect {
                 device_id,
@@ -1270,7 +1655,7 @@ impl Actor {
                     self.stop_all();
                     self.clear_error_after_stop();
                 } else if let Some(id) = self.command_target(device_id, request_id) {
-                    self.stop_route(&id);
+                    self.stop_target(&id);
                 }
             }
             Command::SetVolume { volume } => {
@@ -1300,7 +1685,11 @@ impl Actor {
                 if !enabled.unwrap_or(true) {
                     self.test_tone = None;
                 } else if self.active_count() > 0 {
-                    self.test_tone = Some(TestTone::new());
+                    let stereo = self
+                        .selected_targets()
+                        .iter()
+                        .any(|id| id.starts_with("stereo:"));
+                    self.test_tone = Some(TestTone::new(stereo));
                 } else {
                     self.error("test_tone", "请先连接至少一台扬声器，再播放测试音。");
                 }
@@ -1341,12 +1730,14 @@ impl Actor {
                 }
             }
             Command::ForgetCredentials { device_id } => {
-                self.forget_pending_access(&device_id);
-                match credentials::delete(CREDENTIAL_SERVICE, &device_id) {
-                    Ok(()) => {
-                        self.remembered.remove(&device_id);
+                for id in self.related_members(&device_id) {
+                    self.forget_pending_access(&id);
+                    match credentials::delete(CREDENTIAL_SERVICE, &id) {
+                        Ok(()) => {
+                            self.remembered.remove(&id);
+                        }
+                        Err(_) => self.error("credentials_delete", "无法删除保存的凭据，请重试。"),
                     }
-                    Err(_) => self.error("credentials_delete", "无法删除保存的凭据，请重试。"),
                 }
             }
         }
@@ -1372,7 +1763,7 @@ impl Actor {
             let Some(route) = self.routes.get_mut(&request.device_id) else {
                 continue;
             };
-            if !route.wanted || route.session.is_some() {
+            if !route.wanted || route.session.is_some() || route.prepared.is_some() {
                 continue;
             }
             if route
@@ -1404,6 +1795,21 @@ impl Actor {
             self.device_error(id, "no_device", "设备已不在发现列表中，请重新扫描。".into());
             return;
         };
+        if device.native_stereo().is_some() {
+            let members = self.related_members(id);
+            if members.len() != 2
+                || members
+                    .iter()
+                    .any(|member| !self.selected.contains(member) || !self.member_available(member))
+            {
+                self.device_error(
+                    id,
+                    "stereo_incomplete",
+                    "请连接完整的原生立体声组合；需要两台成员同时可用。".into(),
+                );
+                return;
+            }
+        }
         let volume = lock(&self.state).volume;
         let route = self.routes.get_mut(id).unwrap();
         if !route.access_loaded {
@@ -1540,44 +1946,14 @@ impl Actor {
     fn completed(&mut self, id: &str, work: Work) {
         match work {
             Work::Connected(Ok(sender)) => {
-                let sender = *sender;
-                if let Err(error) = self.start_capture() {
-                    self.stop_all();
-                    let cleanup = tokio::spawn(async move {
-                        let mut sender = sender;
-                        let _ =
-                            tokio::time::timeout(Duration::from_millis(750), sender.stop()).await;
-                    });
-                    if let Some(route) = self.routes.get_mut(id) {
-                        route.cleanup = Some(cleanup);
-                    }
-                    self.device_error(
-                        id,
-                        "capture_start",
-                        format!("无法采集所选声音来源：{}", capture_error_message(&error)),
-                    );
-                    self.error(
-                        "capture_start",
-                        format!("无法采集所选声音来源：{}", capture_error_message(&error)),
-                    );
-                    return;
-                }
-                let volume = lock(&self.state).volume;
                 let route = self.routes.get_mut(id).unwrap();
                 if let Some(credentials) = sender.credentials() {
                     route.access.credentials = Some(credentials.clone());
                 }
-                route.session = Some(ActiveTarget::spawn(
-                    sender,
-                    id.into(),
-                    route.generation,
-                    volume,
-                    self.events.clone(),
-                ));
-                route.phase = Phase::Streaming;
-                route.message = "正在发送声音".into();
-                route.error = None;
-                self.persist_access(id);
+                route.prepared = Some(*sender);
+                route.phase = Phase::Connecting;
+                route.message = "连接已建立，等待播放准备完成…".into();
+                self.start_prepared(id);
             }
             Work::Connected(Err(error)) => self.connection_error(id, error),
             Work::PairingStarted(Ok(pairing)) => {
@@ -1598,6 +1974,94 @@ impl Actor {
                 "pairing_failed",
                 format!("{} 请重新开始配对。", user_error(&error)),
             ),
+        }
+    }
+
+    fn start_prepared(&mut self, id: &str) {
+        let members = self.related_members(id);
+        let native = self
+            .known_device(id)
+            .is_some_and(|device| device.native_stereo().is_some());
+        if native
+            && (members.len() != 2 || members.iter().any(|member| !self.selected.contains(member)))
+        {
+            self.device_error(
+                id,
+                "stereo_incomplete",
+                "原生组合成员已变化，请重新选择完整组合。".into(),
+            );
+            return;
+        }
+        if members.iter().any(|member| {
+            !self
+                .routes
+                .get(member)
+                .is_some_and(|route| route.wanted && route.prepared.is_some())
+        }) {
+            return;
+        }
+        let mut senders: Vec<_> = members
+            .iter()
+            .map(|member| {
+                let sender = self
+                    .routes
+                    .get_mut(member)
+                    .unwrap()
+                    .prepared
+                    .take()
+                    .unwrap();
+                (member.clone(), sender)
+            })
+            .collect();
+        if native {
+            let mut borrowed: Vec<_> = senders.iter_mut().map(|(_, sender)| sender).collect();
+            if let Err(error) = Sender::prepare_native_group(&mut borrowed) {
+                self.close_prepared(senders);
+                self.device_error(
+                    id,
+                    "native_stereo",
+                    format!("原生立体声协商未完成：{}", user_error(&error)),
+                );
+                return;
+            }
+        }
+        if let Err(error) = self.start_capture() {
+            self.close_prepared(senders);
+            self.stop_all();
+            let message = format!("无法采集所选声音来源：{}", capture_error_message(&error));
+            self.device_error(id, "capture_start", message.clone());
+            self.error("capture_start", message);
+            return;
+        }
+        let volume = lock(&self.state).volume;
+        // Both group members become active in the same actor turn. fan_out
+        // gives them the same first block, sequence and complete stereo PCM.
+        for (member, sender) in senders {
+            let route = self.routes.get_mut(&member).unwrap();
+            route.session = Some(ActiveTarget::spawn(
+                sender,
+                member,
+                route.generation,
+                volume,
+                self.events.clone(),
+            ));
+            route.phase = Phase::Streaming;
+            route.message = "正在发送声音".into();
+            route.error = None;
+        }
+        for member in &members {
+            self.persist_access(member);
+        }
+    }
+
+    fn close_prepared(&mut self, senders: Vec<(String, Sender)>) {
+        for (id, mut sender) in senders {
+            let task = tokio::spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_millis(750), sender.stop()).await;
+            });
+            if let Some(route) = self.routes.get_mut(&id) {
+                route.cleanup = Some(task);
+            }
         }
     }
 
@@ -1643,16 +2107,21 @@ impl Actor {
     }
 
     fn device_error(&mut self, id: &str, code: &str, message: String) {
-        self.cancel_operation(id);
-        if let Some(route) = self.routes.get_mut(id) {
-            route.phase = Phase::Error;
-            route.message = message.clone();
-            route.error = Some(AppError {
-                code: code.into(),
-                message,
-            });
-            route.wanted = false;
-            route.retry_at = None;
+        let members = self.related_members(id);
+        self.fail_members(&members, code, &message);
+    }
+
+    fn fail_members(&mut self, members: &[String], code: &str, message: &str) {
+        for member in members {
+            self.stop_route(member);
+            if let Some(route) = self.routes.get_mut(member) {
+                route.phase = Phase::Error;
+                route.message = message.into();
+                route.error = Some(AppError {
+                    code: code.into(),
+                    message: message.into(),
+                });
+            }
         }
     }
 
@@ -1695,38 +2164,47 @@ impl Actor {
     }
 
     fn retry_stream(&mut self, id: &str, message: String) {
-        let Some(route) = self.routes.get_mut(id) else {
+        let members = self.related_members(id);
+        let retries = members
+            .iter()
+            .filter_map(|member| self.routes.get(member).map(|route| route.retries))
+            .max()
+            .unwrap_or(0);
+        let wanted = members
+            .iter()
+            .all(|member| self.routes.get(member).is_some_and(|route| route.wanted));
+        if !wanted || retries >= 3 {
+            self.fail_members(&members, "stream", &message);
             return;
-        };
-        if route.retries < 3 && route.wanted {
-            route.retries += 1;
-            route.retry_at = Some(Instant::now() + Duration::from_secs(2 * route.retries as u64));
-            route.phase = Phase::Reconnecting;
-            route.message = format!("连接中断，稍后重试（{}/3）。{message}", route.retries);
-            route.error = Some(AppError {
-                code: "reconnecting".into(),
-                message,
-            });
-        } else {
-            self.device_error(id, "stream", message);
+        }
+        let retries = retries + 1;
+        let retry_at = Instant::now() + Duration::from_secs(2 * retries as u64);
+        for member in &members {
+            self.stop_route(member);
+            if let Some(route) = self.routes.get_mut(member) {
+                route.wanted = true;
+                route.retries = retries;
+                route.retry_at = Some(retry_at);
+                route.phase = Phase::Reconnecting;
+                route.message = format!("连接中断，稍后重试（{retries}/3）。{message}");
+                route.error = Some(AppError {
+                    code: "reconnecting".into(),
+                    message: message.clone(),
+                });
+            }
         }
     }
 
     fn target_failed(&mut self, failure: TargetFailure) {
         let id = failure.identity.device_id;
-        let Some(route) = self.routes.get_mut(&id) else {
+        let Some(route) = self.routes.get(&id) else {
             return;
         };
         if route.generation != failure.identity.generation || route.session.is_none() {
             return;
         }
-        if let Some(session) = route.session.take() {
-            route.last_metrics = lock(&session.progress).clone();
-            route.cleanup = Some(tokio::spawn(session.shutdown()));
-        }
-        if self.active_count() == 0 {
-            self.stop_capture();
-        }
+        // A native group is one playback target: a failed member stops and
+        // realigns the entire group, without disturbing unrelated receivers.
         self.retry_stream(&id, failure.message);
     }
 
@@ -1758,7 +2236,9 @@ impl Actor {
         let block = MediaBlock {
             samples: block,
             captured_at: Instant::now(),
+            sequence: self.media_sequence,
         };
+        self.media_sequence = self.media_sequence.wrapping_add(1);
         let mut failed = Vec::new();
         for (id, route) in &self.routes {
             if let Some(session) = &route.session {
@@ -1866,6 +2346,10 @@ impl Actor {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "routing_tests.rs"]
+mod routing_tests;
 
 fn load_access(device_id: &str) -> Option<Access> {
     let data = Zeroizing::new(credentials::load(CREDENTIAL_SERVICE, device_id).ok()??);
@@ -2603,7 +3087,7 @@ mod tests {
         let mut capture = CaptureBuffer::new(now);
         capture.ingest(chunk(0.0, BLOCK_FRAMES, 0), now);
         let actual_before = capture.view(&CaptureInfo::default(), false, now);
-        let mut tone = TestTone::new();
+        let mut tone = TestTone::new(false);
         let mut samples = vec![0.0; TEST_TONE_FRAMES * 2 + BLOCK_FRAMES * 2];
         tone.apply(&mut samples);
         assert_eq!(samples[0], 0.0);

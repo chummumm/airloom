@@ -2,6 +2,8 @@
 
 Airloom is a native Windows audio-routing app. Its interface puts the sound route, the receiving speakers and direct playback control in one compact workspace. The 0.3.0 redesign replaces the full-height left receiver rail and disconnected white cards from 0.2.1.
 
+The 0.4.0 work refines the native button hierarchy and adds an explicit choice between system sound and a selected application's sound. It keeps the established composition, instrument and responsive rules. Final source, native visual evidence and verification boundaries are recorded below.
+
 The visual world is **a silver audio workspace with an inset instrument display**. A low-chroma silver ground, white working surfaces and ink controls form the shell. One dark neutral display contains the actual signal. Blue belongs to real audio and connection state, not navigation or decoration. The display is the product's signature element: an instrument showing this computer's sound, never invented album art or a simulated playing state.
 
 ## Composition
@@ -9,7 +11,7 @@ The visual world is **a silver audio workspace with an inset instrument display*
 | Region | Rule |
 | --- | --- |
 | Native title bar | 48 effective pixels; the Airloom mark and name; native caption controls |
-| Sound route | Compact source selection, route context and session status above the instrument |
+| Sound route | Explicit system/app scope, source selection, route context and session status above the instrument |
 | Main workspace | Instrument first; a bounded receiver panel to its right when space permits |
 | Compact workspace | Receiver panel precedes the instrument so selection is visible on opening |
 | Transport dock | Persistent bottom position, with connection action, stable volume control and local-output mute |
@@ -17,13 +19,15 @@ The visual world is **a silver audio workspace with an inset instrument display*
 | Ordinary panels | White/neutral fill, one subtle boundary, 8 effective pixel radius |
 | Instrument | Distinct dark display, 16 effective pixel radius, 24 effective pixel inset |
 | Transport dock | 12 effective pixel radius, 20 × 16 effective pixel inset |
-| Main controls | Native buttons, 36–44 effective pixels high, 8 effective pixel radius |
+| Main controls | Native buttons: 44-pixel primary actions with 10-pixel radius; 40-pixel secondary and 36-pixel compact/quiet actions with 8-pixel radius |
 
 The normal opening size is 1120 × 780 effective pixels, clamped to the monitor work area. The minimum remains 880 × 680. At 1050 effective pixels of actual root content width, the receiver panel can sit beside the instrument; smaller widths put it above the instrument, keeping speaker selection in the first viewport. The dock remains available while workspace content scrolls. A native `UserControl` owns visual states; HWND physical pixels are not used as the layout breakpoint.
 
 There is no permanently empty navigation rail. Home and settings are the two working views, with explicit actions between them. The window can grow, but essential controls should not spread across an unbounded row or leave the lower half of the window without a purpose. Receiver rows have their own scrolling region when necessary. The compact receiver panel reserves 330 effective pixels. The transport action row reserves 88, and the source detail row reserves 36; loading, unavailable-source and authentication controls do not collapse these working slots.
 
 The volume number retains a fixed 52 effective pixel tabular slot. Dynamic state text and receiver names cannot recenter the workspace. The slider's native thumb outset stays inside its stable slot. Layout and acknowledgement protection remain part of the design, not optional polish.
+
+The source scope selector reserves 134 effective pixels, and the source name takes the remaining flexible column. Source status keeps a separate 154-pixel column. The refresh action reserves 104 pixels so its loading label cannot move its left edge. The primary transport action occupies 152 × 44 effective pixels, with the existing secondary authentication action inside the reserved 88-pixel dock row.
 
 ## Type and object identity
 
@@ -61,6 +65,33 @@ Do not apply the audio hue to navigation, a whole sidebar, every button or a car
 
 No gradients, glass, glows or large resting shadows. Contrast comes from the instrument against the silver workspace, typography and careful alignment. The dark instrument is an intentional audio component, not a dark sidebar on a light app.
 
+## Button hierarchy (0.4.0)
+
+Buttons are native controls with a consistent hierarchy, not independent visual treatments for each page. The existing WinUI templates provide pointer, pressed, disabled and focus behavior. Application resources supply neutral fills and boundaries in light/dark themes; high contrast uses Windows system colors. No replacement control template or ornamental animation is introduced.
+
+| Style | Native base and dimensions | Use |
+| --- | --- | --- |
+| `PrimaryButtonStyle` | `AccentButtonStyle`; minimum height 44, radius 10, padding 18 × 10 | Start/stop the sound route and install an available update |
+| `SecondaryButtonStyle` | `DefaultButtonStyle`; minimum height 40, radius 8, padding 14 × 8 | Test tone, check updates, copy diagnostics and remove saved credentials |
+| `CompactButtonStyle` | Secondary; minimum height 36, padding 12 × 6 | Refresh sound sources and hide/restore individual receivers |
+| `QuietButtonStyle` | Native `SubtleButtonStyle`; minimum height 36, radius 8, padding 12 × 6 | Cancel, manage devices, rediscover and exit |
+| `IconButtonStyle` | Quiet; 36 × 36, no padding | Back and receiver refresh, with an accessible name and tooltip |
+| `ToolbarButtonStyle` | Quiet; minimum width 76, padding 10 × 6 | Settings in the native title region |
+
+Text uses 14-pixel semibold Segoe; adjacent glyphs use 16 pixels with an 8-pixel gap. `ButtonLabelStyle` and `ButtonGlyphStyle` leave foreground inheritance intact so nested content can follow the native disabled state. Quiet actions have no resting outline; secondary actions have a restrained surface and boundary; the route action carries the strongest contrast. Disabled controls remain present where their disappearance would move the dock or source strip.
+
+Native system focus visuals remain enabled. Pointer/press feedback uses the native template's transitions and the existing Windows animation preference. Actual 0.4.0 light/dark, disabled and compact presentation was reviewed in the UI run identified below; dark-theme hover and pressed frames show distinct, stable feedback. UIA `SetFocus` verifies logical focus only. The focus capture does not establish a visible keyboard focus ring.
+
+## Sound-source scope (0.4.0)
+
+The route begins with **系统声音** or **指定应用**, followed by the corresponding source selector. System mode captures the shared playback mix of the chosen Windows output. Application mode captures an explicitly selected process and its children through Windows' process loopback API. It creates no virtual sound card and does not change the application's original output routing. The [capture contract](docs/windows-audio.md) owns platform details.
+
+Switching scope stops the current route and preserves receiver selections. Application mode starts with no app chosen; the person must select one before connecting. Its empty state tells them to let the app play once and refresh the list. Paused sessions can remain selectable. A process that exits never causes another app or the system mix to be selected automatically; a restarted instance requires a new selection. Changing a valid source within the same scope can restart the existing active route while preserving its receivers.
+
+The scope explanation stays beside the selector: a browser instance's tabs may be captured together, because this is a process-tree choice rather than an individual-tab selector. The **电脑静音** control is disabled in application mode and its explanation states that local playback continues. An endpoint-wide mute would affect other applications. Source loading, unavailable-source and recovery text reuse the stable source strip rather than opening a second settings flow.
+
+Multiple selected receivers still receive the complete stereo stream independently. This is distinct from an Apple HomePod stereo pair. The UI must not expose unimplemented pair creation, dissolution or left/right assignment, or imply that an existing Apple pair has been hardware-verified. See [stereo support boundaries](docs/stereo.md).
+
 ## Home states and signal truth
 
 Home answers: **which speakers receive this computer's sound, and is an actual signal being sent?** Source choice and selected receivers remain real engine state. A receiver can be available, selected, connecting, waiting for authentication, streaming, reconnecting, offline or failed. One receiver awaiting a password cannot conceal another receiver's session.
@@ -87,17 +118,25 @@ Focus, keyboard behavior, accessible names and status announcements remain nativ
 
 ## Verification
 
-Native layout, theme and active-waveform visual review passed for source `e80e6f9af8707216277fa8396dd351eaf33fad73` in [CI run 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973). The reviewed evidence comes from the actual WinUI executable, not a web rendering. The source-error/empty home was checked at 880 × 680, 1100 × 800 and 1600 × 1000; home and settings were checked in light and dark themes. The compact view exposes receivers before scrolling, the dock stays available, text fits its working slots, and the enabled native switches now use the intended monochrome resources.
+The 0.4.0 source `7c5133e006ec0be13017ec21084680518c95082f` passed both jobs and all gates in [CI 39583891772](https://github.com/chummumm/airloom/actions/runs/39583891772), including the Windows build/package, native UI smoke, updater lifecycle and real process-loopback API checks. The visual review used actual screenshots from that run's native artifact.
 
-The run's `native-smoke.json` records successful volume geometry and value retention at 0/9/10/99/100 across all three sizes, actual `SendInput` drag, settings/back, read-only update checking, restricted diagnostic copy and both theme selections. The native fixture checks also passed populated volume retention, the password dialog, cancelling only the challenged receiver and `active_waveform_mode_verified=true`. The animation-enabled 64-bar envelope is visible in both themes, stays inside the instrument guides and leaves the caption, meters and title unobscured.
+**Visual verdict:** the final light/dark application home and settings, native unavailable-output layout, compact populated view and dark button-state frames have no new blocking clipping, obscured action or unreadable state. Source scope and application names fit their reserved slots. The 64-bar envelope stays inside the instrument and leaves its labels and meters clear. At 880 × 680 the first two receiver rows and fixed dock are visible before scrolling; the management footer can meet the ordinary outer scroll boundary, as in the previous baseline.
 
-The `fixture-*` screenshots use the same WinUI executable with a CI-only replacement core DLL in an isolated temporary copy. They show three synthetic receivers, two selected streaming states, a third receiver's password challenge, populated settings and the compact view. Device names, levels, counts and authentication requests in those images are test data. The shipped core is checked for an unchanged hash; the replacement DLL and synthetic data are not distributed. These images establish presentation and interaction, not real discovery, AirPlay transport or acoustic output. No physical HomePod was connected to CI.
+The native proof records volume geometry and retention at 0/9/10/99/100 across 880 × 680, 1100 × 800 and 1600 × 1000, actual `SendInput` drag, settings/back, update checking, restricted diagnostic copy and both themes. The application fixture verifies explicit selection, stop on scope change, refresh retaining selection, disabled local mute and the active waveform. The primary button retains its 44-pixel height and position under actual pointer input; dark normal, hover and pressed frames show distinct feedback.
 
-**Release verification passed:** both CI jobs and all release gates passed in run 39573924973, including the independent updater lifecycle checks. The earlier window-caption readiness race was corrected in the test harness; no product lifecycle change was needed. The normal-animation fixture setting is applied only to the disposable CI desktop and restored afterward.
+UIA `SetFocus` and `HasKeyboardFocus` verify **logical focus**. The focus frame does not show a visible change around the button and is not evidence of a keyboard focus ring. Native focus templates remain enabled. Password-dialog opening and cancelling only the challenged receiver passed UIA interaction checks. The final `fixture-auth-dark.png` frame shows the home view rather than the modal, so it is not used as visual proof of the password dialog.
 
-Reduced-motion presentation was also visually reviewed in [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. The retained [light](docs/evidence/fixture-reduced-motion-home-light.png) and [dark](docs/evidence/fixture-reduced-motion-home-dark.png) captures show the explanatory baseline with numeric levels and meters retained. That earlier run passed UI smoke but failed the independent updater readiness test; it is reduced-motion evidence, not the final release gate.
+Populated `fixture-*` frames use the same WinUI executable with a CI-only replacement core DLL in an isolated temporary copy. Source applications, receiver identities, levels and authentication challenges are synthetic. The smoke checks the shipped core's hash remains unchanged; the replacement and its data are not distributed. The awaiting-selection frame contains three available synthetic applications; empty and ended-app screens were not visually verified.
 
-No high-contrast screenshot or complete receiver error/reconnect matrix was reviewed in this run. The [saved resource calculation](docs/design/contrast-check.json) checks 54 application-owned text/surface pairs, including the instrument, with a minimum ratio of 4.501:1. These calculations do not certify native rendering or high-contrast behavior. The user's 0.2.1 listening result remains a separate, attributed hardware observation.
+The separate Windows process-loopback test uses an owned process with no audio stream. It passed activation, stale identity rejection, finite exact-zero received samples, mute refusal, bounded stop, client restart and process-exit handling. This is API/lifecycle evidence. It does not establish isolation between two simultaneously playing applications, browser child-process behavior or audible HomePod playback. No physical HomePod is connected to CI. Native stereo pairs and multiroom synchronization retain their hardware-verification boundaries.
+
+High-contrast rendering and the complete receiver error/reconnect matrix were not visually verified. The [saved resource calculation](docs/design/contrast-check.json) checks 54 application-owned text/surface pairs, including the instrument, with a minimum ratio of 4.501:1; it is not a rendered accessibility audit of all native control states.
+
+### Historical baseline and reduced motion
+
+The 0.3.0 shell passed [CI 39573924973](https://github.com/chummumm/airloom/actions/runs/39573924973), source `e80e6f9af8707216277fa8396dd351eaf33fad73`. It remains a historical regression baseline rather than evidence for the new application scope.
+
+The separately retained reduced-motion [light](docs/evidence/fixture-reduced-motion-home-light.png) and [dark](docs/evidence/fixture-reduced-motion-home-dark.png) captures come from [run 39572112414](https://github.com/chummumm/airloom/actions/runs/39572112414), source `f2a914feec150f56e98e0f461b5088d3e54616a3`. They show the explanatory baseline with numeric levels and meters retained. That earlier run passed UI smoke but failed an independent updater readiness test subsequently corrected in the test harness; these files are reduced-motion evidence, not the 0.4.0 release gate.
 
 ## Direction provenance
 
@@ -106,3 +145,5 @@ The taste app-screen draw selected **achromatic-ledger**, seed **192244604**, on
 One shell redraw selected **no-sidebar**. The initial open-plane navigation sidebar had no real navigation destinations in this small app and reproduced the rejected full-height column. The drawn greeting/count-tile pattern was adapted to the native audio job: no greeting, vanity counters or invented content. The receiver panel is an operational object list, not navigation. These adaptations preserve the style's monochrome chrome and one data hue.
 
 The exact draw is saved in [app-direction.json](docs/design/app-direction.json). The surface brief records the incumbent critique, available skill guidance and evidence boundaries.
+
+The 0.4.0 button work is a component refinement within this incumbent direction. No new taste draw or additional shell redraw was performed.

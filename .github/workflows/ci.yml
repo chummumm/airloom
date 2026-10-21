@@ -31,6 +31,8 @@ jobs:
       - run: cargo test --workspace --locked
       - name: Verify updater version and checksum policy
         run: |
+          python3 scripts/check-release-version.py --self-test
+          python3 scripts/check-release-version.py --check-files
           g++ -std=c++20 -Wall -Wextra -Werror native/Updater/UpdatePolicyTests.cpp -o /tmp/airloom-update-policy-tests
           /tmp/airloom-update-policy-tests
       - name: Verify ALAC with an independent decoder
@@ -68,6 +70,8 @@ jobs:
           New-Item -ItemType Directory -Force artifacts | Out-Null
           cargo test --workspace --locked process_loopback_activation_and_lifetime -- --ignored --nocapture 2>&1 | Tee-Object -FilePath artifacts/process-capture-api.txt
           if ($LASTEXITCODE -ne 0) { throw 'Real Windows process capture lifecycle verification failed.' }
+          cargo test --workspace --locked source_notifications_start_refresh_and_stop -- --ignored --nocapture 2>&1 | Tee-Object -FilePath artifacts/source-notifications-api.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Real Windows source notification lifecycle verification failed.' }
       - name: Build native app
         id: native_build
         shell: pwsh
