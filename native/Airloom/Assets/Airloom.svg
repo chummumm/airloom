@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#343044"/>
+      <stop offset="1" stop-color="#191923"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="1" x2="1" y2="0">
+      <stop stop-color="#8DE1CF"/>
+      <stop offset="1" stop-color="#C3B4FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="62" fill="url(#shell)"/>
+  <rect x="9" y="9" width="238" height="238" rx="61" fill="none" stroke="#FFFFFF" stroke-opacity=".14" stroke-width="2"/>
+  <g fill="url(#signal)">
+    <rect x="61" y="99" width="24" height="58" rx="12"/>
+    <rect x="116" y="54" width="24" height="148" rx="12"/>
+    <rect x="171" y="78" width="24" height="100" rx="12"/>
+  </g>
+</svg>
