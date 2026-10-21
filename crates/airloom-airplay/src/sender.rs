@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     io::Cursor,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, Weak,
@@ -311,51 +311,10 @@ impl Sender {
         };
         let transport = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
         let control = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
-        let device_id = connection
-            .identity
-            .as_bytes()
-            .chunks(2)
-            .map(|part| std::str::from_utf8(part).unwrap())
-            .collect::<Vec<_>>()
-            .join(":");
-        let mut session = Dictionary::new();
-        session.insert("deviceID".into(), Value::String(device_id.clone()));
-        session.insert("macAddress".into(), Value::String(device_id));
-        session.insert(
-            "sessionUUID".into(),
-            Value::String(connection.session_uuid.to_uppercase()),
-        );
-        session.insert("name".into(), Value::String("Airloom".into()));
-        session.insert("model".into(), Value::String("Airloom1,1".into()));
-        session.insert("sourceVersion".into(), Value::String("550.10".into()));
-        session.insert("isMultiSelectAirPlay".into(), Value::Boolean(true));
-        session.insert("groupContainsGroupLeader".into(), Value::Boolean(false));
-        session.insert("senderSupportsRelay".into(), Value::Boolean(false));
-        session.insert(
-            "timingProtocol".into(),
-            Value::String(if ptp { "PTP" } else { "NTP" }.into()),
-        );
-        session.insert("timingPort".into(), number(timing.port as u64));
-        if ptp {
-            let mut peer = Dictionary::new();
-            peer.insert("ClockID".into(), number(identity));
-            peer.insert(
-                "Addresses".into(),
-                Value::Array(vec![Value::String(local.to_string())]),
-            );
-            session.insert("timingPeerInfo".into(), Value::Dictionary(peer.clone()));
-            session.insert(
-                "timingPeerList".into(),
-                Value::Array(vec![Value::Dictionary(peer)]),
-            );
-        }
-        let session_response = exchange_plist(
-            &mut connection,
-            "SETUP",
-            Value::Dictionary(session),
-            "session SETUP",
-        )
-        .await?;
+        let session =
+            build_session_setup(identity, &connection.session_uuid, local, ptp, timing.port);
+        let session_response =
+            exchange_plist(&mut connection, "SETUP", session, "session SETUP").await?;
         let event_port = optional_port(&session_response, "eventPort")?;
         // Connect the receiver event socket before RECORD. Do not spawn detached
         // workers until the entire setup succeeds, so failed setup has no leaks.
@@ -660,6 +619,80 @@ impl Sender {
 fn number(value: u64) -> Value {
     Value::Integer(value.into())
 }
+
+fn build_session_setup(
+    identity: u64,
+    session_uuid: &str,
+    local: IpAddr,
+    ptp: bool,
+    timing_port: u16,
+) -> Value {
+    // deviceID follows the 64-bit DACP identity. macAddress is a separate,
+    // six-octet field; sending the eight-octet device ID there is malformed.
+    let octets = identity
+        .to_be_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>();
+    let device_id = octets.join(":");
+    let mac_address = octets[..6].join(":");
+    let mut session = Dictionary::new();
+    session.insert("deviceID".into(), Value::String(device_id));
+    session.insert("macAddress".into(), Value::String(mac_address));
+    session.insert(
+        "sessionUUID".into(),
+        Value::String(session_uuid.to_uppercase()),
+    );
+    session.insert("name".into(), Value::String("Airloom".into()));
+    session.insert("model".into(), Value::String("Airloom1,1".into()));
+    session.insert("sourceVersion".into(), Value::String("550.10".into()));
+    session.insert("isMultiSelectAirPlay".into(), Value::Boolean(true));
+    session.insert("groupContainsGroupLeader".into(), Value::Boolean(false));
+    session.insert("senderSupportsRelay".into(), Value::Boolean(false));
+    session.insert(
+        "timingProtocol".into(),
+        Value::String(if ptp { "PTP" } else { "NTP" }.into()),
+    );
+    if ptp {
+        let mut peer = Dictionary::new();
+        peer.insert("ID".into(), Value::String(timing_peer_uuid()));
+        peer.insert("DeviceType".into(), number(0));
+        // PTP's identity is a 64-bit bit pattern, but the plist field is signed.
+        // A positive u64 above i64::MAX would be serialized as a 128-bit integer.
+        peer.insert("ClockID".into(), Value::Integer((identity as i64).into()));
+        peer.insert(
+            "SupportsClockPortMatchingOverride".into(),
+            Value::Boolean(false),
+        );
+        peer.insert(
+            "Addresses".into(),
+            Value::Array(vec![Value::String(local.to_string())]),
+        );
+        session.insert("timingPeerInfo".into(), Value::Dictionary(peer.clone()));
+        session.insert(
+            "timingPeerList".into(),
+            Value::Array(vec![Value::Dictionary(peer)]),
+        );
+    } else {
+        session.insert("timingPort".into(), number(timing_port as u64));
+    }
+    Value::Dictionary(session)
+}
+
+fn timing_peer_uuid() -> String {
+    let mut bytes = crypto::random::<16>();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let value = hex::encode_upper(bytes);
+    format!(
+        "{}-{}-{}-{}-{}",
+        &value[..8],
+        &value[8..12],
+        &value[12..16],
+        &value[16..20],
+        &value[20..]
+    )
+}
 fn decode_plist(bytes: &[u8]) -> Result<Value> {
     Value::from_reader(Cursor::new(bytes)).map_err(|_| protocol("invalid receiver plist"))
 }
@@ -822,4 +855,114 @@ fn spawn_retransmit(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod session_setup_contract_tests {
+    use super::*;
+
+    const ID: u64 = 0xf842_885f_7175_0008;
+    const SESSION: &str = "9dff3e7a-ec6d-4fa7-8666-b416d376897d";
+
+    fn setup(ptp: bool) -> Value {
+        build_session_setup(ID, SESSION, "192.0.2.25".parse().unwrap(), ptp, 64123)
+    }
+
+    // These wire constraints come from independent senders, not our mock:
+    // OwnTone src/outputs/airplay.c payload_make_setup_session_ptp;
+    // Music Assistant src/ap2_client.c ap2_make_timing_peer / native SETUP.
+    #[test]
+    fn session_setup_contract_distinguishes_device_id_from_mac_address() {
+        for ptp in [false, true] {
+            let value = setup(ptp);
+            let session = value.as_dictionary().unwrap();
+            assert_eq!(
+                session["deviceID"].as_string(),
+                Some("F8:42:88:5F:71:75:00:08")
+            );
+            assert_eq!(session["macAddress"].as_string(), Some("F8:42:88:5F:71:75"));
+        }
+    }
+
+    #[test]
+    fn session_setup_contract_ptp_has_complete_peer_and_no_ntp_port() {
+        let value = setup(true);
+        let session = value.as_dictionary().unwrap();
+        assert_eq!(session["timingProtocol"].as_string(), Some("PTP"));
+        assert!(
+            !session.contains_key("timingPort"),
+            "PTP does not advertise an NTP timingPort"
+        );
+        let info = session["timingPeerInfo"].as_dictionary().unwrap();
+        let id = info["ID"].as_string().unwrap();
+        assert_eq!(id.len(), 36);
+        assert_eq!(
+            id.split('-').map(str::len).collect::<Vec<_>>(),
+            [8, 4, 4, 4, 12]
+        );
+        assert!(id
+            .bytes()
+            .all(|byte| byte == b'-' || byte.is_ascii_hexdigit()));
+        assert_eq!(info["DeviceType"].as_signed_integer(), Some(0));
+        assert_eq!(
+            info["SupportsClockPortMatchingOverride"].as_boolean(),
+            Some(false)
+        );
+        assert_eq!(
+            info["Addresses"],
+            Value::Array(vec![Value::String("192.0.2.25".into())])
+        );
+        assert_eq!(info.len(), 5);
+        let peers = session["timingPeerList"].as_array().unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(
+            peers[0], session["timingPeerInfo"],
+            "both peer fields describe the same clock"
+        );
+    }
+
+    #[test]
+    fn session_setup_contract_high_bit_clock_id_uses_signed_eight_byte_binary() {
+        let value = setup(true);
+        let mut binary = Vec::new();
+        value.to_writer_binary(&mut binary).unwrap();
+        // The complete serialized request must contain an eight-byte integer
+        // object (0x13). The old u64 conversion emitted 0x14 + 16 bytes instead.
+        let bytes = ID.to_be_bytes();
+        let mut objects = 0;
+        for (position, window) in binary.windows(bytes.len()).enumerate() {
+            if window == bytes {
+                assert!(position > 0);
+                assert_eq!(
+                    binary[position - 1],
+                    0x13,
+                    "ClockID must be encoded as signed 64-bit, never 128-bit"
+                );
+                objects += 1;
+            }
+        }
+        assert!(
+            objects > 0,
+            "ClockID bit pattern must survive serialization"
+        );
+        let decoded = Value::from_reader(Cursor::new(binary)).unwrap();
+        let session = decoded.as_dictionary().unwrap();
+        let clock = &session["timingPeerInfo"].as_dictionary().unwrap()["ClockID"];
+        assert_eq!(clock.as_signed_integer(), Some(-557_733_460_333_756_408));
+        assert_eq!(clock.as_signed_integer().unwrap() as u64, ID);
+        assert_eq!(
+            session["timingPeerList"].as_array().unwrap()[0],
+            session["timingPeerInfo"]
+        );
+    }
+
+    #[test]
+    fn session_setup_contract_ntp_has_only_its_timing_port() {
+        let value = setup(false);
+        let session = value.as_dictionary().unwrap();
+        assert_eq!(session["timingProtocol"].as_string(), Some("NTP"));
+        assert_eq!(session["timingPort"].as_unsigned_integer(), Some(64123));
+        assert!(!session.contains_key("timingPeerInfo"));
+        assert!(!session.contains_key("timingPeerList"));
+    }
 }

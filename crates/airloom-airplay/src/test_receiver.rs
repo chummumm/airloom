@@ -298,7 +298,26 @@ async fn serve_media(
     }
     let setup = decode(&session.2);
     let dictionary = setup.as_dictionary().unwrap();
+    // Independent wire contract: deviceID is 64-bit, macAddress is 48-bit.
+    assert_eq!(
+        dictionary["deviceID"]
+            .as_string()
+            .unwrap()
+            .split(':')
+            .count(),
+        8
+    );
+    assert_eq!(
+        dictionary["macAddress"]
+            .as_string()
+            .unwrap()
+            .split(':')
+            .count(),
+        6
+    );
     assert_eq!(dictionary["timingProtocol"].as_string(), Some("NTP"));
+    assert!(!dictionary.contains_key("timingPeerInfo"));
+    assert!(!dictionary.contains_key("timingPeerList"));
     let timing = SocketAddr::new(
         peer.ip(),
         dictionary["timingPort"].as_unsigned_integer().unwrap() as u16,

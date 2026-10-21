@@ -1,4 +1,4 @@
-name: Publish verified preview
+name: Publish verified release
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-preview
+  group: publish-release
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify build and publish immutable preview
+      - name: Verify build and publish Latest release
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
@@ -43,8 +43,19 @@ jobs:
           print(run['head_sha'])
           PY
           )
+          gh api "repos/$REPOSITORY/contents/Cargo.toml?ref=$BUILD_SHA" --jq .content | base64 --decode > /tmp/airloom-release-cargo.toml
+          APP_VERSION=$(python3 - <<'PY'
+          import tomllib
+          with open('/tmp/airloom-release-cargo.toml', 'rb') as source:
+              print(tomllib.load(source)['workspace']['package']['version'])
+          PY
+          )
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a stable numeric version.'; exit 1; }
+          gh api "repos/$REPOSITORY/contents/docs/releases/$APP_VERSION.md?ref=$BUILD_SHA" --jq .content | base64 --decode > /tmp/airloom-release-notes.md
+          test -s /tmp/airloom-release-notes.md
+          INSTALLER="Airloom-$APP_VERSION-setup-x64.exe"
           gh run download "$BUILD_RUN_ID" --repo "$REPOSITORY" --name airloom-windows-x64 --dir release-assets
-          test -s release-assets/dist/Airloom-0.1.0-setup-x64.exe
+          test -s "release-assets/dist/$INSTALLER"
           test -s release-assets/dist/airloom-windows-x64-portable.zip
           test -s release-assets/artifacts/native-smoke.json
           python3 - <<'PY'
@@ -52,12 +63,12 @@ jobs:
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
               assert json.load(source)['result'] == 'window-opened', 'Native startup check is missing.'
           PY
-          (cd release-assets/dist && sha256sum Airloom-0.1.0-setup-x64.exe airloom-windows-x64-portable.zip > SHA256SUMS.txt)
-          gh release create v0.1.0-preview.1 \
-            --repo "$REPOSITORY" --target "$BUILD_SHA" --prerelease \
-            --title 'Airloom 0.1.0 Preview 1' \
-            --notes-file docs/releases/0.1.0-preview.1.md \
-            release-assets/dist/Airloom-0.1.0-setup-x64.exe \
+          (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
+          gh release create "v$APP_VERSION" \
+            --repo "$REPOSITORY" --target "$BUILD_SHA" --latest \
+            --title "Airloom $APP_VERSION" \
+            --notes-file /tmp/airloom-release-notes.md \
+            "release-assets/dist/$INSTALLER" \
             release-assets/dist/airloom-windows-x64-portable.zip \
             release-assets/dist/SHA256SUMS.txt \
             release-assets/artifacts/native-window.png \

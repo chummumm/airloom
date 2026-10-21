@@ -100,6 +100,31 @@ event worker authenticates incoming messages and acknowledges them. It does
 not currently translate Siri/touch remote commands into Windows playback
 actions or implement MediaRemote now-playing metadata.
 
+### Session SETUP field compatibility
+
+Physical HomePod testing reported status 400 at the first session SETUP. Review
+against the current OwnTone and Music Assistant sender implementations found
+incorrect fields in Airloom's request [5,6]. The corrected request preserves
+the eight-octet `deviceID` and 64-bit DACP/PTP identity, but sends a separate
+six-octet `macAddress`. PTP `ClockID` uses a signed 64-bit plist integer with the
+same underlying bits: for example, `0xf842885f71750008` is serialized as
+`-557733460333756408`. Passing that value as an unsigned integer to `plist`
+would instead produce a 16-byte integer, incompatible with the field's shape.
+
+PTP requests include `ID` (a UUID), `DeviceType`, `ClockID`,
+`SupportsClockPortMatchingOverride`, and `Addresses` in `timingPeerInfo`.
+`timingPeerList` is also a **request** field in both reference implementations;
+it contains the same peer dictionary, including the same UUID. `timingPort`
+belongs only to the NTP request. NTP requests omit both PTP peer fields.
+
+Regression tests were run against the old construction first and failed on
+the malformed MAC, 128-bit clock integer, and PTP/NTP field mixture. They now
+check the full serialized plist, its integer marker (`0x13`, eight bytes),
+identity round trips, and mutually exclusive timing fields. The loopback
+receiver additionally checks the identity lengths in the actual encrypted
+request. These checks establish the corrected protocol representation;
+successful playback on the reported HomePod still requires a hardware retest.
+
 Audio SETUP requests type 96, ALAC format `0x40000`, two 16-bit channels at
 44.1 kHz, and 352 frames per packet. The small original ALAC encoder emits the
 format's uncompressed lossless frames. It does not vendor or link Apple's ALAC
@@ -160,6 +185,9 @@ The ordinary Rust tests include:
   connection, and rejection of a forged accessory signature.
 - Rejection of an incorrect password before audio setup, plus synthetic gPTP
   master and receiver-following exchanges.
+- Reference-derived session SETUP constraints: eight-octet device identity,
+  six-octet MAC, signed 64-bit clock encoding even when its high bit is set,
+  identical PTP peer descriptions, and separate PTP/NTP field sets.
 
 Run `cargo test -p airloom-airplay`. Tests open loopback sockets; restricted
 sandboxes must allow those sockets. The separate test
@@ -211,3 +239,11 @@ notices remain applicable.
    [RustCrypto SRP](https://github.com/RustCrypto/PAKEs/tree/master/srp):
    SRP group/arithmetic and HTTP Digest. HAP's proof transcript is constructed
    explicitly because the selected SRP crate's legacy convenience proof differs.
+5. [OwnTone session SETUP construction](https://github.com/owntone/owntone-server/blob/3aee59740c715d40df8de87e06b7b91badfbe20b/src/outputs/airplay.c):
+   `device_id_colon_make`, interface MAC formatting, and
+   `payload_make_setup_session_ptp`, including its explicit signed `ClockID`
+   example and both peer request fields.
+6. [Music Assistant native sender construction](https://github.com/music-assistant/airplay-cli/blob/1701bc25e9d303b42532569f624b64c0d0afb1f6/src/ap2_client.c):
+   distinct eight-byte device ID and six-byte MAC, `ap2_make_timing_peer`, and
+   separate PTP/NTP session SETUP builders. These wire-format facts informed
+   the fix; no upstream implementation code was incorporated.
