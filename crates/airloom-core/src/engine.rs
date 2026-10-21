@@ -862,7 +862,10 @@ impl Actor {
             Ok(sources) => (sources, None),
             Err(error) => (
                 Vec::new(),
-                Some(format!("无法读取声音来源：{}", capture_error(&error))),
+                Some(format!(
+                    "无法读取声音来源：{}",
+                    capture_error_message(&error)
+                )),
             ),
         };
         let active = self.running;
@@ -1551,11 +1554,11 @@ impl Actor {
                     self.device_error(
                         id,
                         "capture_start",
-                        format!("无法采集所选声音来源：{}", capture_error(&error)),
+                        format!("无法采集所选声音来源：{}", capture_error_message(&error)),
                     );
                     self.error(
                         "capture_start",
-                        format!("无法采集所选声音来源：{}", capture_error(&error)),
+                        format!("无法采集所选声音来源：{}", capture_error_message(&error)),
                     );
                     return;
                 }
@@ -1803,7 +1806,7 @@ impl Actor {
             let muted = lock(&self.state).mute_local;
             let mut diagnostic = capture.buffer.view(&capture.info, muted, now);
             self.stop_all();
-            let message = format!("音频采集已中断：{}", capture_error(&error));
+            let message = format!("音频采集已中断：{}", capture_error_message(&error));
             self.error("capture", message.clone());
             diagnostic.state = "error";
             diagnostic.message = message;
@@ -1869,7 +1872,7 @@ fn load_access(device_id: &str) -> Option<Access> {
     serde_json::from_slice(&data).ok()
 }
 
-fn capture_error(error: &airloom_capture::CaptureError) -> String {
+fn capture_error_message(error: &airloom_capture::CaptureError) -> String {
     match error {
         airloom_capture::CaptureError::ApplicationExited => {
             "所选应用已退出，请重新打开应用并刷新列表后再选择。".into()
