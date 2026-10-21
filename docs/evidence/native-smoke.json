@@ -1,0 +1,11 @@
+{
+    "distribution":  "portable-zip",
+    "returned_home":  true,
+    "update_check_verified":  true,
+    "process":  "Airloom.exe",
+    "update_status":  "当前已是最新版本。",
+    "note":  "Real UI launch from a clean extracted distribution; settings and the live GitHub metadata update check verified using UI Automation, then returned home. No installer was downloaded and no physical HomePod was connected.",
+    "hwnd":  524592,
+    "result":  "window-opened",
+    "settings_verified":  true
+}
