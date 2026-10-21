@@ -61,7 +61,11 @@ jobs:
           python3 - <<'PY'
           import json
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
-              assert json.load(source)['result'] == 'window-opened', 'Native startup check is missing.'
+              proof = json.load(source)
+          assert proof['result'] == 'window-opened', 'Native startup check is missing.'
+          assert proof.get('settings_verified') is True, 'Native settings check is missing.'
+          assert proof.get('update_check_verified') is True, 'Live update check is missing.'
+          assert proof.get('returned_home') is True, 'Native settings navigation check is missing.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
           gh release create "v$APP_VERSION" \

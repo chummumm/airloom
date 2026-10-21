@@ -1,10 +1,9 @@
 # AirPlay sender: implementation and verification
 
 Airloom contains an original Rust sender in `crates/airloom-airplay`. It targets
-one AirPlay 2 audio receiver using the realtime, encrypted type-96 transport.
+an AirPlay 2 audio receiver per `Sender`, using the realtime, encrypted type-96 transport. The application fans one capture stream out to independently paced senders.
 The implementation is experimental. Its tests use synthetic receivers and an
-independent audio decoder; **no physical HomePod, HomePod mini, Apple TV, stereo
-pair, or audioOS version has been validated by this project yet**. A successful
+independent audio decoder. A user confirmed that 0.1.1 connects to a HomePod, captures nonzero audio and sends packets, but reported no audible output. **Audible playback on physical HomePod, HomePod mini, Apple TV, stereo pairs and specific audioOS versions remains unconfirmed.** A successful
 RTSP exchange, a PTP exchange, and a UDP send are observable protocol events;
 none proves that a speaker produced sound.
 
@@ -18,8 +17,11 @@ call. It accumulates 352 frames per packet and owns the media pacing clock.
 
 The caller owns its bounded capture queue. It must supply zero samples when
 capture is idle; a period with no `send_pcm` calls is not implicitly silence.
-The engine may submit 441 frames at a time and await this method without adding
-a second periodic scheduler. A delay exceeding 200 ms discards the pending old
+Each receiver worker submits 441-frame blocks and awaits this method. The
+application captures once, produces a shared block every 10 ms, and sends it to
+independent bounded queues. It never awaits one receiver inside the producer or
+splits the capture queue between consumers. A full queue or a block older than
+200 ms triggers recovery for that receiver only. A delay exceeding 200 ms discards the pending old
 audio, advances the RTP position by the missed duration, and establishes a new
 anchor. Sequence numbers and cryptographic nonces continue; the `reanchors`
 counter records that event. Audible recovery after a machine suspension remains
@@ -32,7 +34,9 @@ silently continue on a desynchronized control stream. The control request
 timeout is six seconds. Do not wrap individual requests in a shorter external
 timeout and then reuse the same session. `stop` attempts TEARDOWN and releases
 workers even if the receiver does not answer. Dropping a sender also releases
-its workers and sockets.
+its receiver-specific workers and sockets. The shared PTP listener intentionally
+retains UDP 319/320 for the application lifetime, independently of individual
+receiver sessions; a stopped receiver only removes its own routing entry.
 
 ## Discovery and authentication
 
@@ -158,9 +162,42 @@ and no `pgid`/`tsid` is followed as the clock master, matching the documented
 upstream observation [1]. Other sessions advertise the sender's clock. This is
 a deliberately narrow heuristic, not a general IEEE 1588 clock-management
 implementation. A followed clock applies measured two-step offsets and E2E
-path-delay estimates. PTP connect waits for three actual exchanges, with a
-five-second bound; missing clock exchanges are errors, not synthetic success.
+path-delay estimates. Version detection accepts `osvers/ov` and `srcvers/vs`
+aliases, with an explicit OS version taking precedence. A receiver-owned clock
+is learned before session SETUP and used consistently in its peer description
+and later playback announcements. PTP connect waits for three actual exchanges
+and a valid offset when following, with a five-second bound; Announce/grant
+messages alone do not establish clock readiness.
 A later five-second timing stall is also surfaced.
+
+### PTP playback announcement correction in 0.2.0
+
+A real-device report showed valid capture levels and increasing send counters,
+but no sound. Two old-code regressions were reproduced against an independent
+wire capture and receiver calculation. A 28-byte type-215 announcement must
+encode its RTCP length as `0x0006`, which was previously zero [7]. The PTP RTP
+positions must not reuse the NTP layout: the independent receiver anchors
+`frame_1 - 11025` at the announced PTP nanoseconds [8]. The default 88200-frame
+receive window gives the captured 77175-frame difference between the two
+positions. Playback lead and receive window are separate; a longer requested
+lead also expands the advertised maximum receive window. Arithmetic wraps at
+the 32-bit RTP boundary.
+
+The regression compares all 28 bytes with OwnTone's published Spotify iOS
+capture, computes sample playback time using Shairport Sync's receiver rule,
+and checks actual decrypted nonzero PCM across a full synthetic PTP session.
+This confirms those protocol defects are corrected; it does not establish an
+audible result on the user's HomePod.
+
+### Multiple receiver clocks
+
+One shared hub binds UDP 319/320 per local interface and supplies a consistent
+local clock identity/timebase. It routes bounded packets by remote IP. Each
+receiver independently tracks its chosen master, offset and exchanges. Stopping
+one sender leaves the other route running. The fixed listeners remain bound
+until process exit, or until a later connection replaces a stale hub after its
+owning runtime has been destroyed. Regression tests exercise both simultaneous
+receivers and full runtime destruction/recreation on the same interface.
 
 Sync announcements use one RTP-to-monotonic-clock anchor, rather than moving
 the receiver's timeline whenever a packet is scheduled late. PTP announcements
@@ -208,7 +245,9 @@ Native HomePod stereo groups, multiroom scheduling, buffered type-103 streams,
 legacy AirPlay 1, remote playback controls, and automatic multi-address/interface
 fallback are outside this initial implementation. IPv4 is preferred; scoped
 IPv6 link-local addresses are not represented by the current discovery API.
-One active sender owns PTP ports; there is no shared multi-session clock daemon.
+The shared listener supports multiple independent receivers. Native group
+formation and acoustically calibrated, sample-accurate synchronization remain
+outside the current compatibility claim.
 
 ## Sources and licensing
 
@@ -247,3 +286,9 @@ notices remain applicable.
    distinct eight-byte device ID and six-byte MAC, `ap2_make_timing_peer`, and
    separate PTP/NTP session SETUP builders. These wire-format facts informed
    the fix; no upstream implementation code was incorporated.
+
+7. [OwnTone PTP wire format and captured Spotify iOS packet](https://github.com/owntone/owntone-server/blob/3aee59740c715d40df8de87e06b7b91badfbe20b/src/outputs/rtp_common.c):
+   28-byte type-215 length, RTP fields and clock identity; the published capture
+   supplies a fixed expected packet independent of Airloom's constructor.
+8. [Shairport Sync AirPlay 2 control receiver](https://github.com/mikebrady/shairport-sync/blob/cf6998daa1876c5a8f97128a960c8afc0e731841/rtp.c):
+   receiver-side PTP sample anchor, 11025-frame offset and receive-window math.

@@ -105,7 +105,8 @@ namespace
         NetworkCheck(WinHttpQueryHeaders(request.value, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX, &status, &length, WINHTTP_NO_HEADER_INDEX));
         if (status == 403 || status == 429) throw winrt::hresult_error(E_FAIL, L"GitHub 暂时限制了请求频率，请稍后再检查更新。");
-        if (status != 200) throw winrt::hresult_error(E_FAIL, L"更新服务器返回 HTTP " + winrt::to_hstring(status) + L"，请稍后重试。");
+        if (status != 200) throw winrt::hresult_error(E_FAIL,
+            winrt::hstring(L"更新服务器返回 HTTP " + std::to_wstring(status) + L"，请稍后重试。"));
 
         // GitHub redirects release files to its asset CDN. Keep HTTPS and host
         // validation after that redirect, without weakening certificate checks.

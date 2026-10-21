@@ -25,6 +25,8 @@ const CREDENTIAL_SERVICE: &str = "Airloom";
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(4);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
 const BLOCK_FRAMES: usize = 441;
+const BLOCK_PERIOD: Duration = Duration::from_millis(10);
+const MAX_CATCH_UP_BLOCKS: usize = 8;
 const MAX_SELECTED_DEVICES: usize = 8;
 const MEDIA_QUEUE_BLOCKS: usize = 16;
 const MEDIA_MAX_AGE: Duration = Duration::from_millis(200);
@@ -296,7 +298,52 @@ struct CaptureSession {
     info: CaptureInfo,
     buffer: CaptureBuffer,
     started: Instant,
-    ready_at: Instant,
+    schedule: MediaSchedule,
+}
+
+/// The timer only wakes the actor. Sample production advances from this
+/// monotonic deadline, so a late Windows wakeup cannot slow the media clock.
+struct MediaSchedule {
+    next_due: Instant,
+}
+
+struct ProductionPlan {
+    blocks: usize,
+    discard_backlog: bool,
+}
+
+impl MediaSchedule {
+    fn new(first_due: Instant) -> Self {
+        Self {
+            next_due: first_due,
+        }
+    }
+
+    fn due(&mut self, now: Instant) -> ProductionPlan {
+        let Some(late) = now.checked_duration_since(self.next_due) else {
+            return ProductionPlan {
+                blocks: 0,
+                discard_backlog: false,
+            };
+        };
+        if late > MEDIA_MAX_AGE {
+            // A suspended process must resume with current audio. The Sender
+            // independently advances its RTP anchor after a >200 ms stall;
+            // already-queued media has the same maximum-age check.
+            self.next_due = now + BLOCK_PERIOD;
+            return ProductionPlan {
+                blocks: 1,
+                discard_backlog: true,
+            };
+        }
+        let blocks = (late.as_nanos() / BLOCK_PERIOD.as_nanos() + 1)
+            .min(MAX_CATCH_UP_BLOCKS as u128) as usize;
+        self.next_due += BLOCK_PERIOD * blocks as u32;
+        ProductionPlan {
+            blocks,
+            discard_backlog: false,
+        }
+    }
 }
 
 /// Only the producer owns this buffer. Every receiver gets the same resulting
@@ -340,9 +387,13 @@ impl CaptureBuffer {
             self.last_signal = Some(now);
         }
         self.pending.extend(chunk.samples);
-        const MAX_SAMPLES: usize = BLOCK_FRAMES * 8 * 2;
-        if self.pending.len() > MAX_SAMPLES {
-            let discard = (self.pending.len() - MAX_SAMPLES) / 2 * 2;
+        self.retain_latest(BLOCK_FRAMES * MAX_CATCH_UP_BLOCKS);
+    }
+
+    fn retain_latest(&mut self, frames: usize) {
+        let maximum_samples = frames * 2;
+        if self.pending.len() > maximum_samples {
+            let discard = (self.pending.len() - maximum_samples) / 2 * 2;
             self.pending.drain(..discard);
             self.queue_dropped = self.queue_dropped.saturating_add((discard / 2) as u64);
         }
@@ -654,10 +705,20 @@ impl Actor {
         });
     }
 
+    fn clear_error_after_stop(&mut self) {
+        if self
+            .global_error
+            .as_ref()
+            .is_none_or(|error| error.code != "capture_stop")
+        {
+            self.global_error = None;
+        }
+    }
+
     async fn run(mut self, mut commands: mpsc::Receiver<Command>) {
         self.refresh();
         self.synchronize();
-        let mut tick = tokio::time::interval(Duration::from_millis(10));
+        let mut tick = tokio::time::interval(BLOCK_PERIOD);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             if self.shutdown.load(Ordering::Acquire) {
@@ -872,8 +933,8 @@ impl Actor {
             route.phase = Phase::Idle;
             route.message = "已停止".into();
             route.error = None;
+            route.last_metrics = SenderMetrics::default();
             if let Some(session) = route.session.take() {
-                route.last_metrics = lock(&session.progress).clone();
                 route.cleanup = Some(tokio::spawn(session.shutdown()));
             }
         }
@@ -924,7 +985,10 @@ impl Actor {
             return;
         }
         if self.work.as_ref().is_some_and(|work| work.device_id == id)
-            || self.auth.as_ref().is_some_and(|prompt| prompt.device_id == id)
+            || self
+                .auth
+                .as_ref()
+                .is_some_and(|prompt| prompt.device_id == id)
         {
             return;
         }
@@ -997,7 +1061,7 @@ impl Actor {
                 self.stop_all();
                 self.selected.clear();
                 self.select(&device_id, true);
-                self.global_error = None;
+                self.clear_error_after_stop();
             }
             Command::ToggleDevice {
                 device_id,
@@ -1017,7 +1081,7 @@ impl Actor {
                 let resume = self.running;
                 self.stop_all();
                 self.update(|s| s.selected_source_id = source_id);
-                self.global_error = None;
+                self.clear_error_after_stop();
                 if resume {
                     self.running = true;
                     for id in self.selected.clone() {
@@ -1084,13 +1148,7 @@ impl Actor {
             } => {
                 if device_id.is_none() && request_id.is_none() {
                     self.stop_all();
-                    if self
-                        .global_error
-                        .as_ref()
-                        .is_none_or(|error| error.code != "capture_stop")
-                    {
-                        self.global_error = None;
-                    }
+                    self.clear_error_after_stop();
                 } else if let Some(id) = self.command_target(device_id, request_id) {
                     self.stop_route(&id);
                 }
@@ -1341,7 +1399,7 @@ impl Actor {
             info,
             buffer: CaptureBuffer::new(now),
             started: now,
-            ready_at: now + Duration::from_millis(30),
+            schedule: MediaSchedule::new(now + Duration::from_millis(30)),
         });
         Ok(())
     }
@@ -1608,57 +1666,67 @@ impl Actor {
             }
         }
         if let Some(error) = capture_error {
+            let muted = lock(&self.state).mute_local;
+            let mut diagnostic = capture.buffer.view(&capture.info, muted, now);
             self.stop_all();
             let message = format!("音频采集已中断：{error}");
             self.error("capture", message.clone());
+            diagnostic.state = "error";
+            diagnostic.message = message;
             self.update(|s| {
-                s.capture.state = "error";
-                s.capture.message = message;
+                s.capture = diagnostic;
             });
             return;
         }
-        if now < capture.ready_at {
-            return;
+        let plan = capture.schedule.due(now);
+        if plan.discard_backlog {
+            capture.buffer.retain_latest(BLOCK_FRAMES);
         }
-        let mut samples = capture.buffer.next_block();
-        let muted = lock(&self.state).mute_local;
-        let diagnostic = capture.buffer.view(&capture.info, muted, now);
-        let elapsed = capture.started.elapsed().as_secs();
-        let dropped = capture.buffer.capture_dropped + capture.buffer.queue_dropped;
-        let underrun = capture.buffer.underrun_frames;
-        let buffered_ms = capture.buffer.pending.len() as f32 / 2.0 / 44.1;
-        if let Some(tone) = &mut self.test_tone {
-            tone.apply(&mut samples);
-            if tone.finished() {
-                self.test_tone = None;
+        for _ in 0..plan.blocks {
+            // fan_out can stop the last receiver and release shared capture.
+            let Some(capture) = &mut self.capture else {
+                break;
+            };
+            let mut samples = capture.buffer.next_block();
+            let muted = lock(&self.state).mute_local;
+            let diagnostic = capture.buffer.view(&capture.info, muted, now);
+            let elapsed = capture.started.elapsed().as_secs();
+            let dropped = capture.buffer.capture_dropped + capture.buffer.queue_dropped;
+            let underrun = capture.buffer.underrun_frames;
+            let buffered_ms = capture.buffer.pending.len() as f32 / 2.0 / 44.1;
+            if let Some(tone) = &mut self.test_tone {
+                tone.apply(&mut samples);
+                if tone.finished() {
+                    self.test_tone = None;
+                }
             }
+            let level = Levels {
+                left: samples
+                    .iter()
+                    .step_by(2)
+                    .map(|sample| sample.abs())
+                    .fold(0.0, f32::max),
+                right: samples
+                    .iter()
+                    .skip(1)
+                    .step_by(2)
+                    .map(|sample| sample.abs())
+                    .fold(0.0, f32::max),
+            };
+            let waveform = model::waveform(&samples);
+            let block: Arc<[i16]> = model::pcm_i16(&samples).into();
+            self.update(|s| {
+                s.level = level;
+                s.waveform = waveform;
+                s.elapsed_seconds = elapsed;
+                s.capture = diagnostic;
+                s.metrics.sample_rate = airloom_airplay::SAMPLE_RATE;
+                s.metrics.buffer_ms = Some(buffered_ms);
+                s.metrics.dropped_frames = dropped;
+                s.metrics.underrun_frames = underrun;
+            });
+            self.fan_out(block);
         }
-        let level = Levels {
-            left: samples
-                .iter()
-                .step_by(2)
-                .map(|sample| sample.abs())
-                .fold(0.0, f32::max),
-            right: samples
-                .iter()
-                .skip(1)
-                .step_by(2)
-                .map(|sample| sample.abs())
-                .fold(0.0, f32::max),
-        };
-        let waveform = model::waveform(&samples);
-        let block: Arc<[i16]> = model::pcm_i16(&samples).into();
-        self.update(|s| {
-            s.level = level;
-            s.waveform = waveform;
-            s.elapsed_seconds = elapsed;
-            s.capture = diagnostic;
-            s.metrics.sample_rate = airloom_airplay::SAMPLE_RATE;
-            s.metrics.buffer_ms = Some(buffered_ms);
-            s.metrics.dropped_frames = dropped;
-            s.metrics.underrun_frames = underrun;
-        });
-        self.fan_out(block);
     }
 }
 
@@ -1686,5 +1754,622 @@ fn user_error(error: &AirplayError) -> String {
         AirplayError::InvalidArgument(_) => "连接参数无效，请重新选择设备。".into(),
         AirplayError::Io(error) => format!("网络连接失败（{:?}）。", error.kind()),
         AirplayError::SessionLost(_) => "与设备的会话已断开。".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(id: &str) -> Device {
+        let mut device = Device::manual("127.0.0.1".parse().unwrap(), 7000);
+        device.id = id.into();
+        device.name = format!("Speaker {id}");
+        device
+    }
+
+    fn actor() -> Actor {
+        let state = Snapshot {
+            sources: vec![SourceView {
+                id: "default".into(),
+                name: "System output".into(),
+                kind: "endpoint",
+                is_default: true,
+            }],
+            ..Snapshot::default()
+        };
+        let mut actor = Actor::new(
+            Arc::new(Mutex::new(state)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        actor.devices = vec![device("one"), device("two")];
+        actor.select("one", true);
+        actor.select("two", true);
+        actor
+    }
+
+    /// Models only the worker boundary. Every receiver has its own bounded
+    /// queue; no protocol/network/hardware is replaced by fabricated success.
+    fn attach_target(actor: &mut Actor, id: &str, capacity: usize) -> mpsc::Receiver<MediaBlock> {
+        let (audio, receiver) = mpsc::channel(capacity);
+        let (volume, _) = watch::channel(0.5);
+        let (stop, mut stopped) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            while stopped.changed().await.is_ok() {
+                if *stopped.borrow() {
+                    break;
+                }
+            }
+        });
+        let route = actor.routes.get_mut(id).unwrap();
+        route.wanted = true;
+        route.generation += 1;
+        route.phase = Phase::Streaming;
+        route.session = Some(ActiveTarget {
+            audio,
+            volume,
+            stop,
+            task,
+            progress: Arc::new(Mutex::new(SenderMetrics::default())),
+            started: Instant::now(),
+        });
+        actor.running = true;
+        receiver
+    }
+
+    async fn shutdown(actor: &mut Actor) {
+        actor.stop_all();
+        for route in actor.routes.values_mut() {
+            if let Some(task) = route.cleanup.take() {
+                task.await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_target_receives_every_complete_pcm_block_from_one_producer() {
+        let mut actor = actor();
+        let mut one = attach_target(&mut actor, "one", 2);
+        let mut two = attach_target(&mut actor, "two", 2);
+        for sequence in 1..=32 {
+            let block: Arc<[i16]> = vec![sequence; BLOCK_FRAMES * 2].into();
+            actor.fan_out(block.clone());
+            let first = one.try_recv().unwrap();
+            let second = two.try_recv().unwrap();
+            assert!(Arc::ptr_eq(&first.samples, &block));
+            assert!(Arc::ptr_eq(&second.samples, &block));
+            assert_eq!(first.captured_at, second.captured_at);
+            assert_eq!(first.samples.len(), BLOCK_FRAMES * 2);
+            assert!(first.samples.iter().all(|sample| *sample == sequence));
+            assert!(one.try_recv().is_err());
+            assert!(two.try_recv().is_err());
+        }
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn a_full_target_queue_reconnects_only_that_target_and_keeps_healthy_audio() {
+        let mut actor = actor();
+        let mut healthy = attach_target(&mut actor, "one", 2);
+        let _slow = attach_target(&mut actor, "two", 1);
+        actor.fan_out(vec![1; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 1);
+        actor.fan_out(vec![2; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 2);
+        assert!(actor.routes["one"].session.is_some());
+        assert!(actor.routes["two"].session.is_none());
+        assert_eq!(actor.routes["two"].phase, Phase::Reconnecting);
+        assert_eq!(actor.routes["two"].retries, 1);
+        actor.synchronize();
+        assert_eq!(lock(&actor.state).state, Phase::Streaming);
+        assert!(lock(&actor.state).error.is_none());
+        actor.fan_out(vec![3; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 3);
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn a_closed_target_queue_and_old_failure_cannot_stop_another_session() {
+        let mut actor = actor();
+        let mut healthy = attach_target(&mut actor, "one", 2);
+        let closed = attach_target(&mut actor, "two", 2);
+        drop(closed);
+        let old_generation = actor.routes["one"].generation;
+        actor.routes.get_mut("one").unwrap().generation += 1;
+        actor.target_failed(TargetFailure {
+            identity: TargetIdentity {
+                device_id: "one".into(),
+                generation: old_generation,
+            },
+            message: "late error from the previous connection".into(),
+        });
+        actor.fan_out(vec![7; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 7);
+        assert!(actor.routes["one"].session.is_some());
+        assert!(actor.routes["one"].error.is_none());
+        assert_eq!(actor.routes["two"].phase, Phase::Reconnecting);
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn authentication_on_a_second_device_keeps_the_first_streaming_and_rejects_stale_dialogs()
+    {
+        let mut actor = actor();
+        let mut healthy = attach_target(&mut actor, "one", 3);
+        actor.routes.get_mut("two").unwrap().wanted = true;
+        actor.prompt("two", AuthenticationKind::Password, false);
+        let stale = actor.auth.as_ref().unwrap().request_id;
+        actor.prompt("two", AuthenticationKind::Password, true);
+        let current = actor.auth.as_ref().unwrap().request_id;
+        actor.routes.get_mut("two").unwrap().access.password =
+            Some(Zeroizing::new("current-attempt".into()));
+        actor.routes.get_mut("two").unwrap().remember_after_connect = true;
+        actor.synchronize();
+        assert_eq!(lock(&actor.state).state, Phase::Streaming);
+        assert_eq!(lock(&actor.state).auth.as_ref().unwrap().device_id, "two");
+        assert_eq!(
+            lock(&actor.state).auth.as_ref().unwrap().device_name,
+            "Speaker two"
+        );
+
+        actor.command(Command::Authenticate {
+            request_id: stale,
+            value: Zeroizing::new("stale-dialog-secret".into()),
+            remember: false,
+        });
+        actor.command(Command::Pair {
+            device_id: None,
+            request_id: Some(stale),
+        });
+        actor.command(Command::Disconnect {
+            device_id: None,
+            request_id: Some(stale),
+        });
+        assert!(actor.matches_auth(current));
+        assert_eq!(
+            actor.routes["two"]
+                .access
+                .password
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "current-attempt"
+        );
+        assert!(actor.routes["two"].remember_after_connect);
+        assert!(actor.work.is_none());
+        actor.fan_out(vec![8; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 8);
+
+        actor.command(Command::Disconnect {
+            device_id: None,
+            request_id: Some(current),
+        });
+        assert!(actor.auth.is_none());
+        assert!(!actor.routes["two"].wanted);
+        assert!(actor.routes["one"].session.is_some());
+        actor.fan_out(vec![9; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 9);
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn credentials_and_remember_consent_are_bound_to_the_prompt_device() {
+        let mut actor = actor();
+        let _first = attach_target(&mut actor, "one", 2);
+        actor.routes.get_mut("one").unwrap().access.password =
+            Some(Zeroizing::new("first-secret".into()));
+        actor.routes.get_mut("one").unwrap().remember_after_connect = true;
+        actor.routes.get_mut("two").unwrap().wanted = true;
+        actor.prompt("two", AuthenticationKind::Password, false);
+        let request = actor.auth.as_ref().unwrap().request_id;
+        actor.command(Command::Authenticate {
+            request_id: request,
+            value: Zeroizing::new("second-secret".into()),
+            remember: true,
+        });
+        assert_eq!(
+            actor.routes["one"]
+                .access
+                .password
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "first-secret"
+        );
+        assert_eq!(
+            actor.routes["two"]
+                .access
+                .password
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "second-secret"
+        );
+        assert_eq!(actor.queue.len(), 1);
+        assert_eq!(actor.queue.front().unwrap().device_id, "two");
+        actor.forget_pending_access("two");
+        assert!(actor.routes["two"].access.password.is_none());
+        assert!(!actor.routes["two"].remember_after_connect);
+        assert!(actor.routes["one"].remember_after_connect);
+        // An in-flight completion cannot save again after consent is revoked.
+        actor.persist_access("two");
+        assert!(actor.routes["two"].error.is_none());
+        actor.synchronize();
+        let snapshot = serde_json::to_string(&*lock(&actor.state)).unwrap();
+        assert!(!snapshot.contains("first-secret"));
+        assert!(!snapshot.contains("second-secret"));
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_only_that_work_and_ignores_its_late_completion() {
+        let mut actor = actor();
+        let mut healthy = attach_target(&mut actor, "one", 2);
+        let route = actor.routes.get_mut("two").unwrap();
+        route.wanted = true;
+        route.generation = 4;
+        route.phase = Phase::Connecting;
+        let task = tokio::spawn(std::future::pending::<Work>());
+        let abort = task.abort_handle();
+        actor.work = Some(ConnectionWork {
+            device_id: "two".into(),
+            generation: 4,
+            task,
+        });
+        actor.command(Command::Disconnect {
+            device_id: Some("two".into()),
+            request_id: None,
+        });
+        tokio::task::yield_now().await;
+        assert!(abort.is_finished());
+        assert!(actor.work.is_none());
+        actor.finish_work(
+            "two",
+            4,
+            Ok(Work::Connected(Err(AirplayError::Timeout("late connect")))),
+        );
+        assert_eq!(actor.routes["two"].phase, Phase::Idle);
+        assert!(actor.routes["two"].error.is_none());
+        actor.fan_out(vec![10; BLOCK_FRAMES * 2].into());
+        assert_eq!(healthy.try_recv().unwrap().samples[0], 10);
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn source_change_restarts_the_selected_set_without_losing_device_access() {
+        let mut actor = actor();
+        let _one = attach_target(&mut actor, "one", 2);
+        let _two = attach_target(&mut actor, "two", 2);
+        actor.routes.get_mut("two").unwrap().access.password =
+            Some(Zeroizing::new("active-access".into()));
+        actor.update(|state| {
+            state.sources.push(SourceView {
+                id: "speakers".into(),
+                name: "Speakers".into(),
+                kind: "endpoint",
+                is_default: false,
+            })
+        });
+        actor.error("capture_stop", "Check the old endpoint mute state");
+        actor.command(Command::SelectSource {
+            source_id: "speakers".into(),
+        });
+        assert_eq!(lock(&actor.state).selected_source_id, "speakers");
+        assert_eq!(actor.selected, ["one", "two"]);
+        assert!(actor.running);
+        assert_eq!(actor.global_error.as_ref().unwrap().code, "capture_stop");
+        assert_eq!(actor.active_count(), 0);
+        assert_eq!(
+            actor
+                .queue
+                .iter()
+                .map(|request| request.device_id.as_str())
+                .collect::<Vec<_>>(),
+            ["one", "two"]
+        );
+        assert_eq!(
+            actor.routes["two"]
+                .access
+                .password
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "active-access"
+        );
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn repeated_connect_does_not_duplicate_an_auth_prompt_or_pending_connection() {
+        let mut actor = actor();
+        actor.routes.get_mut("two").unwrap().wanted = true;
+        actor.prompt("two", AuthenticationKind::Password, false);
+        let request = actor.auth.as_ref().unwrap().request_id;
+        actor.command(Command::Connect {
+            device_id: Some("two".into()),
+        });
+        assert!(actor.matches_auth(request));
+        assert!(actor.queue.is_empty());
+        assert_eq!(actor.routes["two"].phase, Phase::AuthRequired);
+        actor.auth = None;
+        actor.request_connect("two", false, false);
+        actor.request_connect("two", false, false);
+        assert_eq!(actor.queue.len(), 1);
+        actor.work = Some(ConnectionWork {
+            device_id: "two".into(),
+            generation: 0,
+            task: tokio::spawn(std::future::pending::<Work>()),
+        });
+        actor.queue.clear();
+        actor.command(Command::Connect {
+            device_id: Some("two".into()),
+        });
+        assert!(actor.queue.is_empty());
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn reconnect_budget_is_independent_and_failure_never_replaces_healthy_global_state() {
+        let mut actor = actor();
+        let _healthy = attach_target(&mut actor, "one", 2);
+        actor.routes.get_mut("two").unwrap().wanted = true;
+        actor.retry_stream("two", "interrupted".into());
+        assert_eq!(actor.routes["two"].retries, 1);
+        actor.connection_error("two", AirplayError::Timeout("connect"));
+        assert_eq!(actor.routes["two"].retries, 2);
+        actor.connection_error("two", AirplayError::Timeout("connect"));
+        assert_eq!(actor.routes["two"].retries, 3);
+        actor.connection_error("two", AirplayError::Timeout("connect"));
+        assert_eq!(actor.routes["two"].phase, Phase::Error);
+        assert!(actor.routes["two"].retry_at.is_none());
+        assert_eq!(actor.routes["one"].retries, 0);
+        actor.synchronize();
+        let state = lock(&actor.state).clone();
+        assert_eq!(state.state, Phase::Streaming);
+        assert!(state.error.is_none());
+        assert_eq!(
+            state
+                .devices
+                .iter()
+                .find(|device| device.id == "two")
+                .unwrap()
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "stream"
+        );
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn rejected_saved_pairing_queues_a_fresh_exchange_only_for_that_device() {
+        let mut actor = actor();
+        let _healthy = attach_target(&mut actor, "one", 2);
+        let route = actor.routes.get_mut("two").unwrap();
+        route.wanted = true;
+        route.access.password = Some(Zeroizing::new("obsolete-access".into()));
+        route.remember_after_connect = true;
+        actor.connection_error(
+            "two",
+            AirplayError::AuthenticationRejected {
+                kind: AuthenticationKind::Credentials,
+            },
+        );
+        assert!(actor.routes["two"].access.password.is_none());
+        assert!(!actor.routes["two"].remember_after_connect);
+        assert!(actor.queue.front().unwrap().pair);
+        assert_eq!(actor.queue.front().unwrap().device_id, "two");
+        assert!(actor.routes["one"].session.is_some());
+        shutdown(&mut actor).await;
+    }
+
+    #[tokio::test]
+    async fn refreshing_discovery_preserves_auth_and_never_selects_new_targets() {
+        let mut actor = actor();
+        actor.routes.get_mut("two").unwrap().wanted = true;
+        actor.prompt("two", AuthenticationKind::Password, false);
+        let request = actor.auth.as_ref().unwrap().request_id;
+        actor.refresh();
+        assert!(actor.matches_auth(request));
+        actor.discovery.take().unwrap().abort();
+        actor.discovered(DiscoveryResult {
+            devices: Ok(vec![device("new-device")]),
+            sources: Ok(vec![CaptureSource {
+                id: "speakers".into(),
+                name: "Speakers".into(),
+                is_default: true,
+            }]),
+        });
+        assert!(actor.matches_auth(request));
+        assert_eq!(actor.selected, ["one", "two"]);
+        assert!(actor.devices.iter().any(|device| device.id == "new-device"));
+        assert!(actor.devices.iter().any(|device| device.id == "two"));
+        shutdown(&mut actor).await;
+    }
+
+    #[test]
+    fn discovery_does_not_select_a_hidden_or_new_device_and_requires_a_real_endpoint() {
+        let mut actor = actor();
+        actor.selected.clear();
+        actor.routes.clear();
+        actor.discovered(DiscoveryResult {
+            devices: Ok(vec![device("one")]),
+            sources: Ok(Vec::new()),
+        });
+        actor.synchronize();
+        let state = lock(&actor.state).clone();
+        assert!(state.selected_device_ids.is_empty());
+        assert!(state.selected_device_id.is_empty());
+        assert!(state.sources.is_empty());
+        assert!(state.selected_source_id.is_empty());
+        assert_eq!(state.error.as_ref().unwrap().code, "capture_sources");
+        actor.discovered(DiscoveryResult {
+            devices: Ok(Vec::new()),
+            sources: Ok(vec![CaptureSource {
+                id: "speakers".into(),
+                name: "Speakers".into(),
+                is_default: false,
+            }]),
+        });
+        assert_eq!(lock(&actor.state).selected_source_id, "speakers");
+        assert!(!lock(&actor.state)
+            .sources
+            .iter()
+            .any(|source| source.id == "default"));
+    }
+
+    fn chunk(value: f32, frames: usize, sequence: u64) -> AudioChunk {
+        AudioChunk {
+            samples: vec![value; frames * 2],
+            sample_rate: 44_100,
+            sequence,
+            rms: [value.abs(); 2],
+            peak: [value.abs(); 2],
+            dropped_frames: 0,
+        }
+    }
+
+    #[test]
+    fn a_wakeup_25ms_late_produces_three_blocks_without_moving_the_sample_clock() {
+        let start = Instant::now();
+        let mut schedule = MediaSchedule::new(start);
+        let plan = schedule.due(start + Duration::from_millis(25));
+        assert_eq!(plan.blocks, 3);
+        assert!(!plan.discard_backlog);
+        assert_eq!(schedule.next_due, start + Duration::from_millis(30));
+        assert_eq!(schedule.due(start + Duration::from_millis(29)).blocks, 0);
+        assert_eq!(schedule.due(start + Duration::from_millis(30)).blocks, 1);
+    }
+
+    #[test]
+    fn irregular_wakeups_still_produce_exactly_44100_frames_per_second() {
+        let start = Instant::now();
+        let mut schedule = MediaSchedule::new(start);
+        let mut elapsed_ms = 0;
+        let mut blocks = 0;
+        for interval in [7, 23, 4, 16, 11, 9].into_iter().cycle() {
+            if elapsed_ms >= 1000 {
+                break;
+            }
+            let plan = schedule.due(start + Duration::from_millis(elapsed_ms));
+            assert!(!plan.discard_backlog);
+            blocks += plan.blocks;
+            elapsed_ms += interval;
+        }
+        blocks += schedule.due(start + Duration::from_millis(999)).blocks;
+        assert_eq!(blocks * BLOCK_FRAMES, airloom_airplay::SAMPLE_RATE as usize);
+        assert_eq!(schedule.next_due, start + Duration::from_secs(1));
+    }
+
+    #[test]
+    fn catchup_is_bounded_and_a_long_stall_resumes_with_current_capture_only() {
+        let start = Instant::now();
+        let mut schedule = MediaSchedule::new(start);
+        assert_eq!(schedule.due(start + Duration::from_millis(90)).blocks, 8);
+        assert_eq!(schedule.due(start + Duration::from_millis(90)).blocks, 2);
+        let later = start + Duration::from_secs(2);
+        let plan = schedule.due(later);
+        assert_eq!(plan.blocks, 1);
+        assert!(plan.discard_backlog);
+        assert_eq!(schedule.next_due, later + BLOCK_PERIOD);
+        assert_eq!(schedule.due(later).blocks, 0);
+
+        let mut buffer = CaptureBuffer::new(start);
+        for sequence in 1..=12 {
+            buffer.ingest(
+                chunk(sequence as f32 / 100.0, BLOCK_FRAMES, sequence),
+                later,
+            );
+        }
+        buffer.retain_latest(BLOCK_FRAMES);
+        assert_eq!(buffer.queue_dropped, (11 * BLOCK_FRAMES) as u64);
+        assert!(buffer
+            .next_block()
+            .iter()
+            .all(|sample| (*sample - 0.12).abs() < f32::EPSILON));
+        assert!(buffer.pending.is_empty());
+    }
+
+    #[test]
+    fn capture_diagnostics_distinguish_no_packets_silence_quiet_and_actual_signal() {
+        let now = Instant::now();
+        let info = CaptureInfo {
+            source_id: "actual-hdmi".into(),
+            source_name: "HDMI audio".into(),
+        };
+        let mut buffer = CaptureBuffer::new(now);
+        let initial = buffer.view(&info, false, now);
+        assert_eq!(initial.state, "waiting");
+        assert_eq!(initial.last_packet_ms, None);
+        assert_eq!(initial.frames_received, 0);
+        buffer.next_block();
+        assert_eq!(buffer.underrun_frames, BLOCK_FRAMES as u64);
+        assert_eq!(buffer.frames_received, 0);
+        let later = now + Duration::from_secs(4);
+        buffer.ingest(chunk(0.0, BLOCK_FRAMES, 0), later);
+        let silent = buffer.view(&info, true, later);
+        assert_eq!(silent.state, "silent");
+        assert_eq!(silent.last_packet_ms, Some(0));
+        assert_eq!(silent.frames_received, BLOCK_FRAMES as u64);
+        assert_eq!(silent.source_id, "actual-hdmi");
+        buffer.ingest(chunk(0.001, BLOCK_FRAMES, 1), later);
+        assert_eq!(buffer.view(&info, false, later).state, "quiet");
+        buffer.ingest(chunk(0.25, BLOCK_FRAMES, 2), later);
+        let signal = buffer.view(&info, false, later);
+        assert_eq!(signal.state, "signal");
+        assert_eq!(signal.level.left, 0.25);
+        assert_eq!(signal.chunks_received, 3);
+        assert_eq!(signal.frames_received, (BLOCK_FRAMES * 3) as u64);
+        let stale = buffer.view(&info, false, later + Duration::from_secs(4));
+        assert_eq!(stale.state, "silent");
+        assert_eq!(stale.level.left, 0.0);
+    }
+
+    #[test]
+    fn capture_backlog_is_bounded_and_discards_oldest_audio_without_repeating_frames() {
+        let now = Instant::now();
+        let mut buffer = CaptureBuffer::new(now);
+        for sequence in 1..=12 {
+            buffer.ingest(chunk(sequence as f32 / 100.0, BLOCK_FRAMES, sequence), now);
+        }
+        assert_eq!(buffer.pending.len(), BLOCK_FRAMES * 8 * 2);
+        assert_eq!(buffer.queue_dropped, (BLOCK_FRAMES * 4) as u64);
+        assert_eq!(buffer.frames_received, (BLOCK_FRAMES * 12) as u64);
+        for expected in 5..=12 {
+            let block = buffer.next_block();
+            assert_eq!(block.len(), BLOCK_FRAMES * 2);
+            assert!(block
+                .iter()
+                .all(|sample| (*sample - expected as f32 / 100.0).abs() < f32::EPSILON));
+        }
+        assert!(buffer.next_block().iter().all(|sample| *sample == 0.0));
+        assert_eq!(buffer.underrun_frames, BLOCK_FRAMES as u64);
+    }
+
+    #[test]
+    fn diagnostic_tone_is_bounded_fades_and_does_not_invent_capture_signal() {
+        let now = Instant::now();
+        let mut capture = CaptureBuffer::new(now);
+        capture.ingest(chunk(0.0, BLOCK_FRAMES, 0), now);
+        let actual_before = capture.view(&CaptureInfo::default(), false, now);
+        let mut tone = TestTone::new();
+        let mut samples = vec![0.0; TEST_TONE_FRAMES * 2 + BLOCK_FRAMES * 2];
+        tone.apply(&mut samples);
+        assert_eq!(samples[0], 0.0);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.1));
+        assert!(samples.iter().all(|sample| sample.abs() <= 0.12));
+        assert!(samples[TEST_TONE_FRAMES * 2..]
+            .iter()
+            .all(|sample| *sample == 0.0));
+        assert!(tone.finished());
+        assert_eq!(tone.remaining_ms(), 0);
+        let actual_after = capture.view(&CaptureInfo::default(), false, now);
+        assert_eq!(actual_after.frames_received, actual_before.frames_received);
+        assert_eq!(actual_after.level.left, 0.0);
+        assert_eq!(actual_after.state, actual_before.state);
+        let mut resumed = vec![0.25; BLOCK_FRAMES * 2];
+        tone.apply(&mut resumed);
+        assert!(resumed.iter().all(|sample| *sample == 0.25));
     }
 }

@@ -53,6 +53,40 @@ function Invoke-NativeButton([System.Windows.Automation.AutomationElement] $Butt
     ([System.Windows.Automation.InvokePattern] $Pattern).Invoke()
 }
 
+function Wait-NativeUpdateCheck {
+    $TextCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $UpdateDeadline = [DateTime]::UtcNow.AddSeconds(35)
+    $LastStatus = ''
+    $LastTextNames = @()
+    do {
+        $Process.Refresh()
+        if ($Process.HasExited) { throw "Native UI exited during update check (code $($Process.ExitCode))." }
+        try {
+            $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+            $TextControls = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $TextCondition)
+            $TextNames = @()
+            foreach ($TextControl in $TextControls) {
+                $Name = $TextControl.Current.Name
+                if ([string]::IsNullOrWhiteSpace($Name)) { continue }
+                $TextNames += $Name
+                if ($TextControl.Current.AutomationId -eq 'UpdateStatusText') { $LastStatus = $Name }
+                # These are the actual TextBlock accessibility names after the
+                # WinHTTP request and GitHub release JSON parsing complete.
+                if ($Name -eq '当前已是最新版本。' -or
+                    $Name.StartsWith('新版本已准备好', [System.StringComparison]::Ordinal)) { return $Name }
+            }
+            if ($TextNames.Count -gt 0) { $LastTextNames = $TextNames }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # Reacquire controls if the updating provider invalidated an element.
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $UpdateDeadline)
+    $Details = if ($LastStatus) { $LastStatus } else { $LastTextNames -join ' | ' }
+    throw "Update check did not return a successful native status within 35 seconds. Last status/settings text: $Details. GitHub metadata or network failures must be resolved before this check can pass."
+}
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $EvidencePath = Join-Path $ProjectRoot 'artifacts'
 New-Item -ItemType Directory -Path $EvidencePath -Force | Out-Null
@@ -78,13 +112,12 @@ try {
     Save-NativeScreenshot (Join-Path $EvidencePath 'native-window.png')
     Invoke-NativeButton $SettingsButton
     $BackButton = Wait-NativeButton '返回声音投放'
-    # The update card can be below the fold on a small runner desktop. Its
-    # presence and InvokePattern still verify the real settings view was loaded.
+    # The update card can be below the fold on a small runner desktop; invoke
+    # its accessible control directly. This checks metadata only, never install.
     $UpdateButton = Wait-NativeButton '检查更新' $false
-    $UpdatePattern = $UpdateButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    if ($UpdatePattern -isnot [System.Windows.Automation.InvokePattern]) {
-        throw 'The settings update button cannot be invoked.'
-    }
+    Invoke-NativeButton $UpdateButton
+    $UpdateStatus = Wait-NativeUpdateCheck
+    $null = Wait-NativeButton '检查更新' $false
     Start-Sleep -Milliseconds 400
     Save-NativeScreenshot (Join-Path $EvidencePath 'settings-window.png')
     Invoke-NativeButton $BackButton
@@ -97,8 +130,10 @@ try {
         process = 'Airloom.exe'
         hwnd = $Process.MainWindowHandle.ToInt64()
         settings_verified = $true
+        update_check_verified = $true
+        update_status = $UpdateStatus
         returned_home = $true
-        note = 'Real UI launch from a clean extracted distribution; settings opened and returned using UI Automation. No update was downloaded and no physical HomePod was connected.'
+        note = 'Real UI launch from a clean extracted distribution; settings and the live GitHub metadata update check verified using UI Automation, then returned home. No installer was downloaded and no physical HomePod was connected.'
     } | ConvertTo-Json
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))

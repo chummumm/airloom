@@ -331,6 +331,35 @@ mod tests {
     }
 
     #[test]
+    fn multi_device_commands_keep_legacy_forms_and_validate_optional_targets() {
+        for json in [
+            r#"{"type":"connect"}"#,
+            r#"{"type":"disconnect"}"#,
+            r#"{"type":"select_device","device_id":"speaker-one"}"#,
+            r#"{"type":"toggle_device","device_id":"speaker-two","selected":true}"#,
+            r#"{"type":"toggle_device","device_id":"speaker-two"}"#,
+            r#"{"type":"connect","device_id":"speaker-two"}"#,
+            r#"{"type":"disconnect","device_id":"speaker-two"}"#,
+            r#"{"type":"pair","device_id":"speaker-two","request_id":42}"#,
+            r#"{"type":"test_tone"}"#,
+            r#"{"type":"test_tone","enabled":false}"#,
+        ] {
+            assert!(serde_json::from_str::<Command>(json).unwrap().validate());
+        }
+        for json in [
+            r#"{"type":"connect","device_id":""}"#,
+            r#"{"type":"disconnect","device_id":"bad\u0000id"}"#,
+            r#"{"type":"pair","request_id":0}"#,
+        ] {
+            assert!(!serde_json::from_str::<Command>(json).unwrap().validate());
+        }
+        assert!(serde_json::from_str::<Command>(
+            r#"{"type":"toggle_device","device_id":"one","selected":"yes"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
     fn visual_envelope_is_flat_only_for_silence() {
         assert_eq!(waveform(&[0.0; 256]), vec![0.0; 64]);
         assert_eq!(waveform(&[0.25; 256]), vec![0.25; 64]);

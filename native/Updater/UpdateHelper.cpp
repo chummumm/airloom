@@ -83,20 +83,26 @@ namespace
 
         // Delete only the package belonging to this update. The new app removes
         // this helper after it exits; a later launch retries after interruption.
+        bool packageRemoved = false;
         for (int attempt = 0; attempt < 30; ++attempt)
         {
-            if (DeleteFileW(installer.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND) break;
+            if (DeleteFileW(installer.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
+            {
+                packageRemoved = true;
+                break;
+            }
             Sleep(100);
         }
         DeleteFileW((job / L"download.part").c_str());
         lock.Reset();
 
+        std::wstring cleanupMessage = packageRemoved ? L"下载包已清理。" : L"下载包仍被占用，Airloom 启动后会重试清理。";
         if (installerResult == 3010)
-            SaveError(L"更新已安装，部分文件需要重启 Windows 后生效。下载包已清理。");
+            SaveError(L"更新已安装，部分文件需要重启 Windows 后生效。" + cleanupMessage);
         else if (installerResult != 0)
-            SaveError(L"更新未完成或已取消（代码 " + std::to_wstring(installerResult) + L"）。下载包已清理，可以重新检查更新。");
+            SaveError(L"更新未完成或已取消（代码 " + std::to_wstring(installerResult) + L"）。" + cleanupMessage + L"可以重新检查更新。");
         if (parentExit == WAIT_OBJECT_0 && !RestartApplication(application))
-            SaveError(L"更新流程已结束，下载包已清理。请从开始菜单重新打开 Airloom。");
+            SaveError(L"更新流程已结束。" + cleanupMessage + L"请从开始菜单重新打开 Airloom。");
         return installerResult == 0 || installerResult == 3010 ? 0 : 1;
     }
 }
