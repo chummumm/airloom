@@ -55,7 +55,9 @@ Airloom already requires Windows 11 build 22000 or newer. See the official
 The completion callback is agile and owns the immutable activation payload until
 Windows releases it, including after the five-second activation deadline. The
 MTA worker receives a signal and retrieves the audio client. It requests stereo
-16-bit PCM at the transport sample rate with Windows automatic format conversion.
+32-bit floating-point PCM at the transport sample rate with Windows automatic
+format conversion. This preserves floating-point samples through capture and
+mixing instead of quantizing to 16-bit integers before the transport encoder.
 The existing bounded capture and sender queues are shared with endpoint mode.
 
 Async activation cannot be cancelled at the Windows API boundary. Before

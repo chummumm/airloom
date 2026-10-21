@@ -458,18 +458,19 @@ impl Session {
         let client = process.activate(cancelled)?;
         process.ensure_alive()?;
         // The virtual process device has no physical endpoint mix format.
-        // Explicit shared-mode PCM plus Windows' converter matches the process
-        // loopback contract and leaves our resampler/queue pipeline unchanged.
+        // Request float samples, as used by our pipeline and Windows' shared
+        // audio engine. Capturing PCM16 here would introduce an unnecessary
+        // float -> integer -> float conversion before final network encoding.
         let mix = WAVEFORMATEX {
-            wFormatTag: 1,
+            wFormatTag: 3, // WAVE_FORMAT_IEEE_FLOAT
             nChannels: 2,
             nSamplesPerSec: config.target_sample_rate,
-            nAvgBytesPerSec: config.target_sample_rate * 4,
-            nBlockAlign: 4,
-            wBitsPerSample: 16,
+            nAvgBytesPerSec: config.target_sample_rate * 8,
+            nBlockAlign: 8,
+            wBitsPerSample: 32,
             cbSize: 0,
         };
-        let format = NativeFormat::new(config.target_sample_rate, 2, 4, 0, Encoding::Signed16)?;
+        let format = NativeFormat::new(config.target_sample_rate, 2, 8, 0, Encoding::Float32)?;
         let resampler = StereoResampler::new(config.target_sample_rate, config.target_sample_rate)?;
         unsafe {
             client.Initialize(

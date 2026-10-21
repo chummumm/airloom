@@ -565,10 +565,25 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline {
             if let Some(chunk) = stream.read_timeout(Duration::from_millis(50)).unwrap() {
-                assert!(chunk
-                    .samples
-                    .iter()
-                    .all(|sample| sample.is_finite() && *sample == 0.0));
+                assert!(
+                    chunk
+                        .samples
+                        .iter()
+                        .all(|sample| sample.is_finite() && *sample == 0.0),
+                    "silent process {} produced nonzero audio: sequence={}, frames={}, peak={:?}, rms={:?}, first_nonzero={:?}",
+                    config.source_id,
+                    chunk.sequence,
+                    chunk.frames(),
+                    chunk.peak,
+                    chunk.rms,
+                    chunk
+                        .samples
+                        .iter()
+                        .copied()
+                        .filter(|sample| !sample.is_finite() || *sample != 0.0)
+                        .take(16)
+                        .collect::<Vec<_>>()
+                );
             }
         }
         println!("Process capture: silent input and mute refusal verified; stopping");
