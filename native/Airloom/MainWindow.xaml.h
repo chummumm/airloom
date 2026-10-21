@@ -84,6 +84,7 @@ namespace winrt::Airloom::implementation
         airloom::native::Snapshot m_snapshot;
         std::vector<airloom::native::HiddenDevice> m_hiddenDevices;
         std::vector<DeviceRow> m_deviceRows;
+        std::vector<Microsoft::UI::Xaml::Shapes::Line> m_waveformBars;
         airloom::native::UpdateSnapshot m_lastUpdate;
         Microsoft::UI::Xaml::DispatcherTimer m_pollTimer{nullptr};
         Microsoft::UI::Xaml::DispatcherTimer m_volumeTimer{nullptr};

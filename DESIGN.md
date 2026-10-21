@@ -1,92 +1,102 @@
 # Airloom visual system
 
-Airloom is a native sound-routing tool. Visual emphasis belongs to the selected source, the receiving speakers and the actual audio signal. The interface should be quiet enough to leave open during listening and precise enough to diagnose an unsuccessful connection.
+Airloom is a native Windows audio-routing app. Its interface puts the sound route, the receiving speakers and direct playback control in one compact workspace. The 0.3.0 redesign replaces the full-height left receiver rail and disconnected white cards from 0.2.1.
 
-The direction is a flat neutral console: a fixed receiver rail, a ruled task header and a flexible working area. Surface lightness defines grouping. The primary action is an inversion of the current theme; the single green data color belongs to audio and connection state. This replaces the earlier centered lavender composition, large speaker illustration and Mica backdrop.
+The visual world is **a silver audio workspace with an inset instrument display**. A low-chroma silver ground, white working surfaces and ink controls form the shell. One dark neutral display contains the actual signal. Blue belongs to real audio and connection state, not navigation or decoration. The display is the product's signature element: an instrument showing this computer's sound, never invented album art or a simulated playing state.
 
-## Structure
+## Composition
 
-| Element | Rule |
+| Region | Rule |
 | --- | --- |
-| Native title bar | 44 effective pixels, original Airloom mark, native caption controls |
-| Task header | 64 effective pixels, task name, reserved status area and settings action |
-| Device rail | 248 effective pixels, independent scrolling and persistent device rows |
-| Working content | Owns the right viewport width; 22 effective pixels of horizontal padding |
-| Section rhythm | 14–22 effective pixels; controls stay adjacent to the signal |
-| Panels | 20 effective pixel radius, opaque fill, no shadows or decorative outline |
-| Device rows | 72 effective pixels, 8 effective pixel radius, fixed icon and selection slots |
-| Primary control | Native 36 effective pixel high button, 18 effective pixel radius, inverted fill |
-| Main / section / target type | 20 / 16 / 22 effective pixels, semibold |
-| Body / secondary type | 14 / 12 effective pixels |
+| Native title bar | 48 effective pixels; the Airloom mark and name; native caption controls |
+| Sound route | Compact source selection, route context and session status above the instrument |
+| Main workspace | Instrument first; a bounded receiver panel to its right when space permits |
+| Compact workspace | Receiver panel follows the instrument in the scrollable workspace |
+| Transport dock | Persistent bottom position, with connection action, stable volume control and local-output mute |
+| Settings | Compact groups of aligned native rows; labels stay close to their controls |
+| Ordinary panels | White/neutral fill, one subtle boundary, 8 effective pixel radius |
+| Instrument | Distinct dark display, 16 effective pixel radius, 24 effective pixel inset |
+| Transport dock | 12 effective pixel radius, 20 × 16 effective pixel inset |
+| Main controls | Native buttons, 36–44 effective pixels high, 8 effective pixel radius |
 
-At compact and normal desktop widths, source, signal and transport stack vertically. At an actual root content width of 1280 effective pixels or greater, a 332 effective pixel transport column sits beside the signal. The receiver rail remains fixed. The minimum tracking size is 880 × 680 effective pixels; vertical overflow scrolls. A reserved vertical scrollbar avoids moving content when overflow changes.
+The normal opening size is 1120 × 780 effective pixels, clamped to the monitor work area. The minimum remains 880 × 680. At 1050 effective pixels of actual root content width, the receiver panel can sit beside the instrument; smaller widths put it below. The dock remains available while workspace content scrolls. A native `UserControl` owns visual states; HWND physical pixels are not used as the layout breakpoint.
 
-Large windows use their available working area. Do not recenter a narrow maximum-width card group as status text, digits or receiver names change. The volume percentage owns a fixed 52 effective pixel slot; changing 9% to 100% must not move the slider or neighboring panels.
+There is no permanently empty navigation rail. Home and settings are the two working views, with explicit actions between them. The window can grow, but essential controls should not spread across an unbounded row or leave the lower half of the window without a purpose. Receiver rows have their own scrolling region when necessary.
 
-## Type and icons
+The volume number retains a fixed 52 effective pixel tabular slot. Dynamic state text and receiver names cannot recenter the workspace. The slider's native thumb outset stays inside its stable slot. Layout and acknowledgement protection remain part of the design, not optional polish.
 
-Use Segoe UI Variable Text with native Windows fallback. This preserves platform language coverage and conventions. Use regular and semibold weights, with tabular numerals for volume, time, sample rate and dB values. Headings describe tasks or settings.
+## Type and object identity
 
-Use the existing Airloom vector mark and native Fluent glyphs. A receiver row needs a small speaker symbol, its real name and plain-language state. It does not need a large product illustration, colored icon tile or ornamental status pill.
+Use **Segoe UI Variable Text**, with Windows' native language fallback. Native type was explicitly retained in the taste draw. Body text is 14 effective pixels; secondary explanations are 12; section titles are 16; the principal source/receiver identity is 24–28. Use regular and semibold weights, with tabular numerals for volume, time, sample rate and dB.
 
-## Theme resources
+Keep the original Airloom vector mark. Use one native outline icon family for controls. A device's actual name, selection and individual connection state carry its identity. A hardware outline may identify a receiver, but do not turn every row into a colored icon tile. System audio has no reliable cover art, track name or artist in the current model, so none may be fabricated.
 
-These are the application-owned opaque colors in [App.xaml](native/Airloom/App.xaml). Native control templates retain hover, pressed, disabled and focus states.
+## Color resources
 
-| Resource | Dark | Light | Purpose |
+Application-owned colors live in [App.xaml](native/Airloom/App.xaml). The default preference remains **follow Windows**; existing light/dark choices are preserved. Dark surfaces are neutral, not navy. High contrast maps application resources to Windows system colors and retains the platform's native control states.
+
+| Resource | Light | Dark | Role |
 | --- | --- | --- | --- |
-| `AppCanvasBrush` | `#000000` | `#F5F5F5` | Window ground |
-| `PanelBrush` | `#111111` | `#FFFFFF` | Working surface |
-| `InsetBrush` | `#2A2A2A` | `#EEEEEE` | Track and inset surface |
-| `HairlineBrush` | `#242424` | `#E4E4E4` | Structural rules |
-| `InkBrush` | `#F7F7F7` | `#191919` | Main text and neutral icons |
-| `MutedBrush` | `#B4B4B4` | `#5B5B5B` | Supporting text |
-| `BrandBrush` | `#F7F7F7` | `#191919` | Neutral selection emphasis |
-| `BrandSoftBrush` | `#242424` | `#E8E8E8` | Selected receiver surface |
-| `AudioBrush` | `#7AD9B4` | `#176C4D` | Actual signal and active state |
-| `AudioSoftBrush` | `#172A23` | `#E5F1EA` | Subtle audio surface |
-| `WarningBrush` | `#E8BE76` | `#80520A` | Attention required |
-| `DangerBrush` | `#FF9696` | `#B3261E` | Failed operation |
-| `PrimaryActionBrush` | `#F7F7F7` | `#202020` | Primary button fill |
-| `PrimaryActionTextBrush` | `#111111` | `#FFFFFF` | Primary button text |
-| `ControlOutlineBrush` | `#555555` | `#B7B7B7` | Control boundary |
+| `AppCanvasBrush` | `#F2F4F7` | `#101010` | Silver or neutral window ground |
+| `PanelBrush` | `#FFFFFF` | `#1C1C1C` | Receiver, settings and transport surfaces |
+| `InsetBrush` | `#E9EDF2` | `#303030` | Quiet inset and track |
+| `HairlineBrush` | `#DEE2E7` | `#333333` | Surface boundaries |
+| `InkBrush` / `BrandBrush` | `#20242A` | `#F5F5F5` | Text and monochrome selection emphasis |
+| `MutedBrush` | `#626A73` | `#B8B8B8` | Supporting text |
+| `BrandSoftBrush` | `#E5E9EF` | `#303030` | Neutral receiver selection |
+| `AudioBrush` | `#1D5FBF` | `#8BB6FB` | Actual signal and active connection state |
+| `WarningBrush` | `#80520A` | `#E8BE76` | Attention required |
+| `DangerBrush` | `#B3261E` | `#FF9696` | Failed operation |
+| `PrimaryActionBrush` | `#20242A` | `#F5F5F5` | Main control |
+| `PrimaryActionTextBrush` | `#FFFFFF` | `#171717` | Main control text |
+| `ControlOutlineBrush` | `#89939E` | `#777777` | Stronger control boundary |
+| `StageBrush` | `#151515` | `#080808` | Instrument ground |
+| `StageInkBrush` | `#F7F7F7` | `#F7F7F7` | Main instrument text |
+| `StageMutedBrush` | `#B4B4B4` | `#B4B4B4` | Instrument labels |
+| `StageRuleBrush` | `#333333` | `#333333` | Instrument grid and separation |
+| `StageAudioBrush` | `#8BB6FB` | `#8BB6FB` | Actual waveform and levels |
+| `StageInsetBrush` | `#292929` | `#292929` | Instrument track |
 
-Do not apply the audio hue to navigation, primary buttons or decorative backgrounds. Do not reintroduce purple, translucent Mica, large glows or gradients. Error and warning colors carry meaning and accompany readable text.
+Do not apply the audio hue to navigation, a whole sidebar, every button or a card ground. The monochrome primary button inherits the native accent-button template with explicit normal, pointer, pressed and disabled resources. Native toggles also use monochrome on-state resources. This preserves recognizable platform behavior without introducing the system's blue accent into unrelated chrome.
 
-The default remains **follow Windows**. Existing light/dark choices are retained. High-contrast resources use Windows system colors.
+No gradients, glass, glows or large resting shadows. Contrast comes from the instrument against the silver workspace, typography and careful alignment. The dark instrument is an intentional audio component, not a dark sidebar on a light app.
 
-## Screen hierarchy
+## Home states and signal truth
 
-### Sound routing
+Home answers: **which speakers receive this computer's sound, and is an actual signal being sent?** Source choice and selected receivers remain real engine state. A receiver can be available, selected, connecting, waiting for authentication, streaming, reconnecting, offline or failed. One receiver awaiting a password cannot conceal another receiver's session.
 
-The source picker and capture explanation come first. Selected receivers and real signal occupy the main surface. Volume, connection and local-mute controls are adjacent. Discovery remains visible in the left rail, with selection and per-device state represented separately.
+The instrument is always framed. Idle and silent states have a quiet baseline and a short next step; an active waveform is drawn only from actual PCM. Numeric levels remain available when animation is disabled. Sample rate, session time and packet count are secondary measurements, grouped closely rather than spread across the full window.
 
-No fake receivers, demo waveform, invented elapsed time, estimated acoustic latency or decorative metrics may appear in production. A silent or missing source has an explicit explanation. A running transport without acoustic confirmation remains a running transport, not a verified speaker.
+Errors appear once near the failed operation. A source failure belongs beside the source selector and rescan action. Receiver failures belong to that receiver or the connection notice. Diagnostics are available from settings. Neither packet counts nor a lit status mark is labeled as an acoustic test or a measured latency.
 
-### Settings
+The user reported audible HomePod playback with 0.2.1 on 2026-10-21. That observation establishes this user's working baseline. It does not certify every receiver model, firmware, password policy, stereo group or multiroom synchronization behavior.
 
-Settings is a full native view with a clear back action. Order: application update, connection diagnostics, appearance/startup, device visibility, application information/exit. Update status and its action are immediately visible. Hidden receivers remain recoverable while offline. Groups use short explanatory labels beside their controls.
+## Settings hierarchy
+
+Settings supports maintenance without disrupting a running route. Keep update status/actions and connection diagnostics easy to find. Theme, waveform, startup, device visibility and explicit exit are native rows with consistent spacing and nearby explanations. A description is shown once and wraps instead of being clipped.
+
+Update downloading/launching/error states may expand their own group. Hidden receivers remain recoverable even when offline. Hiding a selected receiver explicitly stops that target. Credential values and network addresses do not appear in copied diagnostic text. Ordinary close and explicit exit remain separate user actions.
 
 ## Interaction and motion
 
-Existing receiver buttons update in place, so periodic snapshots do not recreate keyboard focus or accessibility peers. Dynamic text is assigned only when it changes.
+Volume follows the pointer immediately. The local target remains authoritative while dragging, awaiting dispatch or awaiting core acknowledgement. Pointer release flushes the final value. Old snapshots cannot move the slider back. Receiver rows preserve their identity while labels and states update.
 
-Volume follows the user's hand immediately. Commands are debounced; an older snapshot cannot replace a local drag value before the core acknowledges it. Pointer release flushes the final value. Motion must never interfere with this direct manipulation.
+Motion gives feedback: a press, a selection, a state transition or opening settings. It does not introduce staggered card entrances or ornamental motion. Continuous sound visualization comes only from engine data. Windows reduced-motion settings and the waveform preference are honored; signal values and controls remain useful with motion off.
 
-The native slider thumb's two-pixel endpoint outset is reserved inside its track slot, not clipped or replaced. Thumb and track normal, hover, pressed and disabled brushes are scoped directly to the control; the high-contrast variants retain system colors. Explicit connection-button text uses a readable muted foreground when disabled instead of overriding the native disabled state with white text.
+Focus, keyboard behavior, accessible names and status announcements remain native. Selection and errors must be legible without color. The instrument's text uses its own foreground resources so the light theme never puts dark text onto its dark display.
 
-Navigation can use a short opacity transition when Windows animations are enabled. Audio movement comes from real PCM. There is no continuous ornamental motion. Disabling animation or the waveform leaves readable states and actual numeric/level information.
+## Verification
 
-## Accessibility and review
+New-design verification is **pending the 0.3.0 Windows build and visual review**. The committed 0.2.1 screenshots and its successful CI are baseline evidence, not proof of this new composition.
 
-Use native buttons, sliders, toggles, combo boxes and password dialogs. Preserve keyboard behavior, focus indication, accessible names, heading levels and status announcements. Color alone must not distinguish selected, authenticating, streaming or failed receivers.
+Required checks are actual WinUI startup and screenshots at 880 × 680, 1100 × 800 and 1600 × 1000; compact/wide receiver placement; persistent transport availability; volume 0/9/10/99/100 stability and real pointer drag; native settings/back/update/diagnostic actions; and full process/tray exit. Inspect light and dark themes and representative receiver/playback/authentication/error states using clearly identified UI-only fixtures where hardware is unavailable. Production must never contain fixture receivers or synthetic live data.
 
-[The saved contrast calculation](docs/design/contrast-check.json) checks main, secondary, signal, warning and error text colors on the three app-owned opaque surfaces. Its minimum calculated ratio is 5.5:1. This is a resource-level calculation, not a rendered accessibility audit or certification of every native control state.
-
-Inspect the actual WinUI window at compact, normal and wide sizes. HTML previews and web inspectors cannot establish XAML layout or native behavior. See [implementation notes](docs/design.md) for the verification procedure.
+The [saved resource calculation](docs/design/contrast-check.json) checks 54 application-owned text/surface pairs, including the instrument, with a minimum ratio of 4.501:1. These calculations do not certify native rendering or high-contrast behavior. A web preview or web inspector cannot establish WinUI correctness. Update this section only when actual evidence is available.
 
 ## Direction provenance
 
-The app-screen draw selected **true-black-flat**, seed **323664579**, on 2026-10-21. Native type was deliberately retained. One shell redraw replaced the centered no-sidebar shell with **ruled-t-frame**, because the former reproduced the reported centered layout and wasted space at maximized size. The data hue was adapted to real audio signal; controls and navigation remain neutral.
+The taste app-screen draw selected **achromatic-ledger**, seed **192244604**, on 2026-10-21. The selected face is the low-chroma silver meter ground `#F2F4F7`; its main data hue is `#1D5FBF`. The signature is the actual waveform instrument and compact Windows-to-speaker route. Native Segoe type was retained with `--keep type`.
 
-The exact draw is retained in [app-direction.json](docs/design/app-direction.json). Surface goals, incumbent critique and verification boundaries are in [the surface brief](docs/design/surfaces/audio-routing.md).
+One shell redraw selected **no-sidebar**. The initial open-plane navigation sidebar had no real navigation destinations in this small app and reproduced the rejected full-height column. The drawn greeting/count-tile pattern was adapted to the native audio job: no greeting, vanity counters or invented content. The receiver panel is an operational object list, not navigation. These adaptations preserve the style's monochrome chrome and one data hue.
+
+The exact draw is saved in [app-direction.json](docs/design/app-direction.json). The surface brief records the incumbent critique, available skill guidance and evidence boundaries.

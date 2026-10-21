@@ -17,3 +17,5 @@
 .DS_Store
 Thumbs.db
 
+# Local design exploration; committed direction lives in docs/design/.
+/.taste-skill/

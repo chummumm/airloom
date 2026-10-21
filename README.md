@@ -4,7 +4,7 @@
 
 一个从零实现的 Windows 原生音频投放应用：WinUI 3 界面、Rust 音频核心、Windows 自带音频采集。无需安装自定义虚拟声卡驱动。
 
-> **开发中 · 0.2.1**：补齐 HomePod 播放所需的 gPTP 时钟报文字段与启动次序，重构原生界面、修复音量回跳与布局抖动，并让安装更新真正退出后台。用户实测 0.2.0 仍无声；0.2.1 的真实 HomePod 可听播放需要实机复测。自动检查通过不等于已验证音响出声。
+> **开发中**：用户已反馈 0.2.1 在其 HomePod 上恢复出声。0.3.0 正在重构原生界面：银灰工作区、音频仪表、紧凑扬声器列表和固定播放控制栏；沿用已经恢复声音的音频核心。下载仍以 Latest 发布页为准。
 
 [![Build and verify](https://github.com/chummumm/airloom/actions/workflows/ci.yml/badge.svg)](https://github.com/chummumm/airloom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-8b7cf6.svg)](LICENSE)
@@ -69,7 +69,7 @@
 | 更新与包清理 | 原生助手通过校验拒绝、成功/取消、重启与缓存清理检查；真实 WinUI 进程通过安装退出、托盘清理及 Restart Manager 查询/取消/确认退出检查 |
 | 实际播放延迟 | 尚未测量，不把接收缓冲设置当作端到端实测值 |
 | HomePod 立体声组合、多房间同步 | 未验证 |
-| 真实 HomePod 实机结果 | 用户反馈 0.2.0 已连接、HomePod 亮起且有波形，仍无声；0.2.1 修正完整时钟协议与启动次序，等待实机复测 |
+| 真实 HomePod 实机结果 | 用户已反馈 0.2.1 在其 HomePod 上恢复出声；其他型号、固件、立体声组合及多设备同步仍需逐项验证 |
 
 本次发布的 Linux 常规测试 73 项、Windows 常规测试 71 项全部通过。Linux 另通过 FFmpeg 对完整 RTP 加密负载解密后的 ALAC 独立解码检查；Windows 未安装 FFmpeg，该项在那里跳过。回归覆盖独立规范字节 fixture、完整 gPTP 扩展、连续时钟就绪、SETPEERS 后才开始公告的接收端、完整加密会话与非零 PCM 解码，以及多设备分发与故障隔离。原生更新检查使用真实 WinUI 进程验证退出，并用本地安装 fixture 验证后续安装和清理；它不等于已经在线覆盖安装了一台用户电脑。这些检查均不替代真实 HomePod 播放测试。
 

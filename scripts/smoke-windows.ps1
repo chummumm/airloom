@@ -27,6 +27,13 @@ public static class AirloomUiProbe {
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string name);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    public static void RequestExit(IntPtr window) {
+        uint message = RegisterWindowMessage("Airloom.RequestExit.v1");
+        if (message == 0 || !PostMessage(window, message, IntPtr.Zero, IntPtr.Zero))
+            throw new InvalidOperationException("Cannot request native application exit: " + Marshal.GetLastWin32Error());
+    }
     [StructLayout(LayoutKind.Sequential)]
     public struct WindowBounds { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out WindowBounds bounds);
@@ -307,15 +314,22 @@ function Get-NativeSliderThumb([System.Windows.Automation.AutomationElement] $Sl
 
 function Assert-AdaptiveComposition($Geometry, [double] $WorkspaceWidth) {
     $Signal = $Geometry['SignalPanel']
+    $Receivers = $Geometry['DeviceRail']
     $Transport = $Geometry['TransportPanel']
-    if ($WorkspaceWidth -ge 1280) {
-        if ($Transport.x -lt ($Signal.x + $Signal.width - 1) -or [Math]::Abs($Transport.y - $Signal.y) -gt 1) {
-            throw 'The wide workspace did not place transport beside the signal panel.'
+    $Home = (Wait-NativeId 'HomeView').Current.BoundingRectangle
+    if ($Transport.y -lt $Signal.y -or $Transport.x -lt $Home.Left - 1 -or
+        $Transport.x + $Transport.width -gt $Home.Right + 1 -or
+        $Transport.y + $Transport.height -gt $Home.Bottom + 1) {
+        throw 'The persistent transport dock was outside the home workspace.'
+    }
+    if ($WorkspaceWidth -ge 1050) {
+        if ($Receivers.x -lt ($Signal.x + $Signal.width - 1) -or [Math]::Abs($Receivers.y - $Signal.y) -gt 1) {
+            throw 'The wide workspace did not place receivers beside the signal stage.'
         }
         return 'wide'
     }
-    if ($Transport.y -lt ($Signal.y + $Signal.height - 1) -or [Math]::Abs($Transport.x - $Signal.x) -gt 1) {
-        throw 'The compact workspace did not stack transport below the signal panel.'
+    if ($Receivers.y -lt ($Signal.y + $Signal.height - 1) -or [Math]::Abs($Receivers.x - $Signal.x) -gt 1) {
+        throw 'The compact workspace did not stack receivers below the signal stage.'
     }
     return 'compact'
 }
@@ -330,9 +344,14 @@ function Test-NativeVolumeLayout {
             throw "Could not resize the real native window to $($Size[0]) x $($Size[1])."
         }
         Start-Sleep -Milliseconds 500
-        # UIA returns empty geometry for clipped controls. Bring the actual
-        # transport into view before measuring or sending pointer input.
+        $DockBeforeScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
         Set-HomeScroll 100
+        $DockAfterScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
+        foreach ($Dimension in @('X', 'Y', 'Width', 'Height')) {
+            if ([Math]::Abs($DockAfterScroll.$Dimension - $DockBeforeScroll.$Dimension) -gt 1) {
+                throw "The transport dock moved when the home workspace scrolled at $($Size[0]) px."
+            }
+        }
         $Slider = Wait-NativeId 'VolumeSlider'
         if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
@@ -441,6 +460,169 @@ function Test-NativeVolumeLayout {
     return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof }
 }
 
+function Start-NativeApplication([string] $Executable) {
+    $script:Process = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path $Executable) -PassThru
+    $Deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        Start-Sleep -Milliseconds 250
+        $Process.Refresh()
+        if ($Process.HasExited) { throw "Native UI exited during startup (code $($Process.ExitCode))." }
+    } while ($Process.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $Deadline)
+    if ($Process.MainWindowHandle -eq 0) { throw 'No native window appeared within 20 seconds.' }
+    if ($Process.MainWindowTitle -ne 'Airloom') { throw "Unexpected startup window: $($Process.MainWindowTitle)" }
+    $null = Wait-NativeId 'HomeView'
+    Start-Sleep -Milliseconds 600
+}
+
+function Stop-NativeApplication {
+    if ($null -eq $Process -or $Process.HasExited) { return }
+    [AirloomUiProbe]::RequestExit($Process.MainWindowHandle)
+    if (-not $Process.WaitForExit(10000)) { throw 'Native UI did not exit after its explicit exit request.' }
+    $script:Process = $null
+}
+
+function Set-SettingsScroll([double] $Percent) {
+    $Viewport = Wait-NativeId 'SettingsScrollViewer'
+    $Scroll = [System.Windows.Automation.ScrollPattern]$Viewport.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    if ($Scroll.Current.VerticallyScrollable) {
+        $Scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $Percent)
+        Start-Sleep -Milliseconds 150
+    }
+}
+
+function Select-NativeTheme([string] $Name) {
+    $Picker = Wait-NativeId 'ThemePicker'
+    # Theme controls can be below the fold at the minimum native window size.
+    foreach ($Percent in @(0, 25, 50, 75, 100)) {
+        Set-SettingsScroll $Percent
+        if (-not $Picker.Current.IsOffscreen -and -not $Picker.Current.BoundingRectangle.IsEmpty) { break }
+    }
+    if ($Picker.Current.IsOffscreen) { throw 'The theme picker could not be brought into view.' }
+    $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $Expansion.Expand()
+    $NameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $KindCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $Condition = [System.Windows.Automation.AndCondition]::new($NameCondition, $KindCondition)
+    $Deadline = [DateTime]::UtcNow.AddSeconds(3)
+    $Option = $null
+    do {
+        $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+        $Option = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
+        if ($null -eq $Option) {
+            # A native ComboBox popup may have its own top-level HWND. Search
+            # only UIA roots owned by this launched process, never other apps.
+            $ProcessCondition = [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $Process.Id)
+            $Roots = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Children, $ProcessCondition)
+            foreach ($Root in $Roots) {
+                $Option = $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
+                if ($null -ne $Option) { break }
+            }
+        }
+        if ($null -ne $Option) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $Deadline)
+    if ($null -eq $Option) { throw "The native theme option '$Name' was not exposed after opening the picker." }
+    $Selection = [System.Windows.Automation.SelectionItemPattern]$Option.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $Selection.Select()
+    $Expansion.Collapse()
+    Start-Sleep -Milliseconds 350
+    $Selected = [System.Windows.Automation.SelectionPattern]$Picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+    if (@($Selected.GetCurrentSelection())[0].Current.Name -ne $Name) { throw "Native theme selection did not retain '$Name'." }
+    Set-SettingsScroll 0
+}
+
+function Test-NativeThemes([string] $Prefix) {
+    $Themes = @()
+    foreach ($Theme in @(@('浅色', 'light'), @('深色', 'dark'))) {
+        Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+        $null = Wait-NativeId 'SettingsBackButton'
+        Select-NativeTheme $Theme[0]
+        Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-settings-$($Theme[1]).png")
+        Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+        $null = Wait-NativeId 'HomeView'
+        Start-Sleep -Milliseconds 250
+        Set-HomeScroll 0
+        Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-home-$($Theme[1]).png")
+        $Themes += $Theme[1]
+    }
+    return [ordered]@{ verified = $true; themes = $Themes }
+}
+
+function Build-VisualFixture([string] $OutputDirectory) {
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+    $VsInstall = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $VsInstall) { throw 'Visual C++ installation not found for the isolated UI fixture.' }
+    $DeveloperCommand = Join-Path $VsInstall 'Common7/Tools/VsDevCmd.bat'
+    $Source = Join-Path $ProjectRoot 'scripts/fixtures/UiFixture.cpp'
+    $CommandFile = Join-Path $OutputDirectory 'build-fixture.cmd'
+    $Dll = Join-Path $OutputDirectory 'airloom_core.dll'
+    $ObjectFile = Join-Path $OutputDirectory 'UiFixture.obj'
+    $ImportLibrary = Join-Path $OutputDirectory 'UiFixture.lib'
+    $Commands = "@echo off`r`ncall `"$DeveloperCommand`" -no_logo -arch=x64 -host_arch=x64`r`nif errorlevel 1 exit /b 1`r`n" +
+        "cl.exe /nologo /std:c++20 /EHsc /W4 /WX /MT /utf-8 /LD `"$Source`" /Fo`"$ObjectFile`" /Fe`"$Dll`" /link /IMPLIB:`"$ImportLibrary`"`r`n"
+    [System.IO.File]::WriteAllText($CommandFile, $Commands, [System.Text.UTF8Encoding]::new($false))
+    & $env:ComSpec /d /c $CommandFile
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Dll)) { throw 'Isolated visual fixture build failed.' }
+}
+
+function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
+    $PriorEnabled = $env:AIRLOOM_UI_FIXTURE
+    try {
+        $env:AIRLOOM_UI_FIXTURE = '1'
+        Start-NativeApplication (Join-Path $FixtureDirectory 'Airloom.exe')
+    } finally { $env:AIRLOOM_UI_FIXTURE = $PriorEnabled }
+    $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
+    Start-Sleep -Milliseconds 400
+    foreach ($Id in @('Receiver:fixture-living-room', 'Receiver:fixture-study', 'Receiver:fixture-bedroom')) {
+        $null = Wait-NativeId $Id
+    }
+    $ThemeProof = Test-NativeThemes 'fixture-playing'
+    $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 880, 680, 0x0004)
+    Start-Sleep -Milliseconds 400
+    Set-HomeScroll 0
+    Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-playing-home-compact-dark.png')
+    $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
+    Start-Sleep -Milliseconds 400
+    $Slider = Wait-NativeId 'VolumeSlider'
+    $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+    $Baseline = Get-NativeLayout
+    foreach ($Volume in @(9, 100, 56)) {
+        $Range.SetValue($Volume)
+        Start-Sleep -Milliseconds 350
+        if ([Math]::Abs($Range.Current.Value - $Volume) -gt 0.01) { throw 'Populated fixture volume snapped back.' }
+        Assert-StableLayout $Baseline (Get-NativeLayout) 'Populated fixture volume'
+    }
+    # This click enters the same native password dialog used for real receivers.
+    # Cancelling its request must leave the other two fixture receivers selected.
+    Invoke-NativeButton (Wait-NativeId 'Receiver:fixture-bedroom')
+    $null = Wait-NativeButton '继续连接'
+    Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-auth-dark.png')
+    Invoke-NativeButton (Wait-NativeButton '取消')
+    Start-Sleep -Milliseconds 400
+    $Targets = (Wait-NativeId 'TargetName').Current.Name
+    if (-not $Targets.Contains('客厅 HomePod') -or -not $Targets.Contains('书房 HomePod mini') -or $Targets.Contains('卧室')) {
+        throw 'Cancelling one fixture authentication request changed the other selected receivers.'
+    }
+    Invoke-NativeButton (Wait-NativeId 'SettingsButton')
+    Invoke-NativeButton (Wait-NativeId 'CopyDiagnosticsButton')
+    Start-Sleep -Milliseconds 150
+    $FixtureDiagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
+    if ($FixtureDiagnostics.fixture -ne $true) { throw 'The isolated screenshot process did not identify its fixture data.' }
+    Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
+    return [ordered]@{
+        verified = $true; data_source = 'CI-only replacement DLL in a separate temporary archive copy'
+        synthetic_data = $true; real_audio_or_receiver_claim = $false
+        themes = $ThemeProof.themes; receivers = 3; initially_streaming = 2
+        password_dialog_verified = $true; per_receiver_cancel_verified = $true
+        populated_volume_retained = $true
+    }
+}
+
 function Wait-NativeUpdateCheck {
     $TextCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -483,24 +665,20 @@ if (-not (Test-Path $ArchivePath)) { throw 'Build the portable distribution befo
 # Launch the shipped files from a clean directory, so build-tree resources
 # cannot accidentally hide a missing DLL or XAML resource in the archive.
 $SmokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Airloom-Smoke-' + [guid]::NewGuid().ToString('N'))
+$FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Airloom-UiFixture-' + [guid]::NewGuid().ToString('N'))
 Expand-Archive -LiteralPath $ArchivePath -DestinationPath $SmokeRoot
 $AppPath = Join-Path $SmokeRoot 'Airloom.exe'
+$ThemeSettingsPath = 'HKCU:\Software\Airloom'
+$SavedTheme = Get-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
+$ShippedCoreHash = (Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash
 $Process = $null
 try {
     # The large adaptive layout must be physically on-screen, not hanging off
     # a 1024 x 768 desktop. Only this disposable CI display is adjusted.
     [AirloomUiProbe]::PrepareDisplay(1600, 1040)
     Start-Sleep -Milliseconds 500
-    $Process = Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path $AppPath) -PassThru
-    $Deadline = [DateTime]::UtcNow.AddSeconds(20)
-    do {
-        Start-Sleep -Milliseconds 500
-        $Process.Refresh()
-        if ($Process.HasExited) { throw "Native UI exited during startup (code $($Process.ExitCode))." }
-    } while ($Process.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $Deadline)
-    if ($Process.MainWindowHandle -eq 0) { throw 'No native window appeared within 20 seconds.' }
-    if ($Process.MainWindowTitle -ne 'Airloom') { throw "Unexpected startup window: $($Process.MainWindowTitle)" }
-    Start-Sleep -Seconds 3
+    Start-NativeApplication $AppPath
+    $ShippedWindowHandle = $Process.MainWindowHandle.ToInt64()
     $VolumeProof = Test-NativeVolumeLayout
     # Capture a fully visible compact window on the runner's actual desktop.
     $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
@@ -532,11 +710,25 @@ try {
     $null = Wait-NativeButton '设置'
     $Process.Refresh()
     if ($Process.HasExited) { throw 'Native UI exited after returning from settings.' }
+    $ThemeProof = Test-NativeThemes 'native'
+    Stop-NativeApplication
+
+    # Populated screenshots run the same WinUI binary with a synthetic core in
+    # another temporary directory. The shipped archive/core stay byte-identical;
+    # no fixture switch, receivers or signals are added to production code.
+    New-Item -ItemType Directory -Path $FixtureRoot -Force | Out-Null
+    Copy-Item -Path (Join-Path $SmokeRoot '*') -Destination $FixtureRoot -Recurse -Force
+    Build-VisualFixture $FixtureRoot
+    $FixtureProof = Test-PopulatedVisualFixture $FixtureRoot
+    Stop-NativeApplication
+    if ((Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash -ne $ShippedCoreHash) {
+        throw 'The populated visual fixture changed the real core used for shipped-archive verification.'
+    }
     $Result = @{
         result = 'window-opened'
         distribution = 'portable-zip'
         process = 'Airloom.exe'
-        hwnd = $Process.MainWindowHandle.ToInt64()
+        hwnd = $ShippedWindowHandle
         settings_verified = $true
         update_check_verified = $true
         update_status = $UpdateStatus
@@ -547,9 +739,13 @@ try {
         pointer_input = $VolumeProof.pointer_input
         volume_measurements = $VolumeProof.measurements
         diagnostics_copy_verified = $true
+        themes_verified = $ThemeProof.verified
+        themes = $ThemeProof.themes
+        fixture_states_verified = $FixtureProof.verified
+        fixture_evidence = $FixtureProof
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
         desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
-        note = 'Real WinUI launch from the shipped archive; on-screen volume geometry verified at 880/1100/1600 pixels with 0/9/10/99/100 values and a real pointer drag. Scrollable controls are brought into view before measurement. Screenshots at all three sizes, settings, live GitHub update metadata, and diagnostics clipboard verified. No physical HomePod was connected.'
+        note = 'Real WinUI launch from the shipped archive; persistent transport, receiver composition, volume geometry at 880/1100/1600 pixels with 0/9/10/99/100 values, real pointer drag, light/dark switching, settings, live update metadata and diagnostics verified. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog visual checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))
@@ -559,5 +755,11 @@ try {
 } finally {
     if ($null -ne $Process -and -not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $FixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($null -ne $SavedTheme) {
+        New-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -Value $SavedTheme.Theme -PropertyType DWord -Force | Out-Null
+    } else {
+        Remove-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
+    }
     [AirloomUiProbe]::RestoreDisplay()
 }

@@ -1,186 +1,440 @@
 {
+  "version": "0.3.0 design",
   "method": "WCAG sRGB luminance formula on opaque XAML resource pairs; not a rendered accessibility audit",
-  "minimum_ratio": 5.5,
+  "minimum_ratio": 4.501,
+  "scope": "App-owned foreground/background pairs in light and dark modes, including the instrument. Native template, disabled and high-contrast states require separate rendered inspection.",
   "pairs": [
     {
       "theme": "Default",
       "foreground": "InkBrush",
       "background": "AppCanvasBrush",
-      "ratio": 19.6
+      "foreground_color": "#F5F5F5",
+      "background_color": "#101010",
+      "ratio": 17.453
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#B8B8B8",
+      "background_color": "#101010",
+      "ratio": 9.592
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#101010",
+      "ratio": 9.226
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#E8BE76",
+      "background_color": "#101010",
+      "ratio": 10.926
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#FF9696",
+      "background_color": "#101010",
+      "ratio": 9.111
     },
     {
       "theme": "Default",
       "foreground": "InkBrush",
       "background": "PanelBrush",
-      "ratio": 17.63
+      "foreground_color": "#F5F5F5",
+      "background_color": "#1C1C1C",
+      "ratio": 15.632
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#B8B8B8",
+      "background_color": "#1C1C1C",
+      "ratio": 8.591
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#1C1C1C",
+      "ratio": 8.263
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#E8BE76",
+      "background_color": "#1C1C1C",
+      "ratio": 9.786
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#FF9696",
+      "background_color": "#1C1C1C",
+      "ratio": 8.16
     },
     {
       "theme": "Default",
       "foreground": "InkBrush",
       "background": "InsetBrush",
-      "ratio": 13.4
-    },
-    {
-      "theme": "Default",
-      "foreground": "MutedBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 10.13
-    },
-    {
-      "theme": "Default",
-      "foreground": "MutedBrush",
-      "background": "PanelBrush",
-      "ratio": 9.11
+      "foreground_color": "#F5F5F5",
+      "background_color": "#303030",
+      "ratio": 12.106
     },
     {
       "theme": "Default",
       "foreground": "MutedBrush",
       "background": "InsetBrush",
-      "ratio": 6.92
-    },
-    {
-      "theme": "Default",
-      "foreground": "AudioBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 12.41
-    },
-    {
-      "theme": "Default",
-      "foreground": "AudioBrush",
-      "background": "PanelBrush",
-      "ratio": 11.16
+      "foreground_color": "#B8B8B8",
+      "background_color": "#303030",
+      "ratio": 6.653
     },
     {
       "theme": "Default",
       "foreground": "AudioBrush",
       "background": "InsetBrush",
-      "ratio": 8.48
-    },
-    {
-      "theme": "Default",
-      "foreground": "WarningBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 12.06
-    },
-    {
-      "theme": "Default",
-      "foreground": "WarningBrush",
-      "background": "PanelBrush",
-      "ratio": 10.84
+      "foreground_color": "#8BB6FB",
+      "background_color": "#303030",
+      "ratio": 6.399
     },
     {
       "theme": "Default",
       "foreground": "WarningBrush",
       "background": "InsetBrush",
-      "ratio": 8.24
-    },
-    {
-      "theme": "Default",
-      "foreground": "DangerBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 10.05
-    },
-    {
-      "theme": "Default",
-      "foreground": "DangerBrush",
-      "background": "PanelBrush",
-      "ratio": 9.04
+      "foreground_color": "#E8BE76",
+      "background_color": "#303030",
+      "ratio": 7.578
     },
     {
       "theme": "Default",
       "foreground": "DangerBrush",
       "background": "InsetBrush",
-      "ratio": 6.87
+      "foreground_color": "#FF9696",
+      "background_color": "#303030",
+      "ratio": 6.319
+    },
+    {
+      "theme": "Default",
+      "foreground": "InkBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#F5F5F5",
+      "background_color": "#303030",
+      "ratio": 12.106
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#B8B8B8",
+      "background_color": "#303030",
+      "ratio": 6.653
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#303030",
+      "ratio": 6.399
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#E8BE76",
+      "background_color": "#303030",
+      "ratio": 7.578
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#FF9696",
+      "background_color": "#303030",
+      "ratio": 6.319
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageInkBrush",
+      "background": "StageBrush",
+      "foreground_color": "#F7F7F7",
+      "background_color": "#080808",
+      "ratio": 18.694
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageMutedBrush",
+      "background": "StageBrush",
+      "foreground_color": "#B4B4B4",
+      "background_color": "#080808",
+      "ratio": 9.659
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageAudioBrush",
+      "background": "StageBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#080808",
+      "ratio": 9.71
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageInkBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#F7F7F7",
+      "background_color": "#292929",
+      "ratio": 13.58
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageMutedBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#B4B4B4",
+      "background_color": "#292929",
+      "ratio": 7.017
+    },
+    {
+      "theme": "Default",
+      "foreground": "StageAudioBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#292929",
+      "ratio": 7.054
+    },
+    {
+      "theme": "Default",
+      "foreground": "PrimaryActionTextBrush",
+      "background": "PrimaryActionBrush",
+      "foreground_color": "#171717",
+      "background_color": "#F5F5F5",
+      "ratio": 16.444
     },
     {
       "theme": "Light",
       "foreground": "InkBrush",
       "background": "AppCanvasBrush",
-      "ratio": 16.13
+      "foreground_color": "#20242A",
+      "background_color": "#F2F4F7",
+      "ratio": 14.147
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#626A73",
+      "background_color": "#F2F4F7",
+      "ratio": 4.978
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#1D5FBF",
+      "background_color": "#F2F4F7",
+      "ratio": 5.538
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#80520A",
+      "background_color": "#F2F4F7",
+      "ratio": 6.091
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "AppCanvasBrush",
+      "foreground_color": "#B3261E",
+      "background_color": "#F2F4F7",
+      "ratio": 5.932
     },
     {
       "theme": "Light",
       "foreground": "InkBrush",
       "background": "PanelBrush",
-      "ratio": 17.58
+      "foreground_color": "#20242A",
+      "background_color": "#FFFFFF",
+      "ratio": 15.588
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#626A73",
+      "background_color": "#FFFFFF",
+      "ratio": 5.485
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#1D5FBF",
+      "background_color": "#FFFFFF",
+      "ratio": 6.102
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#80520A",
+      "background_color": "#FFFFFF",
+      "ratio": 6.711
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "PanelBrush",
+      "foreground_color": "#B3261E",
+      "background_color": "#FFFFFF",
+      "ratio": 6.536
     },
     {
       "theme": "Light",
       "foreground": "InkBrush",
       "background": "InsetBrush",
-      "ratio": 15.15
-    },
-    {
-      "theme": "Light",
-      "foreground": "MutedBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 6.23
-    },
-    {
-      "theme": "Light",
-      "foreground": "MutedBrush",
-      "background": "PanelBrush",
-      "ratio": 6.79
+      "foreground_color": "#20242A",
+      "background_color": "#E9EDF2",
+      "ratio": 13.258
     },
     {
       "theme": "Light",
       "foreground": "MutedBrush",
       "background": "InsetBrush",
-      "ratio": 5.85
-    },
-    {
-      "theme": "Light",
-      "foreground": "AudioBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 5.86
-    },
-    {
-      "theme": "Light",
-      "foreground": "AudioBrush",
-      "background": "PanelBrush",
-      "ratio": 6.39
+      "foreground_color": "#626A73",
+      "background_color": "#E9EDF2",
+      "ratio": 4.665
     },
     {
       "theme": "Light",
       "foreground": "AudioBrush",
       "background": "InsetBrush",
-      "ratio": 5.5
-    },
-    {
-      "theme": "Light",
-      "foreground": "WarningBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 6.16
-    },
-    {
-      "theme": "Light",
-      "foreground": "WarningBrush",
-      "background": "PanelBrush",
-      "ratio": 6.71
+      "foreground_color": "#1D5FBF",
+      "background_color": "#E9EDF2",
+      "ratio": 5.19
     },
     {
       "theme": "Light",
       "foreground": "WarningBrush",
       "background": "InsetBrush",
-      "ratio": 5.78
-    },
-    {
-      "theme": "Light",
-      "foreground": "DangerBrush",
-      "background": "AppCanvasBrush",
-      "ratio": 6.0
-    },
-    {
-      "theme": "Light",
-      "foreground": "DangerBrush",
-      "background": "PanelBrush",
-      "ratio": 6.54
+      "foreground_color": "#80520A",
+      "background_color": "#E9EDF2",
+      "ratio": 5.708
     },
     {
       "theme": "Light",
       "foreground": "DangerBrush",
       "background": "InsetBrush",
-      "ratio": 5.63
+      "foreground_color": "#B3261E",
+      "background_color": "#E9EDF2",
+      "ratio": 5.559
+    },
+    {
+      "theme": "Light",
+      "foreground": "InkBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#20242A",
+      "background_color": "#E5E9EF",
+      "ratio": 12.792
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#626A73",
+      "background_color": "#E5E9EF",
+      "ratio": 4.501
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#1D5FBF",
+      "background_color": "#E5E9EF",
+      "ratio": 5.008
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#80520A",
+      "background_color": "#E5E9EF",
+      "ratio": 5.507
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "BrandSoftBrush",
+      "foreground_color": "#B3261E",
+      "background_color": "#E5E9EF",
+      "ratio": 5.364
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageInkBrush",
+      "background": "StageBrush",
+      "foreground_color": "#F7F7F7",
+      "background_color": "#151515",
+      "ratio": 17.046
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageMutedBrush",
+      "background": "StageBrush",
+      "foreground_color": "#B4B4B4",
+      "background_color": "#151515",
+      "ratio": 8.807
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageAudioBrush",
+      "background": "StageBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#151515",
+      "ratio": 8.854
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageInkBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#F7F7F7",
+      "background_color": "#292929",
+      "ratio": 13.58
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageMutedBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#B4B4B4",
+      "background_color": "#292929",
+      "ratio": 7.017
+    },
+    {
+      "theme": "Light",
+      "foreground": "StageAudioBrush",
+      "background": "StageInsetBrush",
+      "foreground_color": "#8BB6FB",
+      "background_color": "#292929",
+      "ratio": 7.054
+    },
+    {
+      "theme": "Light",
+      "foreground": "PrimaryActionTextBrush",
+      "background": "PrimaryActionBrush",
+      "foreground_color": "#FFFFFF",
+      "background_color": "#20242A",
+      "ratio": 15.588
     }
   ]
 }

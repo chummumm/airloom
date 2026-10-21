@@ -184,8 +184,8 @@ namespace winrt::Airloom::implementation
         SetTitleBar(TitleDragRegion());
 
         auto const dpi = GetDpiForWindow(m_hwnd);
-        auto const width = MulDiv(1140, static_cast<int>(dpi), 96);
-        auto const height = MulDiv(810, static_cast<int>(dpi), 96);
+        auto const width = MulDiv(1120, static_cast<int>(dpi), 96);
+        auto const height = MulDiv(780, static_cast<int>(dpi), 96);
         MONITORINFO monitor{sizeof(monitor)};
         GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
         auto const usableWidth = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
@@ -343,14 +343,14 @@ namespace winrt::Airloom::implementation
         bool const hiddenOnly = visibleCount == 0 && !m_hiddenDevices.empty();
         EmptyDeviceTitle().Text(discovering ? L"正在寻找附近的扬声器" : hiddenOnly ? L"设备已收好" : L"还没有发现扬声器");
         EmptyDeviceDescription().Text(hiddenOnly ? L"在设置中恢复已隐藏的设备，\n或重新发现附近的扬声器。" :
-            L"让电脑和 HomePod 连接同一网络，\n然后点右上角重新发现。");
+            L"将 HomePod 与电脑连接同一网络，然后点击重新发现。");
         DiscoveryRing().IsActive(discovering);
         DiscoveryRing().Visibility(discovering ? Visibility::Visible : Visibility::Collapsed);
 
         hstring badge = L"等待连接";
         hstring eyebrow = L"尚未连接";
-        hstring description = device ? L"使用当前声音来源连接已选扬声器。" : L"在左侧选择一台或多台扬声器，然后开始连接。";
-        hstring action = L"开始连接";
+        hstring description = device ? L"使用当前声音来源连接已选扬声器。" : L"选择一台或多台扬声器，然后开始投放。";
+        hstring action = L"开始投放";
         if (discovering) { badge = L"正在发现"; description = L"正在寻找同一网络中的 AirPlay 扬声器。"; }
         if (streaming) { badge = L"正在传输"; eyebrow = L"正在向 " + to_hstring(streamingCount) + L" 台扬声器发送音频"; action = L"全部断开"; }
         if (next.state == L"connecting") { badge = L"正在连接"; eyebrow = L"正在建立连接"; description = L"正在与扬声器建立连接…"; action = L"取消连接"; }
@@ -364,8 +364,8 @@ namespace winrt::Airloom::implementation
         {
             badge = L"等待音频输出";
             eyebrow = L"等待声音来源";
-            description = device ? L"完成声音来源设置后，可连接已选扬声器。" : L"在左侧选择一台或多台扬声器。";
-            action = L"开始连接";
+            description = device ? L"完成声音来源设置后，可连接已选扬声器。" : L"选择扬声器，准备投放电脑声音。";
+            action = L"开始投放";
         }
 
         hstring targets;
@@ -377,7 +377,7 @@ namespace winrt::Airloom::implementation
         }
         SetText(StatusBadge(), badge);
         SetText(SessionEyebrow(), eyebrow);
-        SetText(TargetName(), targets.empty() ? L"选择扬声器" : targets);
+        SetText(TargetName(), targets.empty() ? L"尚未选择扬声器" : targets);
         SetText(StatusDescription(), description);
         ToolTipService::SetToolTip(StatusDescription(), box_value(description));
         ToolTipService::SetToolTip(TargetName(), box_value(targets));
@@ -439,8 +439,8 @@ namespace winrt::Airloom::implementation
         if (m_desktop.HasTrayIcon())
         {
             FooterMessage().Text(next.muteLocal
-                ? L"电脑静音会影响同一输出上的其他应用；如果采集无声，可先关闭此选项。"
-                : L"关闭窗口后继续在托盘运行。要结束传输，请选择“全部断开”或退出 Airloom。");
+                ? L"电脑输出已静音；若声音中断，请关闭电脑静音。"
+                : L"关闭窗口后，声音投放会在托盘中继续。");
         }
         if (next.state != m_snapshot.state || next.selectedDeviceIds != m_snapshot.selectedDeviceIds)
         {
@@ -473,15 +473,15 @@ namespace winrt::Airloom::implementation
                 created.button = Button();
                 created.button.HorizontalAlignment(HorizontalAlignment::Stretch);
                 created.button.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-                created.button.Padding(Thickness{10, 10, 10, 10});
-                created.button.Height(72);
+                created.button.Padding(Thickness{12, 12, 12, 12});
+                created.button.Height(80);
                 created.button.CornerRadius(CornerRadius{8});
                 Automation::AutomationProperties::SetAutomationId(created.button, L"Receiver:" + device.id);
 
                 Grid contents;
                 contents.ColumnSpacing(10);
                 ColumnDefinition iconColumn, textColumn, markerColumn;
-                iconColumn.Width(GridLength{18, GridUnitType::Pixel});
+                iconColumn.Width(GridLength{28, GridUnitType::Pixel});
                 textColumn.Width(GridLength{1, GridUnitType::Star});
                 markerColumn.Width(GridLength{14, GridUnitType::Pixel});
                 contents.ColumnDefinitions().Append(iconColumn);
@@ -489,14 +489,14 @@ namespace winrt::Airloom::implementation
                 contents.ColumnDefinitions().Append(markerColumn);
                 created.icon = FontIcon();
                 created.icon.Glyph(L"\uE767");
-                created.icon.FontSize(16);
+                created.icon.FontSize(22);
                 contents.Children().Append(created.icon);
                 StackPanel labels;
                 Grid::SetColumn(labels, 1);
                 labels.Spacing(5);
                 labels.VerticalAlignment(VerticalAlignment::Center);
                 created.name = TextBlock();
-                created.name.FontSize(14);
+                created.name.FontSize(15);
                 created.name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
                 created.name.TextTrimming(TextTrimming::CharacterEllipsis);
                 created.detail = TextBlock();
@@ -549,9 +549,9 @@ namespace winrt::Airloom::implementation
 
             auto& row = *found;
             bool const selected = next.IsSelected(device.id);
-            row.button.BorderThickness(Thickness{m_highContrast ? 1.0 : 0.0});
-            row.button.BorderBrush(Brush(L"ControlOutlineBrush"));
-            row.button.Background(Brush(selected ? L"BrandSoftBrush" : L"AppCanvasBrush"));
+            row.button.BorderThickness(Thickness{1.0});
+            row.button.BorderBrush(Brush(selected ? L"ControlOutlineBrush" : L"HairlineBrush"));
+            row.button.Background(Brush(selected ? L"BrandSoftBrush" : L"PanelBrush"));
             row.button.IsEnabled(device.online || selected);
             SetText(row.name, device.name);
             row.name.Foreground(Brush(selected ? L"BrandBrush" : L"InkBrush"));
@@ -567,10 +567,10 @@ namespace winrt::Airloom::implementation
             SetText(row.detail, stateLabel);
             row.detail.Foreground(Brush(m_highContrast && selected ? L"BrandBrush" :
                 device.state == L"streaming" ? L"AudioBrush" : device.state == L"error" ? L"DangerBrush" : L"MutedBrush"));
-            row.marker.Glyph(selected ? L"\uE73E" : L"\uE72E");
+            row.marker.Glyph(selected ? L"\uE73E" : device.passwordRequired ? L"\uE72E" : L"\uE710");
             row.marker.Foreground(Brush(selected ? L"BrandBrush" : L"MutedBrush"));
-            // Hidden keeps the same marker slot for every state.
-            row.marker.Opacity(selected || device.passwordRequired ? 1.0 : 0.0);
+            // A reserved selection/lock/add slot keeps every receiver name aligned.
+            row.marker.Opacity(1.0);
             row.retry.Visibility(selected && device.state != L"streaming" ? Visibility::Visible : Visibility::Collapsed);
             row.hide.Text(selected ? L"断开并隐藏设备" : L"隐藏设备");
             SetAccessibleName(row.button, device.name + (selected ? L"，已选择，" : L"，未选择，") + stateLabel);
@@ -635,27 +635,46 @@ namespace winrt::Airloom::implementation
         WaveformBaseline().Y2(center);
         bool const waveformAllowed = m_visualizerEnabled && m_motionAllowed;
         bool const hasSignal = streaming && std::max(left, right) > 0.00005;
-        WaveformLine().Visibility(waveformAllowed && streaming ? Visibility::Visible : Visibility::Collapsed);
-        WaveformHint().Visibility(hasSignal && waveformAllowed ? Visibility::Collapsed : Visibility::Visible);
-        WaveformHint().Text(!streaming ? L"连接后显示实时音频" : !m_visualizerEnabled ? L"动态波形已关闭 · 电平仍在实时更新" : !m_motionAllowed ? L"已遵循 Windows 动画设置 · 电平仍在更新" : L"等待声音 · 试着播放一首音乐");
-        if (!waveformAllowed || !streaming) return;
+        WaveformHintSurface().Visibility(hasSignal && waveformAllowed ? Visibility::Collapsed : Visibility::Visible);
+        WaveformHint().Text(!streaming ? L"连接后，声音将在这里流动" : !m_visualizerEnabled ? L"动态波形已关闭" : !m_motionAllowed ? L"已遵循 Windows 动画设置" : L"等待声音 · 播放一首音乐试试");
+        WaveformUpperGuide().X2(width);
+        WaveformLowerGuide().X2(width);
+        WaveformUpperGuide().Y1(height * 0.08);
+        WaveformUpperGuide().Y2(height * 0.08);
+        WaveformLowerGuide().Y1(height * 0.92);
+        WaveformLowerGuide().Y2(height * 0.92);
 
-        PointCollection points;
-        if (next.waveform.size() >= 2)
+        // The core provides a 64-bin peak envelope, not signed time-domain samples.
+        // Display its actual magnitude on a fixed -60..0 dB scale. Mirroring is only
+        // a display convention; there is no synthetic motion or automatic gain.
+        if (m_waveformBars.empty())
         {
-            auto const count = next.waveform.size();
-            for (size_t index = 0; index < count; ++index)
+            auto color = Brush(L"StageAudioBrush");
+            for (size_t index = 0; index < 64; ++index)
             {
-                points.Append(Point{static_cast<float>(width * static_cast<double>(index) / static_cast<double>(count - 1)),
-                    static_cast<float>(center - next.waveform[index] * (height * 0.43))});
+                Line bar;
+                bar.Stroke(color);
+                bar.StrokeStartLineCap(PenLineCap::Round);
+                bar.StrokeEndLineCap(PenLineCap::Round);
+                bar.Visibility(Visibility::Collapsed);
+                WaveformCanvas().Children().Append(bar);
+                m_waveformBars.push_back(bar);
             }
         }
-        else
+        auto const step = width / static_cast<double>(m_waveformBars.size());
+        for (size_t index = 0; index < m_waveformBars.size(); ++index)
         {
-            points.Append(Point{0, static_cast<float>(center)});
-            points.Append(Point{static_cast<float>(width), static_cast<float>(center)});
+            auto const peak = waveformAllowed && streaming && index < next.waveform.size()
+                ? std::clamp(std::abs(next.waveform[index]), 0.0, 1.0) : 0.0;
+            auto const magnitude = peak > 0.001 ? std::clamp((20.0 * std::log10(peak) + 60.0) / 60.0, 0.0, 1.0) : 0.0;
+            auto const extent = magnitude * height * 0.42;
+            auto const x = (static_cast<double>(index) + 0.5) * step;
+            auto const& bar = m_waveformBars[index];
+            bar.X1(x); bar.X2(x);
+            bar.Y1(center - extent); bar.Y2(center + extent);
+            bar.StrokeThickness(std::clamp(step * 0.45, 2.0, 6.0));
+            bar.Visibility(magnitude > 0.0 ? Visibility::Visible : Visibility::Collapsed);
         }
-        WaveformLine().Points(points);
     }
 
     void MainWindow::RenderError(Snapshot const& next)
@@ -962,9 +981,10 @@ namespace winrt::Airloom::implementation
             bool const hidden = IsDeviceHidden(entry.id);
             auto const discovered = next.FindDevice(entry.id);
             Border row;
-            row.Background(Brush(L"InsetBrush"));
-            row.CornerRadius(CornerRadius{12});
-            row.Padding(Thickness{16, 13, 14, 13});
+            row.Background(Brush(L"PanelBrush"));
+            row.BorderBrush(Brush(L"HairlineBrush"));
+            row.BorderThickness(Thickness{0, 0, 0, 1});
+            row.Padding(Thickness{0, 10, 0, 10});
             Grid layout;
             layout.ColumnSpacing(16);
             ColumnDefinition labelColumn;
@@ -983,7 +1003,7 @@ namespace winrt::Airloom::implementation
             title.TextTrimming(TextTrimming::CharacterEllipsis);
             labels.Children().Append(title);
             TextBlock detail;
-            detail.FontSize(11);
+            detail.FontSize(12);
             detail.Foreground(Brush(L"MutedBrush"));
             detail.TextTrimming(TextTrimming::CharacterEllipsis);
             hstring status = hidden ? L"已隐藏" : L"在首页显示";
@@ -996,7 +1016,7 @@ namespace winrt::Airloom::implementation
             Button toggle;
             Grid::SetColumn(toggle, 1);
             toggle.VerticalAlignment(VerticalAlignment::Center);
-            toggle.MinWidth(90);
+            toggle.MinWidth(76);
             toggle.Content(box_value(hidden ? L"恢复显示" : L"隐藏"));
             SetAccessibleName(toggle, (hidden ? L"恢复显示 " : L"隐藏 ") + entry.name);
             toggle.Click([weak = get_weak(), id = entry.id, name = entry.name, hidden](auto const&, auto const&)
@@ -1140,6 +1160,7 @@ namespace winrt::Airloom::implementation
         titlebar.ButtonInactiveBackgroundColor(Windows::UI::Color{0, 0, 0, 0});
         titlebar.ButtonHoverBackgroundColor(m_highContrast ? SystemColor(COLOR_HIGHLIGHT) :
             dark ? Windows::UI::Color{30, 255, 255, 255} : Windows::UI::Color{18, 0, 0, 0});
+        for (auto const& bar : m_waveformBars) bar.Stroke(Brush(L"StageAudioBrush"));
         m_forceDeviceRender = true;
         m_visibilityRendered = false;
     }
@@ -1184,7 +1205,7 @@ namespace winrt::Airloom::implementation
     {
         // XAML layout reports effective pixels. Use the actual client content,
         // not the HWND's outer frame or an assumed monitor scale.
-        bool const wide = width >= 1280.0;
+        bool const wide = width >= 1050.0;
         WideWorkspaceTrigger().IsActive(wide);
         CompactWorkspaceTrigger().IsActive(!wide);
     }

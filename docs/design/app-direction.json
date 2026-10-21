@@ -1,12 +1,12 @@
 {
  "version": 1,
  "kind": "app",
- "at": "2026-10-21T03:58:22.641Z",
- "seed": 323664579,
+ "at": "2026-10-21T07:56:59.182Z",
+ "seed": 192244604,
  "input": {
-  "kind": "community",
-  "brief": "Airloom is a native Windows audio router: existing Windows playback output to one or more HomePods, with real stereo input meters, receiver selection, password pairing and settings. A precision listening console for quick volume and route adjustments; no fictitious metrics.",
-  "theme": null,
+  "kind": "workspace",
+  "brief": "Airloom 原生 Windows 音频投放工作台；银灰色精密音频播放器，紧凑的音源与扬声器路由，真实声波示波器，固定底部播放控制，独立设置，保留原生 Segoe 字体",
+  "theme": "light",
   "screens": [
    "home",
    "settings"
@@ -14,129 +14,144 @@
   "keep": [
    "type"
   ],
-  "style": "true-black-flat"
+  "style": "achromatic-ledger"
  },
  "style": {
-  "id": "true-black-flat",
-  "name": "True-black flat",
-  "theme": "dark",
-  "basis": "5 screens: an events back office, an event analytics tab, a community overview, an artist studio home, an artist insights page",
+  "id": "achromatic-ledger",
+  "name": "Achromatic ledger",
+  "theme": "light",
+  "basis": "4 screens: a seller home, a per-agent insights page, a generated report, a settings page with usage numbers",
   "suits": [
-   "community",
-   "creator",
-   "markets"
+   "finance",
+   "commerce",
+   "devtools",
+   "support",
+   "report",
+   "workspace",
+   "builder"
   ],
-  "idea": "Night mode on true black: sidebar, top bar and page share one ground, elevation is a lightness step alone, and colour is confined to data marks.",
-  "colourBudget": "at or under 3%; the accent never touches buttons, tabs or nav",
+  "idea": "The chrome holds no colour at all; money and counts are set in ink, the one chart hue marks the screen's main data element, and the only other hue is a small signal where a figure changed.",
+  "colourBudget": "under 1% coloured pixels; the chrome is ink, the one chart hue goes on the main data element, and the only other hue is a small change signal",
   "tokens": {
-   "ground": "#000000",
-   "surface": "#111111",
-   "raised": "#2a2a2a",
-   "border": "#1a1a1a",
-   "rule": "#161616",
-   "control": "#444444",
-   "text": "#ffffff",
-   "muted": "#b4b4b4",
-   "faint": "#949494",
-   "accent": "#c6f24e",
-   "positive": "#c6f24e",
-   "negative": "#e5484d",
-   "warning": "#e5a93b",
+   "ground": "#f8f8f8",
+   "surface": "#ffffff",
+   "raised": "#eeeeee",
+   "border": "#e6e6e6",
+   "rule": "#f0f0f0",
+   "control": "#d4d4d4",
+   "text": "#0a0a0a",
+   "muted": "#6b6b6b",
+   "accent": "#141414",
+   "positive": "#2e7d32",
+   "negative": "#c4242a",
+   "warning": "#92400e",
    "chart": [
-    "#c6f24e",
-    "#e6e6e6",
-    "#6b6b6b"
+    "#141414",
+    "#8a8a8a",
+    "#1d5fbf"
    ],
    "pills": {
     "positive": [
-     "#222a10",
-     "#c6f24e"
+     "#dcfae5",
+     "#04250e"
     ],
     "negative": [
-     "#2c1a20",
-     "#e5566f"
+     "#ffedea",
+     "#831c1e"
     ],
     "warning": [
-     "#2b2414",
-     "#e5a93b"
+     "#fffbeb",
+     "#92400e"
     ],
     "neutral": [
-     "#222222",
-     "#ffffff"
+     "#eeeeee",
+     "#3d3d3d"
     ]
    },
    "radius": {
-    "card": 20,
-    "control": 999
+    "card": 8,
+    "control": 6
    },
    "font": {
-    "family": "Inter",
-    "second": null,
-    "fallback": "system-ui, sans-serif",
+    "family": "Geist",
+    "second": "Geist Mono, for IDs and keys only",
+    "fallback": "Inter, system-ui, sans-serif",
     "sizes": {
-     "title": 20,
+     "title": 24,
      "section": 16,
-     "kpi": 24,
+     "kpi": 30,
      "body": 14,
      "small": 12
     },
     "weights": [
      400,
      500,
-     600
+     700
     ],
-    "note": "Nothing above 600; inactive nav labels #bbb, active #fff."
+    "note": "700 is for money figures only; every other number is 400-500."
    },
-   "density": "medium",
-   "rowHeight": 80,
-   "sidebarWidth": 210,
-   "gap": 14,
-   "pad": 22,
+   "density": "sparse",
+   "rowHeight": 44,
+   "sidebarWidth": 256,
+   "gap": 12,
+   "pad": 24,
    "controlHeight": 36
   },
-  "shell": "ruled-t-frame",
+  "shell": "open-plane",
   "shellAlternatives": [
+   "icon-rail",
    "no-sidebar"
   ],
-  "signature": "Elevation by lightness alone (#000 ground, #111 card, #2a2a2a nested panel) with no borders or shadows on cards; the active nav item is marked only by its label going from #bbb to #fff; the primary control is made primary by inversion, a white 36px pill with black text.",
+  "signature": "No brand colour anywhere in the chrome: the one primary action is near-black (a grey pill, #e5e5e5, is the secondary), the main data element (today's series, the booked bars, the current period) takes the one chart hue, #1d5fbf, and everything else is drawn in ink with the comparison or the part after the cursor in grey, zero balances are set in grey, and the only hue on the screen is a small triangle or a short coloured number where a figure changed.",
   "identity": [
-   "The one data hue from the product's world in place of the dealt lime: a solar amber (#f2b33d) for an energy home, a sky blue (#4cb3f0) for water or weather, a lime only for sport. It is still the only hue on data and never touches buttons, tabs or nav. A green or yellow-green hue is also --positive; an amber that sits beside --warning leaves the warning to its pill pair.",
-   "A ground with the product's temperature: the studied #000 for media and events, a warm near-black (#0e0d0c) for a home, a cool one (#0c0d0f) for a monitor, with cards one lightness step above it (#181716, #15171a). Never navy or slate.",
-   "A signature element from the product's world as the lead: the energy home's power flow (sun, house, battery and grid with their live kW), an event's doors against capacity, an artist's release with its cover."
+   "A ground from the product's world in place of #f8f8f8, one level off white and low in chroma: a stone (#f4f3f1) for a bakery or a shop, a sage (#f2f5f2) for a garden or a greenhouse, a blue-grey (#f2f4f7) for a ledger or a meter. Cards stay white; a warm tint stays under the cream check (saturation under about 15%).",
+   "The one chart hue (#1d5fbf, or the brand's own hue at 3:1 or more on white) on the screen's main data element: today's line, the booked bars, the current period's column, the margin that breaks. The chrome stays ink and the hue stays under 1% of the screen.",
+   "Every figure in Geist Mono, as the style's decision, so money and counts read as a ledger's columns while the text stays Geist. Lint and the inspector flag mono; give the reason in the report."
   ],
   "avoid": [
-   "a navy or slate dark theme",
-   "glow, neon borders or shadows",
-   "a hue per chart (five hues across four charts was flagged)",
-   "the accent on buttons, tabs or nav",
-   "a 64px top bar left empty across most of its width (flagged twice)"
+   "a brand-coloured primary button",
+   "tinted cards or tinted KPI tiles",
+   "a coloured chart where one series in ink says it",
+   "bold on anything but money",
+   "a chart with no y-scale (the study's one example of this look hid magnitude behind hover and was flagged)",
+   "a grey pill as the only button for the screen's main job: in testing an Approve repeated in grey on every row left the screen without a primary"
   ],
-  "notes": "The studied screens of this kind used a violet-magenta (#dd6cff) and an orange (#ff5500) as their one data hue. The library deals a lime, which keeps the move and stays clear of the violet ban; because the lime is a yellow-green, it is also the positive colour (a second, mint green beside it read as two greens). The greys are #b4b4b4 for secondary text and #949494 for meta, 32 levels apart rather than the 20 of the measured #aaa and #969696, which read as one grey; #949494 still holds 4.5:1 on the #2a2a2a nested panel."
+  "notes": "The studied screens of this kind used 11-12px card radii, which §9.4 counts among the rare middle values; the library sets the tight pair (8 and 6) so the style lands on the bimodal rule. After testing, the chart hue moved from an unused third series colour onto the main data element: a screen whose only hue was a delta read as a kit."
  },
  "shell": {
-  "id": "ruled-t-frame",
-  "name": "Ruled T-frame",
-  "basis": "4 of 23 screens (3 dark, 1 light)",
+  "id": "no-sidebar",
+  "name": "No sidebar",
+  "basis": "3 of 23 screens",
   "suits": [
-   "community",
+   "report",
    "creator",
-   "smb-admin"
+   "community"
   ],
   "numbers": {
-   "sidebarWidth": "210-240",
-   "topBar": "64px with a 1px bottom rule",
-   "rules": "1px; #1a1a1a on #000, #f2f2f2 on white",
-   "navPitch": "34 (dark) or 40 (light)",
-   "switcher": "at the top bar's right end, behind a full-height 1px divider",
-   "contentGutter": "29px from the sidebar rule and the window edge"
+   "topBar": "46-48px on the page ground, no border",
+   "column": "centred, 1088-1208px",
+   "gutters": "152-212px at a 1512px window",
+   "logo": "on the column's left edge",
+   "links": "14-15px semibold grey"
   },
-  "blueprint": "A 210-240px sidebar and a 64px top bar share one ground, divided only by 1px rules. The workspace or community switcher sits at the right end of the top bar behind a full-height divider; the sidebar holds the wordmark and the nav on a 34px pitch with sentence-case group labels. On dark, the active item is its label going from #bbb to #fff. The top bar must carry something real (search, the back link and object name, the switcher): two studied screens left about 1070px of it blank and were flagged.",
-  "phone": "The top bar stays at 48-56px with the switcher reduced to its mark; the sidebar becomes a full-screen menu sheet or a bottom bar of four or five destinations."
+  "blueprint": "A 46-48px top bar on the page ground over a centred 1088-1208px column; the logo sits exactly on the column's left edge and the bar's right cluster ends near its right edge, so header and content share one column. Three to five text links, a 36px search, the account. Use it for generated reports, viewers and products with few destinations; with a sticky bar on the same ground, give it a 1px rule when content scrolls under it (the studied bar without one sliced content off).",
+  "phone": "The bar keeps the logo, a search icon and a menu button; the links move into the menu sheet. The column becomes the full width with 16px margins."
  },
  "screens": [
   {
    "name": "home",
-   "pattern": null
+   "pattern": {
+    "id": "workspace-home-greeting",
+    "name": "Workspace home with a greeting",
+    "screen": "home",
+    "kinds": [
+     "workspace",
+     "creator"
+    ],
+    "basis": "a team workspace home; a personal insights home",
+    "blueprint": "A centred column on a real 12-column grid (77px columns, 16px gutters, 1100px), about 72px from the top. The greeting is the h1 (48/700 in a serif, or 24/400 in the sans), with the date after it or in a grey line under it, never as a tracked eyebrow, and no emoji. 50px below, 4 count tiles spanning 3 columns each (128px tall, 16px padding): label, value at regular weight in tabular or mono figures, a plain caption ('Ready when you are'), no deltas. Then spans that change by row but share column lines (9 + 3, then 6 + 6, so each internal edge meets one above it) for the main objects: panels with 20px padding, a 14/600 title, a count chip and a 'View all' link, holding row cards 63px tall with 8px gaps, one step lighter than the panel with a border one step darker. Pale tints may code the panels, each in the hue of the tile that counts it. Only a floating composer, if there is one, carries a shadow, and it must not cover the last rows.",
+    "phone": "Greeting at 24-28px; tiles in a 2 x 2 grid; panels stack in reading order."
+   }
   },
   {
    "name": "settings",

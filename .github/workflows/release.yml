@@ -61,6 +61,9 @@ jobs:
           test -s release-assets/artifacts/native-window-880.png
           test -s release-assets/artifacts/native-window-1100.png
           test -s release-assets/artifacts/native-window-1600.png
+          for IMAGE in native-home-light native-home-dark native-settings-light native-settings-dark fixture-playing-home-light fixture-playing-home-dark fixture-playing-settings-light fixture-playing-settings-dark fixture-playing-home-compact-dark fixture-auth-dark; do
+            test -s "release-assets/artifacts/$IMAGE.png"
+          done
           python3 - <<'PY'
           import json
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
@@ -73,6 +76,12 @@ jobs:
           assert proof.get('adaptive_layout_verified') is True, 'Wide and compact native composition checks are missing.'
           assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
           assert proof.get('diagnostics_copy_verified') is True, 'Diagnostics clipboard check is missing.'
+          assert proof.get('themes_verified') is True and set(proof.get('themes', [])) == {'light', 'dark'}, 'Real native light/dark checks are missing.'
+          assert proof.get('fixture_states_verified') is True, 'Populated native visual checks are missing.'
+          fixture = proof.get('fixture_evidence', {})
+          assert fixture.get('synthetic_data') is True and fixture.get('real_audio_or_receiver_claim') is False, 'Visual fixture provenance is missing.'
+          assert fixture.get('password_dialog_verified') is True and fixture.get('per_receiver_cancel_verified') is True, 'Native authentication presentation/cancel checks are missing.'
+          assert fixture.get('populated_volume_retained') is True, 'Populated native volume check is missing.'
           assert proof.get('desktop_width', 0) >= 1600 and proof.get('desktop_height', 0) >= 1040, 'Native windows were not verified on a sufficiently large display.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
@@ -87,4 +96,14 @@ jobs:
             release-assets/artifacts/native-window-880.png \
             release-assets/artifacts/native-window-1600.png \
             release-assets/artifacts/settings-window.png \
-            release-assets/artifacts/native-smoke.json
+            release-assets/artifacts/native-smoke.json \
+            release-assets/artifacts/native-home-light.png \
+            release-assets/artifacts/native-home-dark.png \
+            release-assets/artifacts/native-settings-light.png \
+            release-assets/artifacts/native-settings-dark.png \
+            release-assets/artifacts/fixture-playing-home-light.png \
+            release-assets/artifacts/fixture-playing-home-dark.png \
+            release-assets/artifacts/fixture-playing-settings-light.png \
+            release-assets/artifacts/fixture-playing-settings-dark.png \
+            release-assets/artifacts/fixture-playing-home-compact-dark.png \
+            release-assets/artifacts/fixture-auth-dark.png
