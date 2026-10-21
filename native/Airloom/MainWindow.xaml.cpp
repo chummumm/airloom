@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
+#include "StartupTrace.h"
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -119,9 +120,13 @@ namespace winrt::Airloom::implementation
 {
     MainWindow::MainWindow()
     {
+        airloom::native::TraceStartup("Window: initialize XAML");
         InitializeComponent();
+        airloom::native::TraceStartup("Window: XAML ready");
         InitializeWindow();
+        airloom::native::TraceStartup("Window: native window ready");
         InitializePreferences();
+        airloom::native::TraceStartup("Window: preferences ready");
 
         m_pollTimer = DispatcherTimer();
         m_pollTimer.Interval(std::chrono::microseconds(33333));
@@ -176,10 +181,12 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::InitializeWindow()
     {
+        airloom::native::TraceStartup("Window: obtain HWND");
         Microsoft::UI::Xaml::Window projectedWindow = *this;
         auto nativeWindow = projectedWindow.as<IWindowNative>();
         check_hresult(nativeWindow->get_WindowHandle(&m_hwnd));
         Title(L"Airloom");
+        airloom::native::TraceStartup("Window: configure titlebar");
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(TitleDragRegion());
 
@@ -192,13 +199,16 @@ namespace winrt::Airloom::implementation
         auto const usableHeight = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
         auto const actualWidth = std::min(width, usableWidth);
         auto const actualHeight = std::min(height, usableHeight);
+        airloom::native::TraceStartup("Window: resize");
         SetWindowPos(m_hwnd, nullptr, monitor.rcWork.left + (usableWidth - actualWidth) / 2,
             monitor.rcWork.top + (usableHeight - actualHeight) / 2,
             actualWidth, actualHeight, SWP_NOZORDER | SWP_NOACTIVATE);
 
+        airloom::native::TraceStartup("Window: attach desktop");
         m_desktop.Attach(m_hwnd,
             [this] { ShowWindow(); },
             [this] { ExitNow(); });
+        airloom::native::TraceStartup("Window: apply theme");
         ApplyTheme();
     }
 
@@ -219,6 +229,7 @@ namespace winrt::Airloom::implementation
     void MainWindow::OnLoaded(IInspectable const&, RoutedEventArgs const&)
     {
         if (m_loaded) return;
+        airloom::native::TraceStartup("Window: loaded event");
         m_loaded = true;
         UpdateWorkspaceLayout(LayoutRoot().ActualWidth());
         if (m_engine.Available())
@@ -240,6 +251,7 @@ namespace winrt::Airloom::implementation
         }
         RenderUpdate();
         m_pollTimer.Start();
+        airloom::native::TraceStartup("Window: polling ready");
         if (!m_desktop.HasTrayIcon())
         {
             FooterMessage().Text(L"系统托盘暂不可用，关闭窗口会退出 Airloom。");

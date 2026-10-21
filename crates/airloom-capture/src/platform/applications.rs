@@ -7,11 +7,13 @@ use crossbeam_channel::{bounded, Sender};
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use windows::core::{implement, Interface, Ref, HRESULT, PWSTR};
-use windows::Win32::Foundation::{FILETIME, S_OK, WAIT_FAILED, WAIT_TIMEOUT};
+use windows::core::{implement, Interface, Ref, HRESULT, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{
+    E_OUTOFMEMORY, FILETIME, HMODULE, S_OK, WAIT_FAILED, WAIT_TIMEOUT,
+};
 use windows::Win32::Media::Audio::{
     eRender, ActivateAudioInterfaceAsync, AudioSessionStateExpired,
     IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
@@ -24,9 +26,12 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::StructuredStorage::{
     PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
 };
-use windows::Win32::System::Com::{BLOB, CLSCTX_ALL};
+use windows::Win32::System::Com::{CoTaskMemAlloc, BLOB, CLSCTX_ALL};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::LibraryLoader::{
+    GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN,
 };
 use windows::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
@@ -310,7 +315,7 @@ impl ApplicationProcess {
 
     pub(super) fn activate(&self, cancelled: &AtomicBool) -> Result<IAudioClient> {
         self.ensure_alive()?;
-        let payload = Arc::new(ActivationPayload::new(self.metadata.id.process_id));
+        let payload = Arc::new(ActivationPayload::new(self.metadata.id.process_id)?);
         let (sender, ready) = bounded(1);
         // windows-rs' implement macro supplies IAgileObject and a free-threaded
         // marshaler. The callback only signals; the audio client remains owned
@@ -320,6 +325,7 @@ impl ApplicationProcess {
             _payload: payload.clone(),
         }
         .into();
+        keep_activation_module_loaded(&callback)?;
         let operation = unsafe {
             ActivateAudioInterfaceAsync(
                 VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
@@ -361,22 +367,55 @@ impl ApplicationProcess {
     }
 }
 
+fn keep_activation_module_loaded(
+    callback: &IActivateAudioInterfaceCompletionHandler,
+) -> Result<()> {
+    static PINNED: OnceLock<std::result::Result<(), i32>> = OnceLock::new();
+    // Activation has no cancellation API. After our bounded wait returns,
+    // Windows may still hold a callback into airloom_core.dll. Owning its Rust
+    // data is insufficient if the native host then destroys EngineBridge and
+    // calls FreeLibrary. Pin the module containing the actual callback thunk
+    // before registering it, so late completion cannot execute unloaded code.
+    //
+    // This deliberately lasts until process exit. It neither keeps the process
+    // running nor extends capture: workers and clients still stop normally.
+    // Airloom's updater already waits for the complete process to exit before
+    // replacing files, at which point Windows releases this module as well.
+    let result = PINNED.get_or_init(|| {
+        let mut module = HMODULE::default();
+        let address = callback.vtable().ActivateCompleted as *const () as *const u16;
+        unsafe {
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                PCWSTR(address),
+                &mut module,
+            )
+        }
+        .map_err(|error| error.code().0)
+    });
+    result.map_err(|code| CaptureError::Windows {
+        operation: "Keep application capture callback module loaded",
+        code,
+    })
+}
+
 struct ActivationPayload {
-    // These allocations are immutable and stay alive with the COM callback,
-    // including after a timeout. The PROPVARIANT borrows the parameters; it must
-    // not be passed to PropVariantClear, which would free the Rust allocation.
-    _parameters: Box<AUDIOCLIENT_ACTIVATION_PARAMS>,
+    // windows-rs implements Drop for PROPVARIANT in its extension module; Drop
+    // calls PropVariantClear, which owns/frees this VT_BLOB with CoTaskMemFree.
+    // Its data therefore uses CoTaskMemAlloc, never a borrowed Rust Box. The
+    // variant and its blob remain immutable and alive with the COM callback,
+    // including after the worker's activation deadline has expired.
     variant: Box<PROPVARIANT>,
 }
 
-// The only raw pointer is an immutable reference to our stable boxed parameter
+// The only raw pointer is an immutable reference to our stable COM parameter
 // allocation. Neither structure contains apartment-bound interfaces or handles.
 unsafe impl Send for ActivationPayload {}
 unsafe impl Sync for ActivationPayload {}
 
 impl ActivationPayload {
-    fn new(process_id: u32) -> Self {
-        let mut parameters = Box::new(AUDIOCLIENT_ACTIVATION_PARAMS {
+    fn new(process_id: u32) -> Result<Self> {
+        let parameters = AUDIOCLIENT_ACTIVATION_PARAMS {
             ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
             Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
                 ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
@@ -384,7 +423,17 @@ impl ActivationPayload {
                     ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
                 },
             },
-        });
+        };
+        let allocation =
+            unsafe { CoTaskMemAlloc(std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>()) }
+                .cast::<AUDIOCLIENT_ACTIVATION_PARAMS>();
+        if allocation.is_null() {
+            return Err(failure(
+                "Allocate application activation parameters",
+                windows::core::Error::from_hresult(E_OUTOFMEMORY),
+            ));
+        }
+        unsafe { allocation.write(parameters) };
         let variant = Box::new(PROPVARIANT {
             Anonymous: PROPVARIANT_0 {
                 Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
@@ -392,17 +441,14 @@ impl ActivationPayload {
                     Anonymous: PROPVARIANT_0_0_0 {
                         blob: BLOB {
                             cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
-                            pBlobData: parameters.as_mut() as *mut _ as *mut u8,
+                            pBlobData: allocation.cast(),
                         },
                     },
                     ..Default::default()
                 }),
             },
         });
-        Self {
-            _parameters: parameters,
-            variant,
-        }
+        Ok(Self { variant })
     }
 }
 
@@ -427,6 +473,41 @@ mod tests {
     use super::*;
     use crate::{CaptureConfig, CaptureStream};
 
+    #[test]
+    fn activation_payload_retains_then_releases_its_owned_com_blob() {
+        // This runs in the ordinary Windows tests, without an audio service.
+        // A borrowed Rust allocation behind an owning VT_BLOB corrupts the
+        // heap when the last payload reference is released.
+        for process_id in 1..=64 {
+            let payload = Arc::new(ActivationPayload::new(process_id).unwrap());
+            let retained = payload.clone();
+            drop(payload);
+            let header = unsafe { &retained.variant.Anonymous.Anonymous };
+            assert_eq!(header.vt, VT_BLOB);
+            let blob = unsafe { header.Anonymous.blob };
+            assert_eq!(
+                blob.cbSize as usize,
+                std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>()
+            );
+            let parameters = unsafe {
+                blob.pBlobData
+                    .cast::<AUDIOCLIENT_ACTIVATION_PARAMS>()
+                    .read()
+            };
+            assert_eq!(
+                parameters.ActivationType,
+                AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
+            );
+            let process = unsafe { parameters.Anonymous.ProcessLoopbackParams };
+            assert_eq!(process.TargetProcessId, process_id);
+            assert_eq!(
+                process.ProcessLoopbackMode,
+                PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+            );
+            drop(retained);
+        }
+    }
+
     struct Child(std::process::Child);
 
     impl Drop for Child {
@@ -441,6 +522,7 @@ mod tests {
     #[test]
     #[ignore = "requires Windows build 20348+ with the Windows Audio service"]
     fn process_loopback_activation_and_lifetime() {
+        println!("Process capture: spawning owned lifetime-test process");
         let mut child = Child(
             std::process::Command::new("powershell.exe")
                 .args([
@@ -457,6 +539,7 @@ mod tests {
         );
         let handle = open_process(child.0.id()).expect("open owned test process");
         let metadata = process_metadata(child.0.id(), &handle).expect("read test process identity");
+        println!("Process capture: process handle and creation identity read");
         let config = CaptureConfig {
             source_id: metadata.id.source_id(),
             ..Default::default()
@@ -470,8 +553,10 @@ mod tests {
             Err(CaptureError::ApplicationExited)
         ));
 
+        println!("Process capture: activating first real process-loopback client");
         let mut stream =
             CaptureStream::start(config.clone()).expect("real process loopback activation");
+        println!("Process capture: first activation and client start completed");
         assert_eq!(stream.info().unwrap().source_id, config.source_id);
         assert!(matches!(
             stream.set_local_mute(true),
@@ -486,6 +571,7 @@ mod tests {
                     .all(|sample| sample.is_finite() && *sample == 0.0));
             }
         }
+        println!("Process capture: silent input and mute refusal verified; stopping");
         let stopped = Instant::now();
         stream.stop().expect("stop a live process capture");
         assert!(
@@ -493,8 +579,10 @@ mod tests {
             "capture cancellation did not finish promptly"
         );
 
+        println!("Process capture: bounded stop passed; activating second client");
         let mut stream =
             CaptureStream::start(config.clone()).expect("restart the same live process capture");
+        println!("Process capture: second client started; ending owned process");
         child.0.kill().expect("end owned test process");
         child.0.wait().expect("wait for owned process exit");
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -507,6 +595,7 @@ mod tests {
             }
         }
         let _ = stream.stop();
+        println!("Process capture: application exit observed; checking stale selection rejection");
         assert!(matches!(
             CaptureStream::start(config),
             Err(CaptureError::ApplicationExited)

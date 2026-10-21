@@ -966,8 +966,11 @@ $AppPath = Join-Path $SmokeRoot 'Airloom.exe'
 $ThemeSettingsPath = 'HKCU:\Software\Airloom'
 $SavedTheme = Get-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
 $ShippedCoreHash = (Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash
+$StartupTracePath = [System.IO.Path]::GetFullPath((Join-Path $EvidencePath 'native-startup.txt'))
+$PriorStartupTrace = $env:AIRLOOM_STARTUP_TRACE
 $Process = $null
 try {
+    $env:AIRLOOM_STARTUP_TRACE = $StartupTracePath
     # The large adaptive layout must be physically on-screen, not hanging off
     # a 1024 x 768 desktop. Only this disposable CI display is adjusted.
     [AirloomUiProbe]::PrepareDisplay(1600, 1040)
@@ -1064,11 +1067,16 @@ try {
         [System.Text.UTF8Encoding]::new($false))
     if ($VisualErrors.Count -gt 0) { throw ('Native visual verification failed: ' + ($VisualErrors -join ' | ')) }
 } catch {
+    Write-Host "Native startup trace: $StartupTracePath"
+    if (Test-Path -LiteralPath $StartupTracePath -PathType Leaf) {
+        Get-Content -LiteralPath $StartupTracePath -ErrorAction Continue | Write-Host
+    } else { Write-Host 'No startup trace was created before this failure.' }
     if ($null -ne $Process -and -not $Process.HasExited) {
         try { Save-NativeScreenshot (Join-Path $EvidencePath 'native-smoke-failure.png') } catch { }
     }
     throw
 } finally {
+    $env:AIRLOOM_STARTUP_TRACE = $PriorStartupTrace
     if ($null -ne $Process -and -not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $FixtureRoot -Recurse -Force -ErrorAction SilentlyContinue

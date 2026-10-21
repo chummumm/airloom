@@ -31,7 +31,7 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE_ACTIVE, WAVEFORMATEX,
 };
-use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
+use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Com::{
     CoCreateGuid, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
     COINIT_MULTITHREADED, STGM_READ,
@@ -93,11 +93,11 @@ fn device_id(device: &IMMDevice) -> Result<String> {
 fn friendly_name(device: &IMMDevice) -> Result<String> {
     let properties = unsafe { device.OpenPropertyStore(STGM_READ) }
         .map_err(|e| failure("Open endpoint properties", e))?;
-    let mut value = unsafe { properties.GetValue(&PKEY_Device_FriendlyName) }
+    let value = unsafe { properties.GetValue(&PKEY_Device_FriendlyName) }
         .map_err(|e| failure("Read endpoint name", e))?;
     let result = unsafe { PropVariantToStringAlloc(&value) };
-    // PROPVARIANT is an ABI struct, not an owning Rust wrapper.
-    let _ = unsafe { PropVariantClear(&mut value) };
+    // windows-rs' PROPVARIANT Drop clears its original allocation; the string
+    // produced by PropVariantToStringAlloc has separate ownership.
     allocated_string(result.map_err(|e| failure("Convert endpoint name", e))?)
 }
 

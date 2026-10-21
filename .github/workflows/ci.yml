@@ -63,13 +63,14 @@ jobs:
         id: native_package
         shell: pwsh
         run: ./scripts/package-windows.ps1
-      - name: Verify native updater lifecycle and cleanup
-        shell: pwsh
-        run: ./scripts/test-updater.ps1
       - name: Launch native UI and capture evidence
         if: ${{ !cancelled() && steps.native_package.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/smoke-windows.ps1
+      - name: Verify native updater lifecycle and cleanup
+        if: ${{ !cancelled() && steps.native_package.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/test-updater.ps1
       - name: Windows Rust tests
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         run: cargo test --workspace --locked

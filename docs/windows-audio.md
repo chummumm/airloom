@@ -58,6 +58,14 @@ MTA worker receives a signal and retrieves the audio client. It requests stereo
 16-bit PCM at the transport sample rate with Windows automatic format conversion.
 The existing bounded capture and sender queues are shared with endpoint mode.
 
+Async activation cannot be cancelled at the Windows API boundary. Before
+registering its callback, capture pins the module containing that callback until
+process exit. The native host also pins the validated engine module before
+creating an instance: blocking device enumeration may outlive the runtime's
+bounded shutdown wait. These pins preserve executable code, not active capture
+or a running process. The updater waits for complete process exit before replacing
+the installation, so module residency does not hold an update open.
+
 If the app has no rendering streams, the API produces silence. The worker checks
 process lifetime at each event-loop iteration (at most a 20 ms wait), prioritizes
 terminal failures over queued samples, and stops on exit. This is one process

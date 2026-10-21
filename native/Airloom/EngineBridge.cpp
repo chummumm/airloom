@@ -1,10 +1,12 @@
 #include "pch.h"
 #include "EngineBridge.h"
+#include "StartupTrace.h"
 
 namespace airloom::native
 {
     EngineBridge::EngineBridge()
     {
+        TraceStartup("Engine: locate module");
         std::wstring executable(32768, L'\0');
         auto const length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
         if (length == 0 || length >= executable.size())
@@ -15,8 +17,10 @@ namespace airloom::native
         executable.resize(length);
         auto const slash = executable.find_last_of(L"\\/");
         auto const libraryPath = executable.substr(0, slash + 1) + L"airloom_core.dll";
+        TraceStartup("Engine: load module");
         m_library = LoadLibraryExW(libraryPath.c_str(), nullptr,
             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        TraceStartup("Engine: module load returned");
         if (!m_library)
         {
             m_loadError = L"音频引擎未能加载。请确认 airloom_core.dll 与 Airloom.exe 位于同一安装目录，或重新安装 Airloom。";
@@ -34,7 +38,21 @@ namespace airloom::native
             Shutdown();
             return;
         }
+        // The core bounds shutdown waits, but Windows callbacks and blocking
+        // device enumeration can finish later. Keep their code mapped until
+        // process exit; this host never hot-reloads the engine. Shutdown still
+        // destroys the instance, and the updater waits for the entire process.
+        HMODULE pinnedModule{};
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCWSTR>(create), &pinnedModule))
+        {
+            m_loadError = L"音频引擎无法安全初始化。请重新打开 Airloom。";
+            Shutdown();
+            return;
+        }
+        TraceStartup("Engine: create instance");
         m_instance = create();
+        TraceStartup("Engine: instance creation returned");
         if (!m_instance)
         {
             m_loadError = L"音频引擎初始化失败。请重新打开 Airloom。";
@@ -49,6 +67,7 @@ namespace airloom::native
 
     void EngineBridge::Shutdown() noexcept
     {
+        TraceStartup("Engine: shutdown begin");
         if (m_instance && m_destroy)
         {
             m_destroy(std::exchange(m_instance, nullptr));
@@ -57,6 +76,7 @@ namespace airloom::native
         {
             FreeLibrary(std::exchange(m_library, nullptr));
         }
+        TraceStartup("Engine: shutdown complete");
     }
 
     winrt::Windows::Data::Json::JsonObject EngineBridge::Snapshot() const
