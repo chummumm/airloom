@@ -21,9 +21,14 @@ try {
     $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $VsInstall = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if (-not $VsInstall) { throw 'Visual C++ installation not found for runtime packaging.' }
-    $CrtPath = Get-ChildItem (Join-Path $VsInstall 'VC/Redist/MSVC') -Directory |
-        Sort-Object { [version]$_.Name } -Descending |
-        ForEach-Object { Get-ChildItem (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
+    # VS 2026 adds toolset aliases such as "v145" beside version directories.
+    # Select a real x64 CRT by its DLL version rather than parsing folder names.
+    $CrtPath = Get-ChildItem (Join-Path $VsInstall 'VC/Redist/MSVC') -Directory -Recurse -Filter 'Microsoft.VC*.CRT' |
+        Where-Object { $_.Parent.Name -eq 'x64' -and (Test-Path (Join-Path $_.FullName 'msvcp140.dll')) } |
+        Sort-Object {
+            $CrtVersion = (Get-Item (Join-Path $_.FullName 'msvcp140.dll')).VersionInfo
+            [version]::new($CrtVersion.FileMajorPart, $CrtVersion.FileMinorPart, $CrtVersion.FileBuildPart, $CrtVersion.FilePrivatePart)
+        } -Descending |
         Select-Object -First 1 -ExpandProperty FullName
     if (-not $CrtPath) { throw 'Redistributable Visual C++ x64 runtime files not found.' }
     Copy-Item (Join-Path $CrtPath '*.dll') $OutputPath -Force
