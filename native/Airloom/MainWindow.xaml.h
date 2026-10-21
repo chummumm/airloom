@@ -47,7 +47,7 @@ namespace winrt::Airloom::implementation
         bool Send(wchar_t const* type);
         fire_and_forget ShowAuthentication(bool explicitlyRequested = false);
         hstring AuthenticationFingerprint() const;
-        Microsoft::UI::Xaml::Media::Brush Brush(wchar_t const* resource) const;
+        Microsoft::UI::Xaml::Media::Brush Brush(wchar_t const* resource);
 
         airloom::native::EngineBridge m_engine;
         airloom::native::DesktopIntegration m_desktop;

@@ -183,7 +183,8 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::InitializeWindow()
     {
-        auto nativeWindow = this->as<IWindowNative>();
+        Microsoft::UI::Xaml::Window projectedWindow = *this;
+        auto nativeWindow = projectedWindow.as<IWindowNative>();
         check_hresult(nativeWindow->get_WindowHandle(&m_hwnd));
         Title(L"Airloom");
         ExtendsContentIntoTitleBar(true);
@@ -194,8 +195,8 @@ namespace winrt::Airloom::implementation
         auto const height = MulDiv(810, static_cast<int>(dpi), 96);
         MONITORINFO monitor{sizeof(monitor)};
         GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
-        auto const usableWidth = monitor.rcWork.right - monitor.rcWork.left;
-        auto const usableHeight = monitor.rcWork.bottom - monitor.rcWork.top;
+        auto const usableWidth = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
+        auto const usableHeight = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
         auto const actualWidth = std::min(width, usableWidth);
         auto const actualHeight = std::min(height, usableHeight);
         SetWindowPos(m_hwnd, nullptr, monitor.rcWork.left + (usableWidth - actualWidth) / 2,
@@ -253,7 +254,7 @@ namespace winrt::Airloom::implementation
         }
     }
 
-    Media::Brush MainWindow::Brush(wchar_t const* resource) const
+    Media::Brush MainWindow::Brush(wchar_t const* resource)
     {
         // Theme dictionaries are resolved by XAML for static elements. Dynamic device cards
         // obtain the matching resource dictionary explicitly when the actual theme changes.
@@ -328,7 +329,10 @@ namespace winrt::Airloom::implementation
             { return source.id == next.selectedSourceId; });
         if (!m_devicesRendered || m_forceDeviceRender || !SameDevices(m_snapshot, next)) RenderDevices(next);
         if (!m_sourcesRendered || !SameSources(m_snapshot, next)) RenderSources(next);
-        DeviceCards().IsEnabled(!active);
+        for (uint32_t index = 0; index < DeviceCards().Children().Size(); ++index)
+        {
+            DeviceCards().Children().GetAt(index).as<Button>().IsEnabled(!active && next.devices[index].online);
+        }
         SourcePicker().IsEnabled(!active && !next.sources.empty());
         DeviceCount().Text(next.devices.empty() ? L"在同一个网络中寻找" : to_hstring(next.devices.size()) + L" 台设备 · 选择声音的目的地");
         EmptyDeviceTitle().Text(discovering ? L"正在寻找附近的扬声器" : L"还没有发现扬声器");
