@@ -11,15 +11,15 @@
 
 ## 界面
 
-以下保留 0.4.0 构建的实际 Windows 截图；0.4.1 的事件列表及原生组合证据随新版 Release 提供。历史截图，来自 [CI 39583891772](https://github.com/chummumm/airloom/actions/runs/39583891772)／`7c5133e`。
+以下为 0.4.1 构建的实际 Windows 截图，来自 [CI 39600958105](https://github.com/chummumm/airloom/actions/runs/39600958105)／`f29ae68`。设备、应用和信号为界面测试数据。
 
-![Airloom 0.4.0 指定应用投放界面，应用、设备和信号为界面测试数据](docs/evidence/fixture-application-home-light.png)
+![Airloom 0.4.1 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.1/fixture-native-stereo-home-light.png)
 
-![Airloom 0.4.0 原生深色设置页，设备为界面测试数据](docs/evidence/fixture-application-settings-dark.png)
+![Airloom 0.4.1 原生深色设置页与组合可见性，设备为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.1/fixture-native-stereo-settings-dark.png)
 
 截图来自实际 WinUI 3 程序。`fixture-*` 使用独立临时目录中的 CI 专用替代 DLL，提供模拟扬声器、信号、应用选择与密码挑战，用于检查原生界面的完整状态；这些数据和替代 DLL 不进入安装包，也不作为实机音频证明。
 
-发布程序本体另有[浅色空状态](docs/evidence/native-home-light.png)、[深色空状态](docs/evidence/native-home-dark.png)及[设置页](docs/evidence/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动程序，验证 880／1100／1600 像素窗口、固定播放栏、音量数值和实际鼠标拖动、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。0.4.0 的隔离 fixture 另验证应用选择、切换范围后停止投放、刷新保留选择、禁用电脑静音，以及真实鼠标操作主按钮。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。
+发布程序本体另有[浅色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.1/native-home-light.png)、[深色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.1/native-home-dark.png)及[设置页](https://github.com/chummumm/airloom/releases/download/v0.4.1/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动程序，验证 880／1100／1600 像素窗口、固定播放栏、音量实际拖动、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。隔离 fixture 验证应用选择、范围切换、事件更新与手动刷新保留选择、下拉框稳定性、组合卡及成员状态、隐藏恢复，以及真实鼠标操作主按钮。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。仓库 `docs/evidence` 中原有应用模式截图保留为 0.4.0 历史证据。
 
 ## 体验
 
@@ -39,7 +39,7 @@
 
 ## 下载与运行
 
-正式安装包以 [GitHub Latest](https://github.com/chummumm/airloom/releases/latest) 为准；完整构建通过后发布。以下为 0.4.1 发布资产。
+正式安装包以 [GitHub Latest](https://github.com/chummumm/airloom/releases/latest) 为准。0.4.1 已通过完整构建，以下为本版发布资产。
 
 **从 0.1.x / 0.2.0 升级，请先右键系统托盘中的 Airloom →“退出 Airloom”，再运行新安装包。** 关闭旧版窗口只会隐藏到托盘；旧版没有新的安装退出协议，新安装器会提示先退出。0.2.1 及更新版本可使用应用内更新和新的进程退出流程。详见[0.4.1 版本说明](docs/releases/0.4.1.md)。
 
@@ -49,7 +49,7 @@
 | [airloom-windows-x64-portable.zip](https://github.com/chummumm/airloom/releases/download/v0.4.1/airloom-windows-x64-portable.zip) | 完整解压到新目录后运行 |
 | [SHA256SUMS.txt](https://github.com/chummumm/airloom/releases/download/v0.4.1/SHA256SUMS.txt) | 两个下载文件的完整性校验值 |
 
-0.4.0 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39583891772)，源码提交为 `7c5133e006ec0be13017ec21084680518c95082f`。Linux 和 Windows 测试、真实进程采集 API、原生应用与打包、界面检查和独立更新生命周期均通过。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
+0.4.1 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39600958105)，源码提交为 `f29ae684dd55305a63e299e9980d1a3f8219a0a4`。Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
 
 要求 Windows 11 x64（build 22000 或更高）。电脑与接收端需处于可以互相发现和通信的局域网。解压便携 ZIP 后运行 `Airloom.exe`，或运行安装包。不要只复制 EXE：原生应用和 Windows App SDK 的自包含文件需要放在一起。
 
@@ -103,9 +103,9 @@ Airloom 不创建、拆散 Apple“家庭”组合，不修改其左右设置，
 | 多房间同步 | 未验证，不把共享采集当作同步播放证明 |
 | 真实 HomePod 实机结果 | 用户已反馈 0.2.1 在其 HomePod 上恢复出声；其他型号、固件、立体声组合及多设备同步仍需逐项验证 |
 
-验证分为独立层次：协议和音频算法测试覆盖加密会话、非零 PCM、时钟协商、多设备分发与故障隔离；Linux 另通过 FFmpeg 独立 ALAC 解码；Windows 通过真实进程 loopback API 检查激活和生命周期；原生 UI fixture 检查选择、按钮、主题和密码；更新 fixture 检查退出、安装与包清理。完整结果见上述 CI。
+验证分为独立层次：协议和音频算法测试覆盖加密会话、非零 PCM、时钟协商、多设备分发与故障隔离；Linux 另通过 FFmpeg 独立 ALAC 解码；Windows 通过真实进程 loopback API 及来源通知注册、显式刷新和关闭检查；原生 UI fixture 检查选择、自动来源变化、原生组合、按钮、主题和密码；更新 fixture 检查退出、安装与包清理。真实播放应用的会话事件交付和 HomePod 双机播放仍需实机验证。完整结果见上述 CI。
 
-密码弹窗与单设备取消通过 UIA 交互检查；最终名为 `fixture-auth-dark.png` 的截图实际显示主页，不用来证明弹窗外观。高对比度、空应用列表及应用退出状态没有本轮视觉验证声明。详见[设计与验证记录](docs/design.md)。
+密码弹窗与单设备取消通过 UIA 交互检查。0.4.0 历史证据中名为 `fixture-auth-dark.png` 的截图实际显示主页，不用来证明该版弹窗外观。高对比度、空应用列表及应用退出状态没有本轮视觉验证声明。详见[设计与验证记录](docs/design.md)。
 
 进程 API 检查使用一个由测试创建、没有播放声音的进程；收到的样本必须为有限值且严格为零。它没有同时播放两个应用，也没有连接真实 HomePod。应用模式的声音隔离、浏览器子进程行为和实际接收端听音仍须实机检查。原生更新检查也不等于已经在线覆盖安装了一台用户电脑。截图和发送包数均不能代替这些实机结果。
 
