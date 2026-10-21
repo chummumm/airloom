@@ -58,6 +58,9 @@ jobs:
           test -s "release-assets/dist/$INSTALLER"
           test -s release-assets/dist/airloom-windows-x64-portable.zip
           test -s release-assets/artifacts/native-smoke.json
+          test -s release-assets/artifacts/native-window-880.png
+          test -s release-assets/artifacts/native-window-1100.png
+          test -s release-assets/artifacts/native-window-1600.png
           python3 - <<'PY'
           import json
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
@@ -69,6 +72,7 @@ jobs:
           assert proof.get('volume_layout_verified') is True, 'Native volume geometry check is missing.'
           assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
           assert proof.get('diagnostics_copy_verified') is True, 'Diagnostics clipboard check is missing.'
+          assert proof.get('desktop_width', 0) >= 1600 and proof.get('desktop_height', 0) >= 1040, 'Native windows were not verified on a sufficiently large display.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
           gh release create "v$APP_VERSION" \
@@ -79,5 +83,7 @@ jobs:
             release-assets/dist/airloom-windows-x64-portable.zip \
             release-assets/dist/SHA256SUMS.txt \
             release-assets/artifacts/native-window.png \
+            release-assets/artifacts/native-window-880.png \
+            release-assets/artifacts/native-window-1600.png \
             release-assets/artifacts/settings-window.png \
             release-assets/artifacts/native-smoke.json

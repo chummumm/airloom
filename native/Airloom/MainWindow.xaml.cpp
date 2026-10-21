@@ -322,6 +322,7 @@ namespace winrt::Airloom::implementation
         bool const busy = next.state == L"connecting" || next.state == L"reconnecting";
         bool const auth = next.authRequestId != 0;
         bool const discovering = next.state == L"discovering";
+        bool const sourceError = next.errorCode == L"capture_sources";
         auto const device = next.SelectedDevice();
         bool const hasSource = std::any_of(next.sources.begin(), next.sources.end(), [&next](auto const& source)
             { return source.id == next.selectedSourceId; });
@@ -355,7 +356,16 @@ namespace winrt::Airloom::implementation
         if (next.state == L"reconnecting") { badge = L"正在重连"; eyebrow = L"连接恢复中"; description = L"连接暂时中断，正在尝试恢复…"; action = L"停止重连"; }
         if (auth) { badge = streaming ? L"传输中 · 待验证" : L"需要验证"; description = L"所选设备需要访问密码或配对码。"; action = next.authKind == L"pin" ? L"输入配对码" : L"输入访问密码"; }
         if (next.state == L"error") { badge = L"连接未完成"; eyebrow = L"连接需要处理"; description = L"查看上方提示后，再试一次。"; action = L"重新连接"; }
-        if (!next.statusMessage.empty()) description = next.statusMessage;
+        // Keep an actionable failure in one place. Capture-source errors belong
+        // beside the source control; session/network errors retain the banner.
+        if (!next.statusMessage.empty() && next.errorMessage.empty()) description = next.statusMessage;
+        if (sourceError)
+        {
+            badge = L"等待音频输出";
+            eyebrow = L"等待声音来源";
+            description = device ? L"完成声音来源设置后，可连接已选扬声器。" : L"在左侧选择一台或多台扬声器。";
+            action = L"开始连接";
+        }
 
         hstring targets;
         for (auto const& entry : next.devices)
@@ -406,11 +416,16 @@ namespace winrt::Airloom::implementation
         LocalMuteToggle().IsEnabled(hasSource);
         LocalMuteToggle().IsOn(next.muteLocal);
         TestToneButton().IsEnabled(streaming);
+        TestToneButton().Visibility(sourceError ? Visibility::Collapsed : Visibility::Visible);
+        SourceRetryButton().Visibility(sourceError ? Visibility::Visible : Visibility::Collapsed);
+        SourceRetryButton().IsEnabled(m_engine.Available());
         CopyDiagnosticsButton().IsEnabled(!next.diagnosticsJson.empty() && next.diagnosticsJson != L"{}");
         SetText(TestToneLabel(), next.testToneActive ? L"停止试播" : L"试播 3 秒");
-        SetText(CaptureStatusText(), next.testToneActive ? L"正在播放测试音，结束后恢复电脑声音。" :
+        SetText(CaptureStatusText(), sourceError ? next.errorMessage : next.testToneActive ? L"正在播放测试音，结束后恢复电脑声音。" :
             !next.captureMessage.empty() ? next.captureMessage : L"连接后显示实际声音采集状态。");
-        CaptureStatusText().Foreground(Brush(next.captureState == L"signal" ? L"AudioBrush" :
+        CaptureStatusText().MaxLines(sourceError ? 0 : 2);
+        ToolTipService::SetToolTip(CaptureStatusText(), box_value(CaptureStatusText().Text()));
+        CaptureStatusText().Foreground(Brush(sourceError ? L"DangerBrush" : next.captureState == L"signal" ? L"AudioBrush" :
             next.captureState == L"error" ? L"DangerBrush" :
             next.captureState == L"silent" || next.captureState == L"quiet" ? L"WarningBrush" : L"MutedBrush"));
 
@@ -639,10 +654,12 @@ namespace winrt::Airloom::implementation
     void MainWindow::RenderError(Snapshot const& next)
     {
         bool const localError = !m_localError.empty() && std::chrono::steady_clock::now() < m_localErrorUntil;
-        bool const engineError = !next.errorMessage.empty();
+        bool const engineError = !next.errorMessage.empty() && next.errorCode != L"capture_sources";
         ErrorBanner().IsOpen(localError || engineError);
-        SettingsErrorBanner().IsOpen(localError || engineError);
-        SettingsErrorBanner().Message(localError ? m_localError : next.errorMessage);
+        // Settings owns maintenance actions; a source/receiver error is already
+        // explained on the home view and must not displace the update controls.
+        SettingsErrorBanner().IsOpen(localError);
+        SettingsErrorBanner().Message(localError ? m_localError : L"");
         if (localError || engineError)
         {
             ErrorBanner().Title(next.state == L"reconnecting" ? L"正在恢复连接" : L"连接需要处理");

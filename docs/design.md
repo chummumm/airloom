@@ -10,6 +10,8 @@ The right grid binds its width to the scroll viewer's viewport, without a center
 
 Settings is a separate native view. It starts with update status and check action, followed by diagnostics, appearance/startup, receiver visibility and application actions. Hiding a selected receiver explicitly deselects it before persisting its visibility. Hidden IDs and display names remain local so offline receivers can be restored. Discovery never silently chooses a first target.
 
+Unavailable Windows outputs are explained once beside the source picker, with the full actionable message and a native rescan button. Long source errors can wrap rather than losing their recovery instruction. They are not repeated in the global connection banner or signal description. Session, authentication and network errors retain the banner; settings shows errors from its local actions rather than repeating a source failure above the update controls.
+
 ## Volume stability
 
 The reported movement had two interacting risks in the prior implementation: dynamic content measured inside a centered layout, and a snapshot that could overwrite the slider immediately after its debounced command was enqueued. The pending flag was cleared before the engine acknowledged the new value.
@@ -99,11 +101,11 @@ Theme, waveform and visibility preferences live under `HKCU\Software\Airloom`; p
 
 ## Verification
 
-[Windows smoke](../scripts/smoke-windows.ps1) operates the real WinUI executable with .NET UI Automation. Its verification covers native settings/back, read-only update check, volume 0/9/10/99/100, layout geometry at 880 × 680, 1100 × 800 and 1600 × 1000, acknowledgement retention and real mouse drag. The current runner desktop is 1024 × 768, so fully visible native screenshots cover the compact home and settings views. Normal/wide geometry checks do not establish a full visual review at those sizes; that requires a sufficiently large display or a supported full-window capture. Clipboard validation checks the restricted diagnostics. The updater harness separately exercises the actual GUI process and exit messages.
+[Windows smoke](../scripts/smoke-windows.ps1) operates the real WinUI executable with .NET UI Automation. Its intended verification covers native settings/back, read-only update check, volume 0/9/10/99/100, layout geometry at 880 × 680, 1100 × 800 and 1600 × 1000, acknowledgement retention and real mouse drag. The follow-up smoke configures a supported larger display mode on its disposable CI desktop, restores that mode afterward, and captures each size on screen. It scrolls the transport into view before interacting with controls, then restores the view for screenshots. Clipboard validation checks the restricted diagnostics. The updater harness separately exercises the actual GUI process and exit messages.
 
 Stable automation IDs include `HomeView`, `DeviceRail`, `HomeScrollViewer`, `PageContent`, `SourcePanel`, `SignalPanel`, `TransportPanel`, `VolumeSlider`, `VolumeValue`, `SettingsButton`, `SettingsView`, `SettingsBackButton`, `UpdateStatusText`, `CheckUpdatesButton` and `CopyDiagnosticsButton`.
 
-XML validity, Windows compile, native screenshots, interaction tests and audible output are distinct evidence. At source handoff this redesign has XML/handler consistency checks and resource contrast calculations. Build, screenshot and interaction results must be read from the associated CI run. No web inspector has certified this XAML interface. Receiver listening, mixed authentication, quiet/active capture and endpoint-mute recovery require their appropriate protocol and hardware checks.
+XML validity, Windows compile, native screenshots, interaction tests and audible output are distinct evidence. The initial redesign compiled and packaged on Windows, and its first actual compact screenshot exposed the duplicate source-error presentation corrected above. That run did not establish volume stability because its test tried to inspect a control below the scroll viewport. The revised source placement, three-size screenshots and completed interaction checks still require the follow-up CI run; they are not predeclared as passed here. XML/handler consistency and resource contrast calculations also passed. No web inspector has certified this XAML interface. Receiver listening, mixed authentication, quiet/active capture and endpoint-mute recovery require their appropriate protocol and hardware checks.
 
 ## Build and platform references
 

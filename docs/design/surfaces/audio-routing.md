@@ -32,11 +32,11 @@ The impeccable context launcher was attempted once and was absent. Direct contex
 | --- | --- |
 | No horizontal movement | Actual WinUI coordinates at 0/9/10/99/100 and native pointer drag |
 | No stale slider reset | Local value retained after snapshot and acknowledgement |
-| Compact/wide composition | Geometry checks at 880 × 680, 1100 × 800 and 1600 × 1000; compact native home/settings screenshots on the 1024 × 768 runner; larger rendered views need separate visual evidence |
+| Compact/wide composition | Geometry and on-screen native screenshots at 880 × 680, 1100 × 800 and 1600 × 1000, using a supported larger CI display mode that is restored afterward |
 | Honest signal | Core-only capture/output data; no production fixture receivers |
 | Settings usability | Native settings/back/check-update interaction and screenshot |
 | Restricted diagnostic copy | Clipboard contains only the allowlisted schema |
 | Exit differs from hiding | Actual process exits for installer and confirmed RM requests |
 | Text contrast | Saved resource calculation; native/high-contrast review remains separate |
 
-At source handoff XML/handler consistency and resource contrast calculations passed. The minimum tested text/surface contrast is 5.5:1. Windows build, render and interaction evidence comes from the associated CI run; this brief does not predeclare results. Real receiver listening remains a separate hardware check.
+XML/handler consistency and resource contrast calculations passed; the minimum tested text/surface contrast is 5.5:1. The first redesign compiled and packaged on Windows. Its actual compact screenshot confirmed readable type and the fixed rail, but exposed a repeated no-output error consuming space above the transport. The correction places that error and a rescan action beside the source, without shrinking the interface. Its follow-up rendering and the complete three-size interaction/screenshot run remain pending here. A below-viewport UI Automation control must be scrolled into view before measurement; an empty clipped rectangle is not evidence that the slider is missing. Real receiver listening remains a separate hardware check.

@@ -285,35 +285,36 @@ namespace
 
     void DismissTimeoutDialog(HANDLE process, HWND dialog)
     {
-        HWND button{};
         auto deadline = GetTickCount64() + 5000;
-        do
+        while (!IsWindowVisible(dialog) && GetTickCount64() < deadline)
         {
-            button = GetDlgItem(dialog, IDOK);
-            if (IsWindowVisible(dialog) && button && IsWindowVisible(button) && IsWindowEnabled(button)) break;
             Require(WaitForSingleObject(process, 0) == WAIT_TIMEOUT, "Timeout helper exited before user acknowledgement");
             Sleep(25);
-        } while (GetTickCount64() < deadline);
-        Require(button && IsWindowVisible(dialog) && IsWindowVisible(button) && IsWindowEnabled(button),
-            "Timeout dialog's OK button did not become ready");
+        }
+        if (!IsWindowVisible(dialog))
+        {
+            std::cerr << "Timeout feedback never became visible: window_alive=" << IsWindow(dialog)
+                << ", process_wait=" << WaitForSingleObject(process, 0) << '\n';
+        }
+        Require(IsWindowVisible(dialog) != FALSE, "Timeout failure dialog did not become visible");
 
-        // Enumeration can observe a dialog before its controls are initialized.
-        // A real control notification carries the button HWND in lParam; zero
-        // describes a menu command and is not a reliable MessageBox dismissal.
+        // Closing an MB_OK message box is a normal user dismissal. Do not depend
+        // on private MessageBox child-window IDs or its version-specific layout.
+        // The gate is visible feedback followed by real helper failure/exit.
         DWORD_PTR response{};
         SetLastError(ERROR_SUCCESS);
-        auto delivered = SendMessageTimeoutW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED),
-            reinterpret_cast<LPARAM>(button), SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &response);
+        auto delivered = SendMessageTimeoutW(dialog, WM_CLOSE, 0, 0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &response);
         auto deliveryError = GetLastError();
         auto exited = WaitForSingleObject(process, 5000);
         if (!delivered || exited != WAIT_OBJECT_0)
         {
             std::cerr << "Timeout dialog acknowledgement: delivered=" << (delivered != 0)
                 << ", win32_error=" << deliveryError << ", wait_result=" << exited
-                << ", dialog_alive=" << IsWindow(dialog) << ", button_alive=" << IsWindow(button) << '\n';
+                << ", dialog_alive=" << IsWindow(dialog) << ", dialog_visible=" << IsWindowVisible(dialog) << '\n';
         }
         Require(delivered != 0, "Timeout dialog acknowledgement was not delivered");
-        Require(exited == WAIT_OBJECT_0, "Failure dialog did not close its helper after OK acknowledgement");
+        Require(exited == WAIT_OBJECT_0, "Failure dialog did not close its helper after user dismissal");
         DWORD result{};
         Require(GetExitCodeProcess(process, &result) != FALSE && result == 1,
             "Acknowledged timeout did not return the helper failure result");

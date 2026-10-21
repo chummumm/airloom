@@ -1,9 +1,12 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([switch] $ProbeDisplay)
+$ErrorActionPreference = 'Stop'
 # The Windows inbox host supplies the .NET Framework UIAutomation assemblies.
 # Keep this integration check usable when CI invokes it from PowerShell 7.
 if ($PSVersionTable.PSEdition -ne 'Desktop') {
     $DesktopPowerShell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    & $DesktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -MTA -File $PSCommandPath
+    $HostArguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-MTA', '-File', $PSCommandPath)
+    if ($ProbeDisplay) { $HostArguments += '-ProbeDisplay' }
+    & $DesktopPowerShell @HostArguments
     if ($LASTEXITCODE -ne 0) { throw "Native UI check failed in Windows PowerShell (code $LASTEXITCODE)." }
     return
 }
@@ -13,14 +16,77 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 public static class AirloomUiProbe {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WindowBounds { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out WindowBounds bounds);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DisplayMode {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        public ushort SpecVersion, DriverVersion, Size, DriverExtra;
+        public uint Fields;
+        public int PositionX, PositionY;
+        public uint Orientation, FixedOutput;
+        public short Color, Duplex, YResolution, TTOption, Collate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string FormName;
+        public ushort LogPixels;
+        public uint BitsPerPel, Width, Height, Flags, Frequency;
+        public uint ICMMethod, ICMIntent, MediaType, DitherType, Reserved1, Reserved2, PanningWidth, PanningHeight;
+        public static DisplayMode Empty() {
+            var mode = new DisplayMode();
+            mode.Size = (ushort)Marshal.SizeOf(typeof(DisplayMode));
+            return mode;
+        }
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool EnumDisplaySettings(string name, int index, ref DisplayMode mode);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int ChangeDisplaySettings(ref DisplayMode mode, uint flags);
+    private static DisplayMode? originalDisplay;
+    public static void PrepareDisplay(int minimumWidth, int minimumHeight) {
+        if (GetSystemMetrics(0) >= minimumWidth && GetSystemMetrics(1) >= minimumHeight) return;
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
+            throw new InvalidOperationException("Native UI verification needs an on-screen desktop of at least " + minimumWidth + " x " + minimumHeight + ". The script does not change a personal desktop.");
+        var original = DisplayMode.Empty();
+        if (!EnumDisplaySettings(null, -1, ref original)) throw new InvalidOperationException("Cannot inspect the CI display mode.");
+        var candidates = new List<DisplayMode>();
+        var available = new List<string>();
+        for (int index = 0; index < 4096; ++index) {
+            var mode = DisplayMode.Empty();
+            if (!EnumDisplaySettings(null, index, ref mode)) break;
+            available.Add(mode.Width + "x" + mode.Height + "x" + mode.BitsPerPel);
+            if (mode.Width >= minimumWidth && mode.Height >= minimumHeight && mode.BitsPerPel == 32) candidates.Add(mode);
+        }
+        candidates.Sort((a, b) => ((ulong)a.Width * a.Height).CompareTo((ulong)b.Width * b.Height));
+        foreach (var candidate in candidates) {
+            var mode = candidate;
+            if (ChangeDisplaySettings(ref mode, 2) != 0) continue; // CDS_TEST, supported modes only.
+            if (ChangeDisplaySettings(ref mode, 0) != 0) continue; // Temporary; no registry write.
+            originalDisplay = original;
+            for (int attempt = 0; attempt < 40; ++attempt) {
+                if (GetSystemMetrics(0) >= minimumWidth && GetSystemMetrics(1) >= minimumHeight) return;
+                Thread.Sleep(50);
+            }
+            RestoreDisplay();
+        }
+        throw new InvalidOperationException("CI display cannot show the required native window. Available modes: " + string.Join(", ", available));
+    }
+    public static void RestoreDisplay() {
+        if (!originalDisplay.HasValue) return;
+        var mode = originalDisplay.Value;
+        int result = ChangeDisplaySettings(ref mode, 0);
+        if (result != 0) throw new InvalidOperationException("Cannot restore the CI display mode: " + result);
+        originalDisplay = null;
+    }
     public static string ReadClipboard() {
         string value = null;
         Exception failure = null;
@@ -38,12 +104,30 @@ public static class AirloomUiProbe {
 }
 '@
 
+if ($ProbeDisplay) {
+    try {
+        [AirloomUiProbe]::PrepareDisplay(1600, 1040)
+        Write-Host "Native UI test display available: $([AirloomUiProbe]::GetSystemMetrics(0)) x $([AirloomUiProbe]::GetSystemMetrics(1))."
+    } finally { [AirloomUiProbe]::RestoreDisplay() }
+    return
+}
+
 function Save-NativeScreenshot([string] $Destination) {
     $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $Bitmap = New-Object System.Drawing.Bitmap $Screen.Width, $Screen.Height
+    $Capture = $Screen
+    if ($null -ne $Process -and -not $Process.HasExited) {
+        $Bounds = New-Object AirloomUiProbe+WindowBounds
+        if ([AirloomUiProbe]::GetWindowRect($Process.MainWindowHandle, [ref]$Bounds)) {
+            $WindowBounds = [System.Drawing.Rectangle]::new($Bounds.Left, $Bounds.Top,
+                $Bounds.Right - $Bounds.Left, $Bounds.Bottom - $Bounds.Top)
+            $Capture = [System.Drawing.Rectangle]::Intersect($Screen, $WindowBounds)
+        }
+    }
+    if ($Capture.Width -le 0 -or $Capture.Height -le 0) { throw 'The native window is outside the capture display.' }
+    $Bitmap = New-Object System.Drawing.Bitmap $Capture.Width, $Capture.Height
     $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
     try {
-        $Graphics.CopyFromScreen($Screen.Location, [System.Drawing.Point]::Empty, $Screen.Size)
+        $Graphics.CopyFromScreen($Capture.Location, [System.Drawing.Point]::Empty, $Capture.Size)
         $Bitmap.Save($Destination, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally { $Graphics.Dispose(); $Bitmap.Dispose() }
 }
@@ -96,6 +180,15 @@ function Wait-NativeId([string] $Id) {
     throw "Native automation ID '$Id' was not available within 10 seconds."
 }
 
+function Set-HomeScroll([double] $Percent) {
+    $Viewport = Wait-NativeId 'HomeScrollViewer'
+    $Scroll = [System.Windows.Automation.ScrollPattern]$Viewport.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    if ($Scroll.Current.VerticallyScrollable) {
+        $Scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $Percent)
+        Start-Sleep -Milliseconds 250
+    }
+}
+
 function Get-NativeLayout {
     $Geometry = [ordered]@{}
     foreach ($Id in @('DeviceRail', 'PageContent', 'SignalPanel', 'TransportPanel', 'VolumeSlider', 'VolumeValue')) {
@@ -120,10 +213,14 @@ function Test-NativeVolumeLayout {
     $Measurements = @()
     $DragVerified = $false
     foreach ($Size in @(@(880, 680), @(1100, 800), @(1600, 1000))) {
+        Write-Host "Verifying native volume at $($Size[0]) x $($Size[1]) on $([AirloomUiProbe]::GetSystemMetrics(0)) x $([AirloomUiProbe]::GetSystemMetrics(1))."
         if (-not [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Size[0], $Size[1], 0x0004)) {
             throw "Could not resize the real native window to $($Size[0]) x $($Size[1])."
         }
         Start-Sleep -Milliseconds 500
+        # UIA returns empty geometry for clipped controls. Bring the actual
+        # transport into view before measuring or sending pointer input.
+        Set-HomeScroll 100
         $Slider = Wait-NativeId 'VolumeSlider'
         if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
@@ -168,6 +265,8 @@ function Test-NativeVolumeLayout {
             if ([Math]::Abs($Range.Current.Value - $DraggedValue) -gt 0.01) { throw 'Volume snapped back after releasing the pointer.' }
             $DragVerified = $true
         }
+        Set-HomeScroll 0
+        Save-NativeScreenshot (Join-Path $EvidencePath "native-window-$($Size[0]).png")
     }
     if (-not $DragVerified) { throw 'No real pointer volume drag could be verified on the native display.' }
     $Range.SetValue(50)
@@ -218,8 +317,13 @@ if (-not (Test-Path $ArchivePath)) { throw 'Build the portable distribution befo
 $SmokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Airloom-Smoke-' + [guid]::NewGuid().ToString('N'))
 Expand-Archive -LiteralPath $ArchivePath -DestinationPath $SmokeRoot
 $AppPath = Join-Path $SmokeRoot 'Airloom.exe'
-$Process = Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path $AppPath) -PassThru
+$Process = $null
 try {
+    # The large adaptive layout must be physically on-screen, not hanging off
+    # a 1024 x 768 desktop. Only this disposable CI display is adjusted.
+    [AirloomUiProbe]::PrepareDisplay(1600, 1040)
+    Start-Sleep -Milliseconds 500
+    $Process = Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path $AppPath) -PassThru
     $Deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 500
@@ -235,6 +339,7 @@ try {
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0,
         [Math]::Min(1100, $Screen.Width), [Math]::Min(800, $Screen.Height), 0x0004)
     Start-Sleep -Milliseconds 500
+    Set-HomeScroll 0
     $SettingsButton = Wait-NativeButton '设置'
     Save-NativeScreenshot (Join-Path $EvidencePath 'native-window.png')
     Invoke-NativeButton $SettingsButton
@@ -272,7 +377,9 @@ try {
         pointer_drag_verified = $VolumeProof.pointer_drag_verified
         volume_measurements = $VolumeProof.measurements
         diagnostics_copy_verified = $true
-        note = 'Real WinUI launch from the shipped archive; volume geometry verified at 880/1100/1600 pixels with 0/9/10/99/100 values and a real pointer drag. Settings, live GitHub update metadata, and diagnostics clipboard verified. No physical HomePod was connected.'
+        desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
+        desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
+        note = 'Real WinUI launch from the shipped archive; on-screen volume geometry verified at 880/1100/1600 pixels with 0/9/10/99/100 values and a real pointer drag. Scrollable controls are brought into view before measurement. Screenshots at all three sizes, settings, live GitHub update metadata, and diagnostics clipboard verified. No physical HomePod was connected.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))
@@ -280,6 +387,7 @@ try {
     try { Save-NativeScreenshot (Join-Path $EvidencePath 'native-smoke-failure.png') } catch { }
     throw
 } finally {
-    if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
+    if ($null -ne $Process -and -not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    [AirloomUiProbe]::RestoreDisplay()
 }

@@ -114,7 +114,7 @@
                         </InfoBar>
 
                         <Grid Grid.Row="1" RowSpacing="8" AutomationProperties.AutomationId="SourcePanel">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="36" /><RowDefinition Height="40" /></Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="36" /><RowDefinition Height="Auto" MinHeight="40" /></Grid.RowDefinitions>
                             <TextBlock Text="声音来源" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
                             <ComboBox x:Name="SourcePicker" Grid.Row="1" PlaceholderText="正在读取 Windows 音频输出…" HorizontalAlignment="Stretch" Height="36" SelectionChanged="OnSourceChanged" AutomationProperties.Name="声音来源，Windows 播放设备" AutomationProperties.AutomationId="SourcePicker" ToolTipService.ToolTip="选择正在播放声音的 Windows 输出设备。传输时切换会重新连接扬声器。" />
                             <Grid Grid.Row="2" ColumnSpacing="14">
@@ -123,6 +123,7 @@
                                 <Button x:Name="TestToneButton" Grid.Column="1" Click="OnTestTone" Style="{StaticResource SubtleButtonStyle}" IsEnabled="False" Padding="8,0" AutomationProperties.Name="播放三秒测试音" AutomationProperties.AutomationId="TestToneButton">
                                     <StackPanel Orientation="Horizontal" Spacing="7"><FontIcon Glyph="&#xE767;" FontSize="14" /><TextBlock x:Name="TestToneLabel" Text="试播 3 秒" FontSize="12" /></StackPanel>
                                 </Button>
+                                <Button x:Name="SourceRetryButton" Grid.Column="1" Content="重新扫描" Click="OnRefresh" Style="{StaticResource SubtleButtonStyle}" Padding="8,0" VerticalAlignment="Center" Visibility="Collapsed" AutomationProperties.Name="重新扫描 Windows 音频输出" AutomationProperties.AutomationId="SourceRetryButton" />
                             </Grid>
                         </Grid>
 

@@ -52,6 +52,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - uses: microsoft/setup-msbuild@v2
       - uses: NuGet/setup-nuget@v2
+      - name: Verify on-screen native test display
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1 -ProbeDisplay
       - name: Build native app
         id: native_build
         shell: pwsh
