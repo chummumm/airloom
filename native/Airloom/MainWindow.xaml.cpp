@@ -422,8 +422,8 @@ namespace winrt::Airloom::implementation
         }
         LocalMuteToggle().IsEnabled(hasSource);
         LocalMuteToggle().IsOn(next.muteLocal);
-        TestToneButton().IsEnabled(streaming);
-        TestToneButton().Visibility(sourceError ? Visibility::Collapsed : Visibility::Visible);
+        // Keep the transport slot stable when source enumeration finishes or fails.
+        TestToneButton().IsEnabled(streaming && !sourceError);
         SourceRetryButton().Visibility(sourceError ? Visibility::Visible : Visibility::Collapsed);
         SourceRetryButton().IsEnabled(m_engine.Available());
         CopyDiagnosticsButton().IsEnabled(!next.diagnosticsJson.empty() && next.diagnosticsJson != L"{}");

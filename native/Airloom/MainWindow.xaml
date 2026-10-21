@@ -67,7 +67,7 @@
                         <Border Style="{StaticResource CardStyle}" Padding="16,12" AutomationProperties.AutomationId="SourcePanel">
                             <Grid RowSpacing="8" ColumnSpacing="12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="76" /><ColumnDefinition Width="*" /><ColumnDefinition Width="154" /></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition Height="38" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="38" /><RowDefinition Height="Auto" MinHeight="36" /></Grid.RowDefinitions>
                                 <FontIcon Glyph="&#xE7F4;" FontSize="20" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="1" Text="声音来源" FontSize="14" VerticalAlignment="Center" />
                                 <ComboBox x:Name="SourcePicker" Grid.Column="2" PlaceholderText="选择 Windows 播放设备" HorizontalAlignment="Stretch" Height="38" SelectionChanged="OnSourceChanged"
@@ -101,7 +101,7 @@
                                                        AutomationProperties.AutomationId="TargetName" AutomationProperties.HeadingLevel="Level1" />
                                             <TextBlock x:Name="StatusDescription" Text="选择扬声器，开始投放系统声音。" FontSize="12" Foreground="{ThemeResource StageMutedBrush}" TextTrimming="CharacterEllipsis" Height="18" />
                                         </StackPanel>
-                                        <FontIcon Grid.Column="1" Glyph="&#xEC42;" FontSize="24" Foreground="{ThemeResource StageMutedBrush}" VerticalAlignment="Top" Margin="0,5,0,0" AutomationProperties.AccessibilityView="Raw" />
+                                        <FontIcon Grid.Column="1" Glyph="&#xE767;" FontSize="24" Foreground="{ThemeResource StageMutedBrush}" VerticalAlignment="Top" Margin="0,5,0,0" AutomationProperties.AccessibilityView="Raw" />
                                     </Grid>
                                     <Grid Grid.Row="1" MinHeight="70">
                                         <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="18" /></Grid.RowDefinitions>
@@ -134,7 +134,7 @@
                                 </Grid>
                             </Border>
 
-                            <Border x:Name="DeviceRail" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="220" MaxHeight="330"
+                            <Border x:Name="DeviceRail" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="330" MaxHeight="330"
                                     AutomationProperties.AutomationId="DeviceRail" AutomationProperties.Name="扬声器列表" AutomationProperties.AccessibilityView="Content">
                                 <Grid RowSpacing="16">
                                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -169,7 +169,7 @@
                 <Border x:Name="TransportPanel" Grid.Row="1" Style="{StaticResource DockStyle}" Margin="24,0,24,20" Padding="20,16"
                         AutomationProperties.AutomationId="TransportPanel" AutomationProperties.Name="音量与连接控制" AutomationProperties.AccessibilityView="Content">
                     <Grid RowSpacing="10" ColumnSpacing="24">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="88" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="186" /></Grid.ColumnDefinitions>
                         <StackPanel x:Name="TransportActions" Spacing="4" VerticalAlignment="Center">
                             <Button x:Name="ConnectButton" Style="{StaticResource PrimaryButtonStyle}" Width="170" Height="48" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
