@@ -30,7 +30,7 @@ The impeccable context launcher was attempted once and was absent. Direct contex
 
 | Requirement | Evidence needed |
 | --- | --- |
-| No horizontal movement | Actual WinUI coordinates at 0/9/10/99/100 and native pointer drag |
+| No horizontal movement | Stable slot/label/panel coordinates at 0/9/10/99/100 and native pointer drag; record the native thumb's endpoint-dependent peer bounds separately |
 | No stale slider reset | Local value retained after snapshot and acknowledgement |
 | Compact/wide composition | Geometry and on-screen native screenshots at 880 × 680, 1100 × 800 and 1600 × 1000, using a supported larger CI display mode that is restored afterward |
 | Honest signal | Core-only capture/output data; no production fixture receivers |
@@ -39,4 +39,4 @@ The impeccable context launcher was attempted once and was absent. Direct contex
 | Exit differs from hiding | Actual process exits for installer and confirmed RM requests |
 | Text contrast | Saved resource calculation; native/high-contrast review remains separate |
 
-XML/handler consistency and resource contrast calculations passed; the minimum tested text/surface contrast is 5.5:1. The first redesign compiled and packaged on Windows. Its actual compact screenshot confirmed readable type and the fixed rail, but exposed a repeated no-output error consuming space above the transport. The correction places that error and a rescan action beside the source, without shrinking the interface. Its follow-up rendering and the complete three-size interaction/screenshot run remain pending here. A below-viewport UI Automation control must be scrolled into view before measurement; an empty clipped rectangle is not evidence that the slider is missing. Real receiver listening remains a separate hardware check.
+XML/handler consistency and resource contrast calculations passed; the minimum tested text/surface contrast is 5.5:1. The redesign compiled and packaged on Windows. The first compact screenshot exposed a repeated no-output error consuming space above the transport. A later actual compact screenshot confirmed the corrected source-local message and visible controls, while exposing disabled action text that needed its own foreground state. A reported two-pixel slider-peer delta was traced to the native thumb's negative margin and child-inclusive automation bounds; [the implementation notes](../../design.md) document the primary sources and stable slot measurement. The complete three-size interaction/screenshot run remains pending here. A below-viewport UI Automation control must be scrolled into view before measurement; an empty clipped rectangle does not mean the slider is missing. Real receiver listening remains a separate hardware check.

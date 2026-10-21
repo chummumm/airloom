@@ -384,7 +384,13 @@ namespace winrt::Airloom::implementation
         SetText(ConnectLabel(), action);
         bool const selectedOnline = std::any_of(next.devices.begin(), next.devices.end(), [&next](Device const& entry)
             { return next.IsSelected(entry.id) && entry.online; });
-        ConnectButton().IsEnabled(active || (selectedOnline && hasSource));
+        bool const canConnect = active || (selectedOnline && hasSource);
+        ConnectButton().IsEnabled(canConnect);
+        // Explicit TextBlock content does not inherit the native presenter's
+        // disabled foreground, so keep its label and glyph readable as well.
+        auto const actionForeground = Brush(canConnect ? L"PrimaryActionTextBrush" : L"MutedBrush");
+        ConnectLabel().Foreground(actionForeground);
+        ConnectGlyph().Foreground(actionForeground);
         ConnectGlyph().Glyph(auth ? L"\uE72E" : streaming ? L"\uE71A" : L"\uE768");
         ConnectGlyph().Visibility(busy && m_motionAllowed ? Visibility::Collapsed : Visibility::Visible);
         ConnectSpinner().Visibility(busy && m_motionAllowed ? Visibility::Visible : Visibility::Collapsed);

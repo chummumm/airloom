@@ -45,6 +45,27 @@ namespace
         throw std::runtime_error("Expected process window did not appear");
     }
 
+    HWND WaitForReadyApplication(HANDLE process)
+    {
+        auto deadline = GetTickCount64() + 15000;
+        HWND window{};
+        while (GetTickCount64() < deadline)
+        {
+            // Attach publishes the window identity before it installs the
+            // subclass and exit capability. Observe completion, not HWND creation.
+            window = WindowForProcess(GetProcessId(process));
+            if (window && GetPropW(window, GracefulExitCapability) == reinterpret_cast<HANDLE>(1)
+                && IsWindowVisible(window)) return window;
+            Require(WaitForSingleObject(process, 0) == WAIT_TIMEOUT,
+                "GUI exited before its graceful-exit protocol became ready");
+            Sleep(50);
+        }
+        std::cerr << "GUI readiness timeout: window_alive=" << IsWindow(window)
+            << ", visible=" << IsWindowVisible(window)
+            << ", exit_capability=" << (window ? GetPropW(window, GracefulExitCapability) : nullptr) << '\n';
+        throw std::runtime_error("GUI did not publish a ready graceful-exit window within 15 seconds");
+    }
+
     struct Running
     {
         Handle process;
@@ -194,8 +215,7 @@ namespace
         else
         {
             Launch(parent, realGui);
-            window = WaitForWindow(parent.process.value);
-            Require(GetPropW(window, GracefulExitCapability) == reinterpret_cast<HANDLE>(1), "GUI has no graceful-exit capability");
+            window = WaitForReadyApplication(parent.process.value);
             Sleep(300);
             hadTray = TrayIconPresent(window);
             if (hadTray)
@@ -230,7 +250,7 @@ namespace
     {
         Running gui;
         Launch(gui, application);
-        auto window = WaitForWindow(gui.process.value);
+        auto window = WaitForReadyApplication(gui.process.value);
         DWORD_PTR response{};
         Require(SendMessageTimeoutW(window, WM_QUERYENDSESSION, 0, ENDSESSION_CLOSEAPP,
             SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &response) != 0 && response == TRUE,

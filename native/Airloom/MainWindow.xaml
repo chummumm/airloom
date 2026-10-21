@@ -175,14 +175,55 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="52" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="扬声器音量" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         <TextBlock x:Name="VolumeLabel" Grid.Column="1" Text="75%" FontSize="14" FontWeight="SemiBold" Width="52" TextAlignment="Right" Typography.NumeralAlignment="Tabular" AutomationProperties.AutomationId="VolumeValue" />
-                                        <Slider x:Name="VolumeSlider" Grid.Row="1" Grid.ColumnSpan="2" Minimum="0" Maximum="100" Value="75" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged" AutomationProperties.Name="扬声器音量" AutomationProperties.AutomationId="VolumeSlider" IsEnabled="False" Foreground="{ThemeResource InkBrush}" />
+                                        <!-- The native thumb draws 2 px beyond its layout bounds at
+                                             either endpoint. Keep that outset inside a stable slot. -->
+                                        <Grid x:Name="VolumeSliderHost" Grid.Row="1" Grid.ColumnSpan="2" Padding="2,0" Background="Transparent" AutomationProperties.AutomationId="VolumeSliderHost" AutomationProperties.Name="扬声器音量轨道" AutomationProperties.AccessibilityView="Content">
+                                            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="75" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged" AutomationProperties.Name="扬声器音量" AutomationProperties.AutomationId="VolumeSlider" IsEnabled="False" Foreground="{ThemeResource InkBrush}">
+                                                <Slider.Resources>
+                                                    <ResourceDictionary>
+                                                        <ResourceDictionary.ThemeDictionaries>
+                                                            <ResourceDictionary x:Key="Default">
+                                                                <SolidColorBrush x:Key="SliderThumbBackground" Color="#F7F7F7" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#DDDDDD" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#C7C7C7" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#777777" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="#F7F7F7" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DDDDDD" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C7C7C7" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#777777" />
+                                                            </ResourceDictionary>
+                                                            <ResourceDictionary x:Key="Light">
+                                                                <SolidColorBrush x:Key="SliderThumbBackground" Color="#202020" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#393939" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#505050" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#8A8A8A" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="#202020" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#393939" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#505050" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#8A8A8A" />
+                                                            </ResourceDictionary>
+                                                            <ResourceDictionary x:Key="HighContrast">
+                                                                <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource SystemColorHighlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{ThemeResource SystemColorHotlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="{ThemeResource SystemColorHighlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{ThemeResource SystemColorHotlightColor}" />
+                                                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
+                                                            </ResourceDictionary>
+                                                        </ResourceDictionary.ThemeDictionaries>
+                                                    </ResourceDictionary>
+                                                </Slider.Resources>
+                                            </Slider>
+                                        </Grid>
                                     </Grid>
                                     <StackPanel x:Name="TransportActions" Grid.Column="1" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
                                         <Button x:Name="ConnectButton" Style="{StaticResource PrimaryButtonStyle}" Width="146" Height="36" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <ProgressRing x:Name="ConnectSpinner" Width="14" Height="14" IsActive="False" Visibility="Collapsed" Foreground="{ThemeResource PrimaryActionTextBrush}" />
-                                                <FontIcon x:Name="ConnectGlyph" Glyph="&#xE768;" FontSize="13" />
-                                                <TextBlock x:Name="ConnectLabel" Text="开始连接" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource PrimaryActionTextBrush}" />
+                                                <FontIcon x:Name="ConnectGlyph" Glyph="&#xE768;" FontSize="13" Foreground="{ThemeResource MutedBrush}" />
+                                                <TextBlock x:Name="ConnectLabel" Text="开始连接" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource MutedBrush}" />
                                             </StackPanel>
                                         </Button>
                                         <Button x:Name="CancelAuthButton" Content="取消此设备" Click="OnCancelAuth" Visibility="Collapsed" Style="{StaticResource SubtleButtonStyle}" HorizontalAlignment="Stretch" />

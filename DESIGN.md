@@ -73,6 +73,8 @@ Existing receiver buttons update in place, so periodic snapshots do not recreate
 
 Volume follows the user's hand immediately. Commands are debounced; an older snapshot cannot replace a local drag value before the core acknowledges it. Pointer release flushes the final value. Motion must never interfere with this direct manipulation.
 
+The native slider thumb's two-pixel endpoint outset is reserved inside its track slot, not clipped or replaced. Thumb and track normal, hover, pressed and disabled brushes are scoped directly to the control; the high-contrast variants retain system colors. Explicit connection-button text uses a readable muted foreground when disabled instead of overriding the native disabled state with white text.
+
 Navigation can use a short opacity transition when Windows animations are enabled. Audio movement comes from real PCM. There is no continuous ornamental motion. Disabling animation or the waveform leaves readable states and actual numeric/level information.
 
 ## Accessibility and review

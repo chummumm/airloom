@@ -191,7 +191,10 @@ function Set-HomeScroll([double] $Percent) {
 
 function Get-NativeLayout {
     $Geometry = [ordered]@{}
-    foreach ($Id in @('DeviceRail', 'PageContent', 'SignalPanel', 'TransportPanel', 'VolumeSlider', 'VolumeValue')) {
+    # WinUI's thumb has a -2 px visual outset. Slider's automation bounds
+    # legitimately include that moving decoration at its endpoints; compare
+    # the containing layout slot, and record the slider's visual bounds separately.
+    foreach ($Id in @('DeviceRail', 'PageContent', 'SignalPanel', 'TransportPanel', 'VolumeSliderHost', 'VolumeValue')) {
         $Control = Wait-NativeId $Id
         $Rect = $Control.Current.BoundingRectangle
         if ($Rect.IsEmpty -or $Rect.Width -le 0 -or $Rect.Height -le 0) { throw "Empty geometry for $Id." }
@@ -204,7 +207,11 @@ function Assert-StableLayout($Expected, $Actual, [string] $Context) {
     foreach ($Id in $Expected.Keys) {
         foreach ($Dimension in @('x', 'y', 'width', 'height')) {
             $Delta = [Math]::Abs([double]$Expected[$Id][$Dimension] - [double]$Actual[$Id][$Dimension])
-            if ($Delta -gt 1.0) { throw "$Context moved $Id $Dimension by $Delta px." }
+            if ($Delta -gt 1.0) {
+                $Before = $Expected[$Id] | ConvertTo-Json -Compress
+                $After = $Actual[$Id] | ConvertTo-Json -Compress
+                throw "$Context moved $Id $Dimension by $Delta px. Before: $Before. After: $After."
+            }
         }
     }
 }
@@ -235,7 +242,11 @@ function Test-NativeVolumeLayout {
             $Geometry = Get-NativeLayout
             if ($null -eq $Baseline) { $Baseline = $Geometry }
             else { Assert-StableLayout $Baseline $Geometry "Volume $Volume at $($Size[0]) px" }
-            $Measurements += [ordered]@{ window_width = $Size[0]; window_height = $Size[1]; volume = $Volume; bounds = $Geometry }
+            $Visual = $Slider.Current.BoundingRectangle
+            $Measurements += [ordered]@{
+                window_width = $Size[0]; window_height = $Size[1]; volume = $Volume; bounds = $Geometry
+                slider_visual_bounds = [ordered]@{ x = $Visual.X; y = $Visual.Y; width = $Visual.Width; height = $Visual.Height }
+            }
         }
         # Use real pointer input once, while the slider lies on the runner's
         # actual display. Wide-window geometry can exceed that display.
