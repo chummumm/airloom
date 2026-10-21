@@ -151,6 +151,36 @@ public static class AirloomUiProbe {
         if (result != 0) throw new InvalidOperationException("Cannot restore the CI display mode: " + result);
         originalDisplay = null;
     }
+    // GET uses BOOL*, while SET takes the BOOL value in pvParam. A zero
+    // fWinIni changes only the session, without persisting or broadcasting it.
+    // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-systemparametersinfow
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", ExactSpelling = true, SetLastError = true)]
+    private static extern bool GetSystemParameter(uint action, uint parameter, [MarshalAs(UnmanagedType.Bool)] out bool value, uint flags);
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", ExactSpelling = true, SetLastError = true)]
+    private static extern bool SetSystemParameter(uint action, uint parameter, IntPtr value, uint flags);
+    private static bool? originalClientAreaAnimation;
+    public static bool ClientAreaAnimationsEnabled() {
+        bool enabled;
+        if (!GetSystemParameter(0x1042, 0, out enabled, 0))
+            throw new InvalidOperationException("Cannot read client-area animation preference: " + Marshal.GetLastWin32Error());
+        return enabled;
+    }
+    public static void PrepareFixtureMotion() {
+        bool original = ClientAreaAnimationsEnabled();
+        if (original) return;
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
+            throw new InvalidOperationException("Active waveform evidence needs animations enabled. The script does not change a personal desktop.");
+        originalClientAreaAnimation = original;
+        if (!SetSystemParameter(0x1043, 0, new IntPtr(1), 0) || !ClientAreaAnimationsEnabled())
+            throw new InvalidOperationException("Cannot temporarily enable CI client-area animations: " + Marshal.GetLastWin32Error());
+    }
+    public static void RestoreFixtureMotion() {
+        if (!originalClientAreaAnimation.HasValue) return;
+        bool original = originalClientAreaAnimation.Value;
+        if (!SetSystemParameter(0x1043, 0, new IntPtr(original ? 1 : 0), 0) || ClientAreaAnimationsEnabled() != original)
+            throw new InvalidOperationException("Cannot restore CI client-area animation preference: " + Marshal.GetLastWin32Error());
+        originalClientAreaAnimation = null;
+    }
     public static string ReadClipboard() {
         string value = null;
         Exception failure = null;
@@ -578,7 +608,27 @@ function Select-NativeTheme([string] $Name) {
     Set-SettingsScroll 0
 }
 
-function Test-NativeThemes([string] $Prefix) {
+function Assert-ActiveFixtureWaveform {
+    $Signal = Wait-NativeId 'SignalPanel'
+    if ($Signal.Current.IsOffscreen -or $Signal.Current.BoundingRectangle.IsEmpty) {
+        throw 'The populated audio instrument is not visible for waveform evidence.'
+    }
+    $TextCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $InactiveHints = @('连接后显示实时声音', '连接后，声音将在这里流动', '动态波形已关闭',
+        '已遵循 Windows 动画设置', '等待声音 · 播放一首音乐试试')
+    $MotionDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $VisibleHints = @($Signal.FindAll([System.Windows.Automation.TreeScope]::Descendants, $TextCondition) |
+            Where-Object { -not $_.Current.IsOffscreen -and $InactiveHints -contains $_.Current.Name })
+        if ([AirloomUiProbe]::ClientAreaAnimationsEnabled() -and $VisibleHints.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $MotionDeadline)
+    throw 'The populated fixture still shows an inactive or reduced-motion waveform hint.'
+}
+
+function Test-NativeThemes([string] $Prefix, [bool] $VerifyActiveWaveform = $false) {
     $Themes = @()
     $ThemeErrors = @()
     foreach ($Theme in @(@('浅色', 'light'), @('深色', 'dark'))) {
@@ -591,6 +641,7 @@ function Test-NativeThemes([string] $Prefix) {
             Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
             Start-Sleep -Milliseconds 250
             Set-HomeScroll 0
+            if ($VerifyActiveWaveform) { Assert-ActiveFixtureWaveform }
             Save-NativeScreenshot (Join-Path $EvidencePath "$Prefix-home-$($Theme[1]).png")
             $Themes += $Theme[1]
         } catch {
@@ -614,7 +665,10 @@ function Test-NativeThemes([string] $Prefix) {
             }
         }
     }
-    return [ordered]@{ verified = ($ThemeErrors.Count -eq 0 -and $Themes.Count -eq 2); themes = $Themes; errors = $ThemeErrors }
+    return [ordered]@{
+        verified = ($ThemeErrors.Count -eq 0 -and $Themes.Count -eq 2); themes = $Themes; errors = $ThemeErrors
+        active_waveform_mode_verified = ($VerifyActiveWaveform -and $ThemeErrors.Count -eq 0 -and $Themes.Count -eq 2)
+    }
 }
 
 function Build-VisualFixture([string] $OutputDirectory) {
@@ -645,7 +699,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     foreach ($Id in @('Receiver:fixture-living-room', 'Receiver:fixture-study', 'Receiver:fixture-bedroom')) {
         $null = Wait-NativeId $Id
     }
-    $ThemeProof = Test-NativeThemes 'fixture-playing'
+    $ThemeProof = Test-NativeThemes 'fixture-playing' $true
     $script:FixtureThemeErrors = @($ThemeProof.errors)
     $FixtureTheme = if ($ThemeProof.themes -contains 'dark') { 'dark' } else { 'theme-unverified' }
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 880, 680, 0x0004)
@@ -687,6 +741,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
         themes = $ThemeProof.themes; errors = $ThemeProof.errors; receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
         populated_volume_retained = $true; compact_receivers_visible_at_top = $true
+        active_waveform_mode_verified = $ThemeProof.active_waveform_mode_verified
     }
 }
 
@@ -788,6 +843,9 @@ try {
     $FixtureThemeErrors = @()
     try {
         Build-VisualFixture $FixtureRoot
+        # Only the isolated populated fixture uses a temporary CI animation
+        # preference; the production executable still honors Windows normally.
+        [AirloomUiProbe]::PrepareFixtureMotion()
         $FixtureProof = Test-PopulatedVisualFixture $FixtureRoot
     } catch {
         $FixtureProof = [ordered]@{
@@ -797,7 +855,9 @@ try {
         if ($null -ne $Process -and -not $Process.HasExited) {
             try { Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-failure.png') } catch { }
         }
-    } finally { Stop-NativeApplication }
+    } finally {
+        try { Stop-NativeApplication } finally { [AirloomUiProbe]::RestoreFixtureMotion() }
+    }
     if ((Get-FileHash -LiteralPath (Join-Path $SmokeRoot 'airloom_core.dll') -Algorithm SHA256).Hash -ne $ShippedCoreHash) {
         throw 'The populated visual fixture changed the real core used for shipped-archive verification.'
     }
@@ -844,5 +904,5 @@ try {
     } else {
         Remove-ItemProperty -LiteralPath $ThemeSettingsPath -Name Theme -ErrorAction SilentlyContinue
     }
-    [AirloomUiProbe]::RestoreDisplay()
+    try { [AirloomUiProbe]::RestoreFixtureMotion() } finally { [AirloomUiProbe]::RestoreDisplay() }
 }

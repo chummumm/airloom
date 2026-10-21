@@ -327,16 +327,81 @@ namespace
         std::cout << (unresponsive ? "Bounded exit timeout" : "Legacy tray-exit migration") << " passed\n";
     }
 
+    HWND FindTimeoutDialog(DWORD processId, bool requireVisible)
+    {
+        struct Search { DWORD processId; bool requireVisible; HWND window{}; } search{processId, requireVisible};
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+            auto& search = *reinterpret_cast<Search*>(parameter);
+            DWORD owner{};
+            GetWindowThreadProcessId(window, &owner);
+            if (owner != search.processId || (search.requireVisible && !IsWindowVisible(window))) return TRUE;
+            std::array<wchar_t, 128> title{};
+            if (GetWindowTextW(window, title.data(), static_cast<int>(title.size())) > 0
+                && std::wstring_view(title.data()) == L"Airloom 更新未完成")
+            {
+                search.window = window;
+                return FALSE;
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&search));
+        return search.window;
+    }
+
+    void LogTimeoutDialogState(HANDLE process)
+    {
+        DWORD exitCode{};
+        auto const hasExitCode = GetExitCodeProcess(process, &exitCode) != FALSE;
+        struct Search { DWORD processId; size_t count{}; } search{GetProcessId(process)};
+        std::cerr << "Timeout dialog readiness: helper_pid=" << search.processId
+            << ", process_wait=" << WaitForSingleObject(process, 0)
+            << ", exit_code_available=" << hasExitCode << ", exit_code=" << exitCode << '\n';
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+            auto& search = *reinterpret_cast<Search*>(parameter);
+            DWORD owner{};
+            GetWindowThreadProcessId(window, &owner);
+            if (owner != search.processId) return TRUE;
+            ++search.count;
+            std::array<wchar_t, 256> title{};
+            auto const length = GetWindowTextW(window, title.data(), static_cast<int>(title.size()));
+            std::array<char, 768> utf8{};
+            auto const bytes = length > 0 ? WideCharToMultiByte(CP_UTF8, 0, title.data(), length,
+                utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr) : 0;
+            std::cerr << "  helper_hwnd=" << reinterpret_cast<void*>(window)
+                << ", visible=" << (IsWindowVisible(window) != FALSE) << ", title=\"";
+            if (bytes > 0) std::cerr.write(utf8.data(), bytes);
+            std::cerr << "\"\n";
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&search));
+        if (search.count == 0) std::cerr << "  no owned top-level windows\n";
+    }
+
+    HWND WaitForTimeoutDialog(HANDLE process)
+    {
+        auto const deadline = GetTickCount64() + 35000;
+        while (GetTickCount64() < deadline)
+        {
+            // HWND creation can precede MessageBox caption/visibility setup.
+            // Ignore other helper windows and wait for the actual user feedback.
+            if (auto dialog = FindTimeoutDialog(GetProcessId(process), true)) return dialog;
+            if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT)
+            {
+                LogTimeoutDialogState(process);
+                throw std::runtime_error("Timeout helper exited before its visible failure dialog became ready");
+            }
+            Sleep(50);
+        }
+        LogTimeoutDialogState(process);
+        throw std::runtime_error("Visible update failure dialog did not become ready within 35 seconds");
+    }
+
     struct TimeoutDialogCleanup
     {
         HANDLE process;
         ~TimeoutDialogCleanup()
         {
             if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) return;
-            auto dialog = WindowForProcess(GetProcessId(process), false);
-            std::array<wchar_t, 128> title{};
-            if (!dialog || !GetWindowTextW(dialog, title.data(), static_cast<int>(title.size()))
-                || std::wstring_view(title.data()) != L"Airloom 更新未完成") return;
+            auto dialog = FindTimeoutDialog(GetProcessId(process), false);
+            if (!dialog) return;
             // Failure cleanup closes only this test helper's known error dialog.
             // It never terminates the parent or turns an assertion into success.
             PostMessageW(dialog, WM_CLOSE, 0, 0);
@@ -392,7 +457,7 @@ namespace
             fixture.lock.value, parent.process.value, &helperProcess), "Timeout fixture handoff failed");
         TimeoutDialogCleanup dialogCleanup{helperProcess.value};
         fixture.lock.Reset();
-        auto dialog = WaitForWindow(helperProcess.value, false, 35000);
+        auto dialog = WaitForTimeoutDialog(helperProcess.value);
         std::array<wchar_t, 128> title{};
         GetWindowTextW(dialog, title.data(), static_cast<int>(title.size()));
         Require(std::wstring_view(title.data()) == L"Airloom 更新未完成", "Timeout did not show visible update failure");

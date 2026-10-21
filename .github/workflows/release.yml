@@ -83,6 +83,7 @@ jobs:
           assert fixture.get('synthetic_data') is True and fixture.get('real_audio_or_receiver_claim') is False, 'Visual fixture provenance is missing.'
           assert fixture.get('password_dialog_verified') is True and fixture.get('per_receiver_cancel_verified') is True, 'Native authentication presentation/cancel checks are missing.'
           assert fixture.get('populated_volume_retained') is True, 'Populated native volume check is missing.'
+          assert fixture.get('active_waveform_mode_verified') is True, 'Animation-enabled native waveform evidence is missing.'
           assert proof.get('desktop_width', 0) >= 1600 and proof.get('desktop_height', 0) >= 1040, 'Native windows were not verified on a sufficiently large display.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
