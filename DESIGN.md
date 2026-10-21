@@ -19,7 +19,7 @@ The direction is a flat neutral console: a fixed receiver rail, a ruled task hea
 | Main / section / target type | 20 / 16 / 22 effective pixels, semibold |
 | Body / secondary type | 14 / 12 effective pixels |
 
-At compact and normal desktop widths, source, signal and transport stack vertically. At 1280 effective pixels or greater, a 332 effective pixel transport column sits beside the signal. The receiver rail remains fixed. The minimum tracking size is 880 × 680 effective pixels; vertical overflow scrolls. A reserved vertical scrollbar avoids moving content when overflow changes.
+At compact and normal desktop widths, source, signal and transport stack vertically. At an actual root content width of 1280 effective pixels or greater, a 332 effective pixel transport column sits beside the signal. The receiver rail remains fixed. The minimum tracking size is 880 × 680 effective pixels; vertical overflow scrolls. A reserved vertical scrollbar avoids moving content when overflow changes.
 
 Large windows use their available working area. Do not recenter a narrow maximum-width card group as status text, digits or receiver names change. The volume percentage owns a fixed 52 effective pixel slot; changing 9% to 100% must not move the slider or neighboring panels.
 

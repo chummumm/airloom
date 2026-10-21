@@ -15,6 +15,7 @@ namespace winrt::Airloom::implementation
         void Start(bool background);
 
         void OnLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnLayoutRootSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void OnActualThemeChanged(Microsoft::UI::Xaml::FrameworkElement const&, Windows::Foundation::IInspectable const&);
         void OnRefresh(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnRetry(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -40,6 +41,7 @@ namespace winrt::Airloom::implementation
     private:
         void InitializeWindow();
         void InitializePreferences();
+        void UpdateWorkspaceLayout(double width);
         void PollEngine();
         void RenderSnapshot(airloom::native::Snapshot const& snapshot);
         void RenderDevices(airloom::native::Snapshot const& snapshot);

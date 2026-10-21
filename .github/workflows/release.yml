@@ -70,6 +70,7 @@ jobs:
           assert proof.get('update_check_verified') is True, 'Live update check is missing.'
           assert proof.get('returned_home') is True, 'Native settings navigation check is missing.'
           assert proof.get('volume_layout_verified') is True, 'Native volume geometry check is missing.'
+          assert proof.get('adaptive_layout_verified') is True, 'Wide and compact native composition checks are missing.'
           assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
           assert proof.get('diagnostics_copy_verified') is True, 'Diagnostics clipboard check is missing.'
           assert proof.get('desktop_width', 0) >= 1600 and proof.get('desktop_height', 0) >= 1040, 'Native windows were not verified on a sufficiently large display.'

@@ -55,7 +55,19 @@ namespace
             // subclass and exit capability. Observe completion, not HWND creation.
             window = WindowForProcess(GetProcessId(process));
             if (window && GetPropW(window, GracefulExitCapability) == reinterpret_cast<HANDLE>(1)
-                && IsWindowVisible(window)) return window;
+                && IsWindowVisible(window))
+            {
+                // First visibility can occur inside OnLaunched/Activate. Let
+                // startup return to the input loop before testing user actions.
+                auto idle = WaitForInputIdle(process, 5000);
+                if (idle != 0) std::cerr << "GUI startup input-idle wait: " << idle << '\n';
+                Require(idle == 0, "GUI startup did not reach input idle");
+                DWORD_PTR response{};
+                Require(SendMessageTimeoutW(window, WM_NULL, 0, 0,
+                    SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000, &response) != 0,
+                    "Ready GUI did not acknowledge a window-thread message");
+                return window;
+            }
             Require(WaitForSingleObject(process, 0) == WAIT_TIMEOUT,
                 "GUI exited before its graceful-exit protocol became ready");
             Sleep(50);
@@ -129,6 +141,42 @@ namespace
         identifier.uID = 1;
         RECT rectangle{};
         return SUCCEEDED(Shell_NotifyIconGetRect(&identifier, &rectangle));
+    }
+
+    void CloseToTrayAndWait(HANDLE process, HWND window)
+    {
+        DWORD_PTR response{};
+        SetLastError(ERROR_SUCCESS);
+        auto delivered = SendMessageTimeoutW(window, WM_CLOSE, 0, 0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000, &response);
+        if (!delivered) std::cerr << "Close-to-tray message failed: " << GetLastError() << '\n';
+        Require(delivered != 0, "GUI did not acknowledge the ordinary close request");
+
+        auto deadline = GetTickCount64() + 5000;
+        ULONGLONG hiddenSince{};
+        while (GetTickCount64() < deadline)
+        {
+            auto processState = WaitForSingleObject(process, 0);
+            if (processState != WAIT_TIMEOUT)
+            {
+                DWORD exitCode{};
+                GetExitCodeProcess(process, &exitCode);
+                std::cerr << "Close-to-tray process state=" << processState << ", exit_code=" << exitCode << '\n';
+                throw std::runtime_error("Ordinary close exited the GUI instead of preserving the tray process");
+            }
+            Require(IsWindow(window) != FALSE, "Ordinary close destroyed the tray window");
+            auto now = GetTickCount64();
+            if (!IsWindowVisible(window))
+            {
+                if (!hiddenSince) hiddenSince = now;
+                if (now - hiddenSince >= 200) return;
+            }
+            else hiddenSince = 0;
+            Sleep(25);
+        }
+        std::cerr << "Close-to-tray state timeout: visible=" << IsWindowVisible(window)
+            << ", tray_registered=" << TrayIconPresent(window) << '\n';
+        throw std::runtime_error("Ordinary close did not leave a stably hidden window within 5 seconds");
     }
 
     void ClearTestUpdateError()
@@ -216,15 +264,8 @@ namespace
         {
             Launch(parent, realGui);
             window = WaitForReadyApplication(parent.process.value);
-            Sleep(300);
             hadTray = TrayIconPresent(window);
-            if (hadTray)
-            {
-                PostMessageW(window, WM_CLOSE, 0, 0);
-                Sleep(200);
-                Require(!IsWindowVisible(window) && WaitForSingleObject(parent.process.value, 0) == WAIT_TIMEOUT,
-                    "Ordinary window close no longer hides to the tray");
-            }
+            if (hadTray) CloseToTrayAndWait(parent.process.value, window);
         }
         auto digest = Sha256File(fixture.installer);
         Require(StartHelper(fixture.helper, fixture.installer, fixture.application, digest,

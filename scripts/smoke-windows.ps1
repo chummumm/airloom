@@ -305,6 +305,21 @@ function Get-NativeSliderThumb([System.Windows.Automation.AutomationElement] $Sl
     throw 'The visible native slider thumb was not available in the raw automation tree.'
 }
 
+function Assert-AdaptiveComposition($Geometry, [double] $WorkspaceWidth) {
+    $Signal = $Geometry['SignalPanel']
+    $Transport = $Geometry['TransportPanel']
+    if ($WorkspaceWidth -ge 1280) {
+        if ($Transport.x -lt ($Signal.x + $Signal.width - 1) -or [Math]::Abs($Transport.y - $Signal.y) -gt 1) {
+            throw 'The wide workspace did not place transport beside the signal panel.'
+        }
+        return 'wide'
+    }
+    if ($Transport.y -lt ($Signal.y + $Signal.height - 1) -or [Math]::Abs($Transport.x - $Signal.x) -gt 1) {
+        throw 'The compact workspace did not stack transport below the signal panel.'
+    }
+    return 'compact'
+}
+
 function Test-NativeVolumeLayout {
     $Measurements = @()
     $DragVerified = $false
@@ -321,6 +336,8 @@ function Test-NativeVolumeLayout {
         $Slider = Wait-NativeId 'VolumeSlider'
         if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+        $WorkspaceWidth = (Wait-NativeId 'HomeView').Current.BoundingRectangle.Width * 96 /
+            [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle)
         $Baseline = $null
         $TrackStart = $null
         $TrackEnd = $null
@@ -332,11 +349,13 @@ function Test-NativeVolumeLayout {
                 throw "Volume snapped back after setting $Volume at $($Size[0]) px."
             }
             $Geometry = Get-NativeLayout
+            $Composition = Assert-AdaptiveComposition $Geometry $WorkspaceWidth
             if ($null -eq $Baseline) { $Baseline = $Geometry }
             else { Assert-StableLayout $Baseline $Geometry "Volume $Volume at $($Size[0]) px" }
             $Visual = $Slider.Current.BoundingRectangle
             $Measurements += [ordered]@{
                 window_width = $Size[0]; window_height = $Size[1]; volume = $Volume; bounds = $Geometry
+                workspace_width_dip = $WorkspaceWidth; composition = $Composition
                 slider_visual_bounds = [ordered]@{ x = $Visual.X; y = $Visual.Y; width = $Visual.Width; height = $Visual.Height }
             }
             if (-not $DragVerified -and ($Volume -eq 0 -or $Volume -eq 100)) {
@@ -415,6 +434,9 @@ function Test-NativeVolumeLayout {
         Save-NativeScreenshot (Join-Path $EvidencePath "native-window-$($Size[0]).png")
     }
     if (-not $DragVerified) { throw 'No real pointer volume drag could be verified on the native display.' }
+    if (-not ($Measurements.composition -contains 'wide') -or -not ($Measurements.composition -contains 'compact')) {
+        throw 'Both wide and compact native compositions must be exercised.'
+    }
     $Range.SetValue(50)
     return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof }
 }
@@ -520,6 +542,7 @@ try {
         update_status = $UpdateStatus
         returned_home = $true
         volume_layout_verified = $true
+        adaptive_layout_verified = $true
         pointer_drag_verified = $VolumeProof.pointer_drag_verified
         pointer_input = $VolumeProof.pointer_input
         volume_measurements = $VolumeProof.measurements

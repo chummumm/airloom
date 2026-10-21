@@ -220,6 +220,7 @@ namespace winrt::Airloom::implementation
     {
         if (m_loaded) return;
         m_loaded = true;
+        UpdateWorkspaceLayout(LayoutRoot().ActualWidth());
         if (m_engine.Available())
         {
             Send(L"refresh");
@@ -1177,6 +1178,20 @@ namespace winrt::Airloom::implementation
         animation.InsertKeyFrame(1.0f, 1.0f);
         animation.Duration(std::chrono::milliseconds(180));
         visual.StartAnimation(L"Opacity", animation);
+    }
+
+    void MainWindow::UpdateWorkspaceLayout(double width)
+    {
+        // XAML layout reports effective pixels. Use the actual client content,
+        // not the HWND's outer frame or an assumed monitor scale.
+        bool const wide = width >= 1280.0;
+        WideWorkspaceTrigger().IsActive(wide);
+        CompactWorkspaceTrigger().IsActive(!wide);
+    }
+
+    void MainWindow::OnLayoutRootSizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
+    {
+        if (m_loaded) UpdateWorkspaceLayout(args.NewSize().Width);
     }
 
     void MainWindow::OnWaveformSizeChanged(IInspectable const&, SizeChangedEventArgs const&)
