@@ -34,7 +34,7 @@ The taste app-screen draw selected `achromatic-ledger`, seed **192244604**. The 
 
 One shell redraw selected `no-sidebar`: the original `open-plane` navigation sidebar had no actual destinations here and reproduced the rejected full-height column. Native Segoe typography was explicitly retained. The generic greeting/count-tile pattern was replaced with the actual audio job. No extra shell redraws or fabricated draws were used. See [app-direction.json](../app-direction.json).
 
-Composition: compact source route above the instrument; receiver panel beside it at 1050 effective pixels and above, or below it when narrower; a unified transport dock remains at the bottom. Settings uses compact aligned native groups. The title bar is 48 effective pixels; the default window is 1120 × 780, with an 880 × 680 minimum. [DESIGN.md](../../../DESIGN.md) owns the resources, component dimensions and interaction rules.
+Composition: compact source route above the instrument; receiver panel beside it at 1050 effective pixels and above, or above it when narrower so receiver selection remains visible on opening; a unified transport dock remains at the bottom. Settings uses compact aligned native groups. The title bar is 48 effective pixels; the default window is 1120 × 780, with an 880 × 680 minimum. [DESIGN.md](../../../DESIGN.md) owns the resources, component dimensions and interaction rules.
 
 ## Context and skill record
 

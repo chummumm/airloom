@@ -18,6 +18,7 @@
                             <Setter Target="ReceiverColumn.Width" Value="320" />
                             <Setter Target="WorkspaceGrid.ColumnSpacing" Value="20" />
                             <Setter Target="WorkspaceGrid.RowSpacing" Value="0" />
+                            <Setter Target="SignalPanel.(Grid.Row)" Value="0" />
                             <Setter Target="SignalPanel.(Grid.ColumnSpan)" Value="1" />
                             <Setter Target="SignalPanel.MinHeight" Value="380" />
                             <Setter Target="SignalPanel.MaxHeight" Value="620" />
@@ -88,7 +89,7 @@
                         <Grid x:Name="WorkspaceGrid" Grid.Row="2" RowSpacing="16" VerticalAlignment="Stretch">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="ReceiverColumn" Width="0" /></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                            <Border x:Name="SignalPanel" Grid.ColumnSpan="2" Style="{StaticResource InstrumentStyle}" Padding="0" MinHeight="330" MaxHeight="360"
+                            <Border x:Name="SignalPanel" Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource InstrumentStyle}" Padding="0" MinHeight="330" MaxHeight="360"
                                     AutomationProperties.AutomationId="SignalPanel" AutomationProperties.Name="实时音频信号" AutomationProperties.AccessibilityView="Content">
                                 <Grid x:Name="InstrumentContent" Padding="24,20" RowSpacing="16">
                                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" MinHeight="70" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -133,7 +134,7 @@
                                 </Grid>
                             </Border>
 
-                            <Border x:Name="DeviceRail" Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="220" MaxHeight="330"
+                            <Border x:Name="DeviceRail" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="220" MaxHeight="330"
                                     AutomationProperties.AutomationId="DeviceRail" AutomationProperties.Name="扬声器列表" AutomationProperties.AccessibilityView="Content">
                                 <Grid RowSpacing="16">
                                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -274,7 +275,7 @@
                                         <StackPanel Grid.Row="2" Spacing="6"><Button x:Name="CopyDiagnosticsButton" Content="复制诊断信息" Click="OnCopyDiagnostics" IsEnabled="False" MinHeight="36" HorizontalAlignment="Left" AutomationProperties.Name="复制诊断信息" AutomationProperties.AutomationId="CopyDiagnosticsButton" /><TextBlock x:Name="DiagnosticsCopyStatus" Text="复制后可粘贴到问题反馈中。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /></StackPanel>
                                     </Grid>
                                 </Border>
-                                <Border Grid.Row="1" Style="{StaticResource SettingsGroupStyle}" Padding="20">
+                                <Border Grid.Row="1" Style="{StaticResource SettingsGroupStyle}" Padding="20" VerticalAlignment="Top">
                                     <StackPanel Spacing="16">
                                         <TextBlock Text="外观与启动" Style="{StaticResource SectionHeadingStyle}" />
                                         <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="156" /></Grid.ColumnDefinitions><TextBlock Text="应用主题" FontSize="14" VerticalAlignment="Center" /><ComboBox x:Name="ThemePicker" Grid.Column="1" HorizontalAlignment="Stretch" SelectionChanged="OnThemeChanged" AutomationProperties.Name="应用主题" AutomationProperties.AutomationId="ThemePicker"><ComboBoxItem Content="跟随 Windows" /><ComboBoxItem Content="浅色" /><ComboBoxItem Content="深色" /></ComboBox></Grid>

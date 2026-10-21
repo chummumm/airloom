@@ -74,6 +74,7 @@ jobs:
           assert proof.get('returned_home') is True, 'Native settings navigation check is missing.'
           assert proof.get('volume_layout_verified') is True, 'Native volume geometry check is missing.'
           assert proof.get('adaptive_layout_verified') is True, 'Wide and compact native composition checks are missing.'
+          assert proof.get('compact_receivers_visible_at_top') is True, 'Compact receiver selection is hidden below the initial viewport.'
           assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
           assert proof.get('diagnostics_copy_verified') is True, 'Diagnostics clipboard check is missing.'
           assert proof.get('themes_verified') is True and set(proof.get('themes', [])) == {'light', 'dark'}, 'Real native light/dark checks are missing.'

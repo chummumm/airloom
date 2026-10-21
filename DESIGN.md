@@ -11,7 +11,7 @@ The visual world is **a silver audio workspace with an inset instrument display*
 | Native title bar | 48 effective pixels; the Airloom mark and name; native caption controls |
 | Sound route | Compact source selection, route context and session status above the instrument |
 | Main workspace | Instrument first; a bounded receiver panel to its right when space permits |
-| Compact workspace | Receiver panel follows the instrument in the scrollable workspace |
+| Compact workspace | Receiver panel precedes the instrument so selection is visible on opening |
 | Transport dock | Persistent bottom position, with connection action, stable volume control and local-output mute |
 | Settings | Compact groups of aligned native rows; labels stay close to their controls |
 | Ordinary panels | White/neutral fill, one subtle boundary, 8 effective pixel radius |
@@ -19,7 +19,7 @@ The visual world is **a silver audio workspace with an inset instrument display*
 | Transport dock | 12 effective pixel radius, 20 × 16 effective pixel inset |
 | Main controls | Native buttons, 36–44 effective pixels high, 8 effective pixel radius |
 
-The normal opening size is 1120 × 780 effective pixels, clamped to the monitor work area. The minimum remains 880 × 680. At 1050 effective pixels of actual root content width, the receiver panel can sit beside the instrument; smaller widths put it below. The dock remains available while workspace content scrolls. A native `UserControl` owns visual states; HWND physical pixels are not used as the layout breakpoint.
+The normal opening size is 1120 × 780 effective pixels, clamped to the monitor work area. The minimum remains 880 × 680. At 1050 effective pixels of actual root content width, the receiver panel can sit beside the instrument; smaller widths put it above the instrument, keeping speaker selection in the first viewport. The dock remains available while workspace content scrolls. A native `UserControl` owns visual states; HWND physical pixels are not used as the layout breakpoint.
 
 There is no permanently empty navigation rail. Home and settings are the two working views, with explicit actions between them. The window can grow, but essential controls should not spread across an unbounded row or leave the lower half of the window without a purpose. Receiver rows have their own scrolling region when necessary.
 

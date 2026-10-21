@@ -316,10 +316,10 @@ function Assert-AdaptiveComposition($Geometry, [double] $WorkspaceWidth) {
     $Signal = $Geometry['SignalPanel']
     $Receivers = $Geometry['DeviceRail']
     $Transport = $Geometry['TransportPanel']
-    $Home = (Wait-NativeId 'HomeView').Current.BoundingRectangle
-    if ($Transport.y -lt $Signal.y -or $Transport.x -lt $Home.Left - 1 -or
-        $Transport.x + $Transport.width -gt $Home.Right + 1 -or
-        $Transport.y + $Transport.height -gt $Home.Bottom + 1) {
+    $HomeBounds = (Wait-NativeId 'HomeView').Current.BoundingRectangle
+    if ($Transport.y -lt $Signal.y -or $Transport.x -lt $HomeBounds.Left - 1 -or
+        $Transport.x + $Transport.width -gt $HomeBounds.Right + 1 -or
+        $Transport.y + $Transport.height -gt $HomeBounds.Bottom + 1) {
         throw 'The persistent transport dock was outside the home workspace.'
     }
     if ($WorkspaceWidth -ge 1050) {
@@ -328,15 +328,48 @@ function Assert-AdaptiveComposition($Geometry, [double] $WorkspaceWidth) {
         }
         return 'wide'
     }
-    if ($Receivers.y -lt ($Signal.y + $Signal.height - 1) -or [Math]::Abs($Receivers.x - $Signal.x) -gt 1) {
-        throw 'The compact workspace did not stack receivers below the signal stage.'
+    if ($Signal.y -lt ($Receivers.y + $Receivers.height - 1) -or [Math]::Abs($Receivers.x - $Signal.x) -gt 1) {
+        throw 'The compact workspace did not place receivers before the signal stage.'
     }
     return 'compact'
+}
+
+function Assert-CompactReceiversVisible {
+    $ViewportBounds = (Wait-NativeId 'HomeScrollViewer').Current.BoundingRectangle
+    $DockBounds = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
+    $VisibleBottom = [Math]::Min($ViewportBounds.Bottom, $DockBounds.Top)
+    $ReceiverPanel = Wait-NativeId 'DeviceRail'
+    $HeadingCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '扬声器'),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))
+    $Heading = $ReceiverPanel.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $HeadingCondition)
+    if ($null -eq $Heading) { throw 'The compact receiver heading was not exposed in the native UI.' }
+    $CandidateControls = @($Heading)
+    $ButtonCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+    foreach ($ReceiverControl in $ReceiverPanel.FindAll([System.Windows.Automation.TreeScope]::Descendants, $ButtonCondition)) {
+        if ($ReceiverControl.Current.AutomationId.StartsWith('Receiver:', [System.StringComparison]::Ordinal)) {
+            $CandidateControls += $ReceiverControl
+            break
+        }
+    }
+    # A compact view must expose the heading and the beginning of its first
+    # receiver at scroll top; the entire receiver panel need not fit on screen.
+    foreach ($CandidateControl in $CandidateControls) {
+        $CandidateBounds = $CandidateControl.Current.BoundingRectangle
+        if ($CandidateBounds.IsEmpty -or $CandidateBounds.Width -le 0 -or $CandidateBounds.Height -le 0 -or
+            $CandidateBounds.Top -lt $ViewportBounds.Top - 1 -or $CandidateBounds.Top -ge $VisibleBottom -or
+            $CandidateBounds.Bottom -le $ViewportBounds.Top -or $CandidateBounds.Right -le $ViewportBounds.Left -or
+            $CandidateBounds.Left -ge $ViewportBounds.Right) {
+            throw "Compact receiver control '$($CandidateControl.Current.Name)' was not visible above the dock at scroll top."
+        }
+    }
 }
 
 function Test-NativeVolumeLayout {
     $Measurements = @()
     $DragVerified = $false
+    $CompactTopVerified = $false
     $InputProof = $null
     foreach ($Size in @(@(880, 680), @(1100, 800), @(1600, 1000))) {
         Write-Host "Verifying native volume at $($Size[0]) x $($Size[1]) on $([AirloomUiProbe]::GetSystemMetrics(0)) x $([AirloomUiProbe]::GetSystemMetrics(1))."
@@ -344,6 +377,13 @@ function Test-NativeVolumeLayout {
             throw "Could not resize the real native window to $($Size[0]) x $($Size[1])."
         }
         Start-Sleep -Milliseconds 500
+        Set-HomeScroll 0
+        $WorkspaceWidth = (Wait-NativeId 'HomeView').Current.BoundingRectangle.Width * 96 /
+            [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle)
+        if ($WorkspaceWidth -lt 1050) {
+            Assert-CompactReceiversVisible
+            $CompactTopVerified = $true
+        }
         $DockBeforeScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
         Set-HomeScroll 100
         $DockAfterScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
@@ -355,8 +395,6 @@ function Test-NativeVolumeLayout {
         $Slider = Wait-NativeId 'VolumeSlider'
         if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
-        $WorkspaceWidth = (Wait-NativeId 'HomeView').Current.BoundingRectangle.Width * 96 /
-            [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle)
         $Baseline = $null
         $TrackStart = $null
         $TrackEnd = $null
@@ -457,7 +495,10 @@ function Test-NativeVolumeLayout {
         throw 'Both wide and compact native compositions must be exercised.'
     }
     $Range.SetValue(50)
-    return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof }
+    return [ordered]@{
+        measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof
+        compact_receivers_visible_at_top = $CompactTopVerified
+    }
 }
 
 function Start-NativeApplication([string] $Executable) {
@@ -585,6 +626,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 880, 680, 0x0004)
     Start-Sleep -Milliseconds 400
     Set-HomeScroll 0
+    Assert-CompactReceiversVisible
     Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-playing-home-compact-dark.png')
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
     Start-Sleep -Milliseconds 400
@@ -619,7 +661,7 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
         synthetic_data = $true; real_audio_or_receiver_claim = $false
         themes = $ThemeProof.themes; receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
-        populated_volume_retained = $true
+        populated_volume_retained = $true; compact_receivers_visible_at_top = $true
     }
 }
 
@@ -735,6 +777,7 @@ try {
         returned_home = $true
         volume_layout_verified = $true
         adaptive_layout_verified = $true
+        compact_receivers_visible_at_top = $VolumeProof.compact_receivers_visible_at_top
         pointer_drag_verified = $VolumeProof.pointer_drag_verified
         pointer_input = $VolumeProof.pointer_input
         volume_measurements = $VolumeProof.measurements
@@ -745,7 +788,7 @@ try {
         fixture_evidence = $FixtureProof
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
         desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
-        note = 'Real WinUI launch from the shipped archive; persistent transport, receiver composition, volume geometry at 880/1100/1600 pixels with 0/9/10/99/100 values, real pointer drag, light/dark switching, settings, live update metadata and diagnostics verified. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog visual checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
+        note = 'Real WinUI launch from the shipped archive; persistent transport, wide side-by-side and compact receivers-first composition, receiver visibility at scroll top, volume geometry at 880/1100/1600 pixels with 0/9/10/99/100 values, real pointer drag, light/dark switching, settings, live update metadata and diagnostics verified. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated and password-dialog visual checks. Fixture data is synthetic, was not shipped, and is not evidence of audio transport. No physical HomePod was connected to CI.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))
