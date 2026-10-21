@@ -23,11 +23,68 @@ public static class AirloomUiProbe {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [StructLayout(LayoutKind.Sequential)]
     public struct WindowBounds { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out WindowBounds bounds);
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CursorPoint { public int X, Y; }
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetPhysicalCursorPos(out CursorPoint point);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(CursorPoint point);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput {
+        public int X, Y;
+        public uint Data, Flags, Time;
+        public UIntPtr Extra;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input { public uint Type; public MouseInput Mouse; }
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, Input[] inputs, int size);
+    private static void SendMouse(int x, int y, uint flags) {
+        var input = new Input { Mouse = new MouseInput { X = x, Y = y, Flags = flags } };
+        int size = Marshal.SizeOf(typeof(Input));
+        if (size != (IntPtr.Size == 8 ? 40 : 28)) throw new InvalidOperationException("Unexpected native INPUT layout.");
+        uint sent = SendInput(1, new[] { input }, size);
+        if (sent != 1) throw new InvalidOperationException("SendInput accepted " + sent + " events; Win32 error " + Marshal.GetLastWin32Error() + ".");
+    }
+    public static CursorPoint Cursor() {
+        CursorPoint point;
+        if (!GetPhysicalCursorPos(out point)) throw new InvalidOperationException("Cannot read the physical pointer: " + Marshal.GetLastWin32Error());
+        return point;
+    }
+    public static CursorPoint MovePointer(int x, int y) {
+        int left = GetSystemMetrics(76), top = GetSystemMetrics(77);
+        int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
+        if (x < left || y < top || x >= left + width || y >= top + height)
+            throw new InvalidOperationException("Pointer target is outside the native desktop.");
+        int absoluteX = (int)Math.Round((x - left) * 65535.0 / (width - 1));
+        int absoluteY = (int)Math.Round((y - top) * 65535.0 / (height - 1));
+        // MOVE | MOVE_NOCOALESCE | VIRTUALDESK | ABSOLUTE. Unlike moving
+        // the cursor alone, this verifies an event entered the input stream.
+        SendMouse(absoluteX, absoluteY, 0xE001);
+        for (int attempt = 0; attempt < 20; ++attempt) {
+            var actual = Cursor();
+            if (Math.Abs(actual.X - x) <= 1 && Math.Abs(actual.Y - y) <= 1) return actual;
+            Thread.Sleep(25);
+        }
+        var final = Cursor();
+        throw new InvalidOperationException("Pointer did not reach " + x + "," + y + "; actual " + final.X + "," + final.Y + ".");
+    }
+    public static void RequirePointOwner(int x, int y, uint expectedProcess) {
+        uint actualProcess;
+        var window = WindowFromPoint(new CursorPoint { X = x, Y = y });
+        GetWindowThreadProcessId(window, out actualProcess);
+        if (actualProcess != expectedProcess)
+            throw new InvalidOperationException("Pointer target belongs to process " + actualProcess + ", expected " + expectedProcess + ".");
+    }
+    public static void LeftButton(bool down) { SendMouse(0, 0, down ? 0x0002u : 0x0004u); }
+    public static bool LeftButtonIsDown() { return (GetAsyncKeyState(1) & 0x8000) != 0; }
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DisplayMode {
@@ -104,10 +161,21 @@ public static class AirloomUiProbe {
 }
 '@
 
+# UI Automation reports physical pixels. Keep window/display calculations in
+# the same coordinate system before creating any Windows Forms handles.
+$null = [AirloomUiProbe]::SetProcessDPIAware()
+
 if ($ProbeDisplay) {
     try {
         [AirloomUiProbe]::PrepareDisplay(1600, 1040)
         Write-Host "Native UI test display available: $([AirloomUiProbe]::GetSystemMetrics(0)) x $([AirloomUiProbe]::GetSystemMetrics(1))."
+        if ($env:GITHUB_ACTIONS -eq 'true') {
+            $OriginalCursor = [AirloomUiProbe]::Cursor()
+            try {
+                $ActualCursor = [AirloomUiProbe]::MovePointer(100, 100)
+                Write-Host "Native mouse input available at $($ActualCursor.X), $($ActualCursor.Y)."
+            } finally { $null = [AirloomUiProbe]::MovePointer($OriginalCursor.X, $OriginalCursor.Y) }
+        }
     } finally { [AirloomUiProbe]::RestoreDisplay() }
     return
 }
@@ -216,9 +284,31 @@ function Assert-StableLayout($Expected, $Actual, [string] $Context) {
     }
 }
 
+function Get-NativeSliderThumb([System.Windows.Automation.AutomationElement] $Slider) {
+    # WinUI deliberately exposes HorizontalThumb in Raw view only. Its actual
+    # bounds are a reliable pointer target; the whole slider includes padding.
+    $Walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $Queue = New-Object 'System.Collections.Generic.Queue[System.Windows.Automation.AutomationElement]'
+    $Queue.Enqueue($Slider)
+    $Visited = 0
+    while ($Queue.Count -gt 0 -and $Visited -lt 128) {
+        $Parent = $Queue.Dequeue()
+        $Child = $Walker.GetFirstChild($Parent)
+        while ($null -ne $Child -and $Visited -lt 128) {
+            $Visited++
+            if ($Child.Current.ControlType -eq [System.Windows.Automation.ControlType]::Thumb -and
+                -not $Child.Current.IsOffscreen -and -not $Child.Current.BoundingRectangle.IsEmpty) { return $Child }
+            $Queue.Enqueue($Child)
+            $Child = $Walker.GetNextSibling($Child)
+        }
+    }
+    throw 'The visible native slider thumb was not available in the raw automation tree.'
+}
+
 function Test-NativeVolumeLayout {
     $Measurements = @()
     $DragVerified = $false
+    $InputProof = $null
     foreach ($Size in @(@(880, 680), @(1100, 800), @(1600, 1000))) {
         Write-Host "Verifying native volume at $($Size[0]) x $($Size[1]) on $([AirloomUiProbe]::GetSystemMetrics(0)) x $([AirloomUiProbe]::GetSystemMetrics(1))."
         if (-not [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Size[0], $Size[1], 0x0004)) {
@@ -232,6 +322,8 @@ function Test-NativeVolumeLayout {
         if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
         $Baseline = $null
+        $TrackStart = $null
+        $TrackEnd = $null
         foreach ($Volume in @(0, 9, 10, 99, 100)) {
             $Range.SetValue($Volume)
             # Covers debounce, engine acknowledgement, and several UI polls.
@@ -247,31 +339,74 @@ function Test-NativeVolumeLayout {
                 window_width = $Size[0]; window_height = $Size[1]; volume = $Volume; bounds = $Geometry
                 slider_visual_bounds = [ordered]@{ x = $Visual.X; y = $Visual.Y; width = $Visual.Width; height = $Visual.Height }
             }
+            if (-not $DragVerified -and ($Volume -eq 0 -or $Volume -eq 100)) {
+                $ThumbBounds = (Get-NativeSliderThumb $Slider).Current.BoundingRectangle
+                $Center = $ThumbBounds.X + $ThumbBounds.Width / 2
+                if ($Volume -eq 0) { $TrackStart = $Center } else { $TrackEnd = $Center }
+            }
         }
-        # Use real pointer input once, while the slider lies on the runner's
-        # actual display. Wide-window geometry can exceed that display.
+        # Drive the actual native thumb using checked mouse input on the
+        # visible desktop. UIA only prepares the starting value, never the drag.
         $Rect = $Slider.Current.BoundingRectangle
         $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         if (-not $DragVerified -and -not $Slider.Current.IsOffscreen -and
             $Rect.Right -lt $Screen.Right -and $Rect.Bottom -lt $Screen.Bottom) {
             $Range.SetValue(25)
             Start-Sleep -Milliseconds 350
-            $Baseline = Get-NativeLayout
-            $Y = [int]($Rect.Y + $Rect.Height / 2)
-            $StartX = [int]($Rect.X + 12 + ($Rect.Width - 24) * 0.25)
             $null = [AirloomUiProbe]::SetForegroundWindow($Process.MainWindowHandle)
-            $null = [AirloomUiProbe]::SetCursorPos($StartX, $Y)
-            [AirloomUiProbe]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+            $Slider.SetFocus()
+            $FocusDeadline = [DateTime]::UtcNow.AddSeconds(2)
+            while ([AirloomUiProbe]::GetForegroundWindow() -ne $Process.MainWindowHandle -and
+                [DateTime]::UtcNow -lt $FocusDeadline) { Start-Sleep -Milliseconds 50 }
+            if ([AirloomUiProbe]::GetForegroundWindow() -ne $Process.MainWindowHandle) {
+                throw 'The native window could not become foreground for pointer verification.'
+            }
+            Start-Sleep -Milliseconds 150
+            $ThumbBounds = (Get-NativeSliderThumb $Slider).Current.BoundingRectangle
+            $Baseline = Get-NativeLayout
+            $Y = [int]($ThumbBounds.Y + $ThumbBounds.Height / 2)
+            $StartX = [int]($ThumbBounds.X + $ThumbBounds.Width / 2)
+            if ($null -eq $TrackStart -or $null -eq $TrackEnd -or $TrackEnd -le $TrackStart) { throw 'Native thumb endpoints did not define a horizontal track.' }
+            [AirloomUiProbe]::RequirePointOwner($StartX, $Y, $Process.Id)
+            $StartCursor = [AirloomUiProbe]::MovePointer($StartX, $Y)
+            Start-Sleep -Milliseconds 150
+            $InputProof = [ordered]@{
+                method = 'SendInput'; dpi = [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle)
+                foreground_verified = $true; point_owner_verified = $true
+                thumb_start = [ordered]@{ x = $StartX; y = $Y }
+                cursor_start = [ordered]@{ x = $StartCursor.X; y = $StartCursor.Y }
+                track_start = $TrackStart; track_end = $TrackEnd; moves = @(); final_value = $null; failure = $null
+            }
+            Write-Host ("Native pointer target: " + ($InputProof | ConvertTo-Json -Depth 5 -Compress))
+            $Pressed = $false
             try {
+                [AirloomUiProbe]::LeftButton($true)
+                $Pressed = $true
+                Start-Sleep -Milliseconds 150
+                $InputProof.button_down_verified = [AirloomUiProbe]::LeftButtonIsDown()
+                if (-not $InputProof.button_down_verified) { throw 'Injected left-button input did not establish a pressed state.' }
                 foreach ($Fraction in @(0.35, 0.45, 0.55, 0.65, 0.75)) {
-                    $X = [int]($Rect.X + 12 + ($Rect.Width - 24) * $Fraction)
-                    $null = [AirloomUiProbe]::SetCursorPos($X, $Y)
+                    $X = [int]($TrackStart + ($TrackEnd - $TrackStart) * $Fraction)
+                    $Cursor = [AirloomUiProbe]::MovePointer($X, $Y)
                     Start-Sleep -Milliseconds 120
+                    $InputProof.moves += [ordered]@{ x = $Cursor.X; y = $Cursor.Y; value = $Range.Current.Value }
                     Assert-StableLayout $Baseline (Get-NativeLayout) 'Pointer volume drag'
                 }
-            } finally { [AirloomUiProbe]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+            } catch {
+                $InputProof.failure = $_.Exception.Message
+                throw
+            } finally {
+                if ($Pressed) { [AirloomUiProbe]::LeftButton($false) }
+                [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-input-probe.json'),
+                    ($InputProof | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+            }
+            Start-Sleep -Milliseconds 100
             $DraggedValue = $Range.Current.Value
-            if ($DraggedValue -lt 60) { throw "Pointer drag did not change the real slider: $DraggedValue." }
+            $InputProof.final_value = $DraggedValue
+            [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-input-probe.json'),
+                ($InputProof | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+            Write-Host ("Native pointer result: " + ($InputProof | ConvertTo-Json -Depth 8 -Compress))
+            if ($DraggedValue -lt 60) { throw "Pointer drag did not change the real slider: $DraggedValue. Input trace is in native-input-probe.json." }
             Start-Sleep -Milliseconds 400
             if ([Math]::Abs($Range.Current.Value - $DraggedValue) -gt 0.01) { throw 'Volume snapped back after releasing the pointer.' }
             $DragVerified = $true
@@ -281,7 +416,7 @@ function Test-NativeVolumeLayout {
     }
     if (-not $DragVerified) { throw 'No real pointer volume drag could be verified on the native display.' }
     $Range.SetValue(50)
-    return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified }
+    return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof }
 }
 
 function Wait-NativeUpdateCheck {
@@ -386,6 +521,7 @@ try {
         returned_home = $true
         volume_layout_verified = $true
         pointer_drag_verified = $VolumeProof.pointer_drag_verified
+        pointer_input = $VolumeProof.pointer_input
         volume_measurements = $VolumeProof.measurements
         diagnostics_copy_verified = $true
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
