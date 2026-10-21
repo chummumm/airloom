@@ -1,14 +1,16 @@
 use crate::{Error, Result};
 use std::{
+    collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex, OnceLock,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     net::UdpSocket,
+    sync::{mpsc, Mutex as AsyncMutex},
     task::JoinHandle,
     time::{interval, MissedTickBehavior},
 };
@@ -20,20 +22,29 @@ pub struct Clock {
     pub master_id: AtomicU64,
     pub exchanges: AtomicU64,
     pub following: AtomicBool,
+    offset_ready: AtomicBool,
     last_exchange_ms: AtomicU64,
 }
 impl Clock {
     pub fn new(identity: u64) -> Self {
-        Self {
-            epoch_ns: SystemTime::now()
+        Self::with_epoch(
+            identity,
+            SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u64,
-            epoch: Instant::now(),
+            Instant::now(),
+        )
+    }
+    fn with_epoch(identity: u64, epoch_ns: u64, epoch: Instant) -> Self {
+        Self {
+            epoch_ns,
+            epoch,
             offset_ns: AtomicI64::new(0),
             master_id: AtomicU64::new(identity),
             exchanges: AtomicU64::new(0),
             following: AtomicBool::new(false),
+            offset_ready: AtomicBool::new(false),
             last_exchange_ms: AtomicU64::new(0),
         }
     }
@@ -53,6 +64,7 @@ impl Clock {
         self.master_id.store(id, Ordering::Relaxed);
         self.offset_ns.store(offset, Ordering::Relaxed);
         self.following.store(true, Ordering::Release);
+        self.offset_ready.store(true, Ordering::Release);
     }
     fn exchanged(&self) {
         self.exchanges.fetch_add(1, Ordering::Relaxed);
@@ -75,6 +87,8 @@ pub struct TimingRuntime {
     pub port: u16,
     pub clock: Arc<Clock>,
     tasks: Vec<JoinHandle<()>>,
+    ptp_registration: Option<PtpRegistration>,
+    following_required: bool,
 }
 impl Drop for TimingRuntime {
     fn drop(&mut self) {
@@ -87,8 +101,15 @@ impl Drop for TimingRuntime {
 impl TimingRuntime {
     pub async fn wait_for_ptp_exchange(&self) -> Result<()> {
         let start = Instant::now();
-        while self.clock.exchanges.load(Ordering::Acquire) < 3 {
-            if self.tasks.iter().any(JoinHandle::is_finished) {
+        while self.clock.exchanges.load(Ordering::Acquire) < 3
+            || (self.following_required && !self.clock.offset_ready.load(Ordering::Acquire))
+        {
+            if self.tasks.iter().any(JoinHandle::is_finished)
+                || self
+                    .ptp_registration
+                    .as_ref()
+                    .is_some_and(|registration| !registration.hub.healthy())
+            {
                 return Err(Error::SessionLost("timing worker ended".into()));
             }
             if start.elapsed() >= Duration::from_secs(5) {
@@ -99,14 +120,20 @@ impl TimingRuntime {
         Ok(())
     }
     pub fn check_health(&self, ptp: bool) -> Result<()> {
-        if self.tasks.iter().any(JoinHandle::is_finished) {
+        if self.tasks.iter().any(JoinHandle::is_finished)
+            || self
+                .ptp_registration
+                .as_ref()
+                .is_some_and(|registration| !registration.hub.healthy())
+        {
             return Err(Error::SessionLost("timing worker ended".into()));
         }
         if ptp
-            && self
-                .clock
-                .last_exchange_age()
-                .is_none_or(|age| age > Duration::from_secs(5))
+            && ((self.following_required && !self.clock.offset_ready.load(Ordering::Acquire))
+                || self
+                    .clock
+                    .last_exchange_age()
+                    .is_none_or(|age| age > Duration::from_secs(5)))
         {
             return Err(Error::SessionLost("PTP clock exchange stalled".into()));
         }
@@ -140,6 +167,8 @@ impl TimingRuntime {
             port,
             clock,
             tasks: vec![task],
+            ptp_registration: None,
+            following_required: false,
         })
     }
 
@@ -149,34 +178,200 @@ impl TimingRuntime {
         identity: u64,
         prefer_receiver: bool,
     ) -> Result<Self> {
-        // Ports belong to a single clock authority. Do not silently share them with
-        // another application's PTP implementation or fall back to incompatible NTP.
-        let event = UdpSocket::bind(SocketAddr::new(local, 319))
-            .await
-            .map_err(|e| Error::SessionLost(format!("PTP UDP port 319 unavailable: {e}")))?;
-        let general = UdpSocket::bind(SocketAddr::new(local, 320))
-            .await
-            .map_err(|e| Error::SessionLost(format!("PTP UDP port 320 unavailable: {e}")))?;
-        let clock = Arc::new(Clock::new(identity));
-        let task_clock = clock.clone();
-        let task = tokio::spawn(async move {
-            run_ptp(
-                event,
-                general,
-                SocketAddr::new(peer, 319),
-                SocketAddr::new(peer, 320),
-                identity,
-                prefer_receiver,
-                task_clock,
-            )
+        // One authority owns the fixed PTP ports per local interface. Reuse that
+        // authority inside this process; never SO_REUSEPORT another application.
+        // The hub outlives individual sessions so closing/replacing one receiver
+        // cannot race the socket ownership of a second receiver.
+        static HUBS: OnceLock<AsyncMutex<HashMap<IpAddr, Arc<PtpHub>>>> = OnceLock::new();
+        let mut hubs = HUBS
+            .get_or_init(|| AsyncMutex::new(HashMap::new()))
+            .lock()
             .await;
-        });
-        Ok(Self {
-            port: 319,
-            clock,
-            tasks: vec![task],
+        if hubs.get(&local).is_some_and(|hub| !hub.healthy()) {
+            hubs.remove(&local);
+        }
+        let hub = if let Some(hub) = hubs.get(&local) {
+            hub.clone()
+        } else {
+            let event = UdpSocket::bind(SocketAddr::new(local, 319))
+                .await
+                .map_err(|e| Error::SessionLost(format!("PTP UDP port 319 unavailable: {e}")))?;
+            let general = UdpSocket::bind(SocketAddr::new(local, 320))
+                .await
+                .map_err(|e| Error::SessionLost(format!("PTP UDP port 320 unavailable: {e}")))?;
+            let hub = PtpHub::from_sockets(event, general, identity);
+            hubs.insert(local, hub.clone());
+            hub
+        };
+        drop(hubs);
+        hub.attach(
+            SocketAddr::new(peer, 319),
+            SocketAddr::new(peer, 320),
+            prefer_receiver,
+        )
+    }
+}
+
+struct PtpPacket {
+    data: Vec<u8>,
+    source: SocketAddr,
+    arrived_ns: u64,
+}
+struct PtpRoute {
+    token: u64,
+    packets: mpsc::Sender<PtpPacket>,
+}
+type PtpRoutes = Arc<Mutex<HashMap<IpAddr, PtpRoute>>>;
+
+struct PtpHub {
+    event: Arc<UdpSocket>,
+    general: Arc<UdpSocket>,
+    identity: u64,
+    epoch_ns: u64,
+    epoch: Instant,
+    routes: PtpRoutes,
+    next_token: AtomicU64,
+    tasks: Vec<JoinHandle<()>>,
+}
+impl Drop for PtpHub {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+impl PtpHub {
+    fn from_sockets(event: UdpSocket, general: UdpSocket, identity: u64) -> Arc<Self> {
+        let event = Arc::new(event);
+        let general = Arc::new(general);
+        let base = Clock::new(identity);
+        let routes = Arc::new(Mutex::new(HashMap::new()));
+        let tasks = [&event, &general]
+            .into_iter()
+            .map(|socket| {
+                tokio::spawn(route_ptp(
+                    socket.clone(),
+                    routes.clone(),
+                    base.epoch_ns,
+                    base.epoch,
+                ))
+            })
+            .collect();
+        Arc::new(Self {
+            event,
+            general,
+            identity,
+            epoch_ns: base.epoch_ns,
+            epoch: base.epoch,
+            routes,
+            next_token: AtomicU64::new(1),
+            tasks,
         })
     }
+    fn healthy(&self) -> bool {
+        self.tasks.iter().all(|task| !task.is_finished())
+    }
+    fn attach(
+        self: &Arc<Self>,
+        event_peer: SocketAddr,
+        general_peer: SocketAddr,
+        prefer_receiver: bool,
+    ) -> Result<TimingRuntime> {
+        if event_peer.ip() != general_peer.ip() {
+            return Err(Error::InvalidArgument(
+                "PTP ports must belong to the same receiver".into(),
+            ));
+        }
+        let peer = event_peer.ip();
+        let port = self.event.local_addr()?.port();
+        let (packets, received) = mpsc::channel(64);
+        let token = self.next_token.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut routes = self
+                .routes
+                .lock()
+                .map_err(|_| crate::protocol("PTP route lock poisoned"))?;
+            if routes
+                .get(&peer)
+                .is_some_and(|route| !route.packets.is_closed())
+            {
+                return Err(Error::InvalidArgument(
+                    "a PTP session for this receiver is already active".into(),
+                ));
+            }
+            routes.insert(peer, PtpRoute { token, packets });
+        }
+        let clock = Arc::new(Clock::with_epoch(self.identity, self.epoch_ns, self.epoch));
+        let transport = PtpTransport {
+            event: self.event.clone(),
+            general: self.general.clone(),
+            event_peer,
+            general_peer,
+            received,
+        };
+        let task = tokio::spawn(run_ptp(
+            transport,
+            self.identity,
+            prefer_receiver,
+            clock.clone(),
+        ));
+        Ok(TimingRuntime {
+            port,
+            clock,
+            tasks: vec![task],
+            ptp_registration: Some(PtpRegistration {
+                hub: self.clone(),
+                peer,
+                token,
+            }),
+            following_required: prefer_receiver,
+        })
+    }
+}
+struct PtpRegistration {
+    hub: Arc<PtpHub>,
+    peer: IpAddr,
+    token: u64,
+}
+impl Drop for PtpRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut routes) = self.hub.routes.lock() {
+            if routes
+                .get(&self.peer)
+                .is_some_and(|route| route.token == self.token)
+            {
+                routes.remove(&self.peer);
+            }
+        }
+    }
+}
+async fn route_ptp(socket: Arc<UdpSocket>, routes: PtpRoutes, epoch_ns: u64, epoch: Instant) {
+    let mut buffer = [0; 2048];
+    while let Ok((size, source)) = socket.recv_from(&mut buffer).await {
+        let arrived_ns = epoch_ns.saturating_add(epoch.elapsed().as_nanos() as u64);
+        if size < 34 || buffer[0] >> 4 != 1 || buffer[1] & 15 != 2 {
+            continue;
+        }
+        let Ok(routes) = routes.lock() else {
+            return;
+        };
+        if let Some(route) = routes.get(&source.ip()) {
+            // This is UDP: bound each peer's work and drop a packet when its
+            // queue is full instead of blocking all other receiver clocks.
+            let _ = route.packets.try_send(PtpPacket {
+                data: buffer[..size].to_vec(),
+                source,
+                arrived_ns,
+            });
+        }
+    }
+}
+struct PtpTransport {
+    event: Arc<UdpSocket>,
+    general: Arc<UdpSocket>,
+    event_peer: SocketAddr,
+    general_peer: SocketAddr,
+    received: mpsc::Receiver<PtpPacket>,
 }
 
 pub fn ntp_time(unix_ns: u64) -> u64 {
@@ -193,9 +388,28 @@ pub fn sync_packet(
     ptp: bool,
     first: bool,
 ) -> Vec<u8> {
+    sync_packet_at(
+        anchor_timestamp,
+        anchor_local_ns,
+        latency_frames,
+        clock,
+        ptp,
+        first,
+        clock.local_ns(),
+    )
+}
+
+fn sync_packet_at(
+    anchor_timestamp: u32,
+    anchor_local_ns: u64,
+    latency_frames: u32,
+    clock: &Clock,
+    ptp: bool,
+    first: bool,
+    local_ns: u64,
+) -> Vec<u8> {
     // An immutable local-time/RTP relationship prevents packet scheduling jitter
     // from moving the receiver's render timeline at every sync announcement.
-    let local_ns = clock.local_ns();
     let elapsed_frames = (local_ns.saturating_sub(anchor_local_ns) as u128
         * crate::SAMPLE_RATE as u128
         / 1_000_000_000) as u32;
@@ -204,10 +418,17 @@ pub fn sync_packet(
         let mut packet = vec![0; 28];
         packet[0] = if first { 0x90 } else { 0x80 };
         packet[1] = 0xd7;
-        packet[4..8].copy_from_slice(&timestamp.wrapping_sub(latency_frames).to_be_bytes());
+        packet[3] = 6; // RTCP length is the number of 32-bit words minus one.
+                       // PTP receivers anchor frame_1 - 11025 at the network timestamp.
+                       // The published Apple/Spotify wire capture uses a 77175-frame gap
+                       // between the two positions. Keep that receive window independent of
+                       // shorter render leads, expanding it only for a lead beyond two seconds.
+        let frame_1 = timestamp.wrapping_sub(latency_frames).wrapping_add(11025);
+        packet[4..8].copy_from_slice(&frame_1.to_be_bytes());
         let master_ns = local_ns.saturating_add_signed(clock.offset_ns.load(Ordering::Acquire));
         packet[8..16].copy_from_slice(&master_ns.to_be_bytes());
-        packet[16..20].copy_from_slice(&timestamp.to_be_bytes());
+        let receive_window = latency_frames.max(crate::SAMPLE_RATE * 2);
+        packet[16..20].copy_from_slice(&frame_1.wrapping_add(receive_window - 11025).to_be_bytes());
         packet[20..28].copy_from_slice(&clock.master_id.load(Ordering::Acquire).to_be_bytes());
         packet
     } else {
@@ -267,21 +488,34 @@ fn difference(remote: u64, local: u64) -> Option<i64> {
     i64::try_from(remote as i128 - local as i128).ok()
 }
 
-async fn run_ptp(
-    event: UdpSocket,
-    general: UdpSocket,
-    event_peer: SocketAddr,
-    general_peer: SocketAddr,
+fn unicast_subscription(
     identity: u64,
-    prefer_receiver: bool,
-    clock: Arc<Clock>,
-) {
+    sequence: u16,
+    kind: u8,
+    target: Option<[u8; 10]>,
+) -> Vec<u8> {
+    let mut request = ptp_header(12, 54, identity, sequence, 0x0408);
+    request[34..44].copy_from_slice(&target.unwrap_or([0xff; 10]));
+    request[44..48].copy_from_slice(&[0, 4, 0, 6]); // REQUEST_UNICAST_TRANSMISSION
+    request[48] = kind << 4;
+    request[49] = if kind == 0 { (-3i8) as u8 } else { 0 };
+    request[50..54].copy_from_slice(&30u32.to_be_bytes());
+    request
+}
+
+async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, clock: Arc<Clock>) {
+    let PtpTransport {
+        event,
+        general,
+        event_peer,
+        general_peer,
+        mut received,
+    } = transport;
     let peer = event_peer.ip();
     let mut tick = interval(Duration::from_millis(125));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut event_buffer = [0; 2048];
-    let mut general_buffer = [0; 2048];
     let mut sequence = 0u16;
+    let mut subscription_sequence = 0u16;
     let mut followed_source = None::<[u8; 10]>;
     let mut sync_received = None::<(u16, u64, i64)>;
     let mut sync_offset = None::<i64>;
@@ -295,6 +529,7 @@ async fn run_ptp(
                 if clock.following.load(Ordering::Acquire) && last_peer.elapsed()>Duration::from_secs(15){
                     // A stale receiver clock cannot drive audio indefinitely.
                     clock.following.store(false,Ordering::Release);followed_source=None;sync_received=None;
+                    clock.offset_ready.store(false,Ordering::Release);
                     clock.master_id.store(identity,Ordering::Relaxed);clock.offset_ns.store(0,Ordering::Relaxed);
                 }
                 if !prefer_receiver {
@@ -311,17 +546,31 @@ async fn run_ptp(
                         announce[53..61].copy_from_slice(&identity.to_be_bytes());announce[63]=0x20;
                         if general.send_to(&announce,general_peer).await.is_err(){return;}
                     }
-                } else if clock.following.load(Ordering::Acquire) && sequence%8==1 {
-                    let request=ptp_header(1,44,identity,sequence,0x0400);
-                    pending_delay=Some((sequence,clock.local_ns()));
-                    if event.send_to(&request,event_peer).await.is_err(){return;}
+                } else if sequence%8==1 {
+                    // A receiver clock may send unicast Sync/Announce only after
+                    // subscription. Request it before session SETUP as well as
+                    // renewing during streaming; grants alone never mean ready.
+                    for kind in [0,9,11] {
+                        subscription_sequence=subscription_sequence.wrapping_add(1);
+                        let request=unicast_subscription(identity,subscription_sequence,kind,followed_source);
+                        if general.send_to(&request,general_peer).await.is_err(){return;}
+                    }
+                    if clock.following.load(Ordering::Acquire) {
+                        let request=ptp_header(1,44,identity,sequence,0x0400);
+                        pending_delay=Some((sequence,clock.local_ns()));
+                        if event.send_to(&request,event_peer).await.is_err(){return;}
+                    }
                 }
                 continue;
             },
-            packet=event.recv_from(&mut event_buffer)=>match packet{Ok((size,address))=>Some((event_buffer[..size].to_vec(),address)),Err(_)=>None},
-            packet=general.recv_from(&mut general_buffer)=>match packet{Ok((size,address))=>Some((general_buffer[..size].to_vec(),address)),Err(_)=>None},
+            packet=received.recv()=>packet,
         };
-        let Some((data, address)) = received else {
+        let Some(PtpPacket {
+            data,
+            source: address,
+            arrived_ns: arrived,
+        }) = received
+        else {
             return;
         };
         if address.ip() != peer || data.len() < 34 || data[1] & 0x0f != 2 || data[0] >> 4 != 1 {
@@ -334,7 +583,6 @@ async fn run_ptp(
         let kind = data[0] & 15;
         let seq = u16::from_be_bytes([data[30], data[31]]);
         let source: [u8; 10] = data[20..30].try_into().unwrap();
-        let arrived = clock.local_ns();
         match kind {
             11 if length >= 64 => {
                 if prefer_receiver {
@@ -458,6 +706,56 @@ async fn run_ptp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ptp_announce_matches_independent_spotify_ios_capture() {
+        // Published capture: OwnTone src/outputs/rtp_common.c, commit
+        // 3aee59740c715d40df8de87e06b7b91badfbe20b, Spotify iOS AirPlay 2.
+        // This fixture is not generated by our encoder or our loopback receiver.
+        let captured =
+            hex::decode("90d70006cbbbfe400001fd1685aea593cbbd2bb7f84288888f4f0008").unwrap();
+        let clock = Clock::new(0xf842_8888_8f4f_0008);
+        let instant = 0x0001_fd16_85ae_a593;
+        let actual = sync_packet_at(0xcbbd_2bb7, instant, 88200, &clock, true, true, instant);
+        assert_eq!(actual, captured);
+    }
+
+    #[test]
+    fn ptp_announce_receiver_mapping_preserves_requested_lead_across_wrap() {
+        // Independent receiver contract: Shairport Sync rtp.c anchors
+        // frame_1 - 11025 at the announced PTP nanosecond timestamp.
+        // The two advertised RTP positions differ by 77175 in Apple's capture.
+        let clock = Clock::new(0x1122_3344_5566_7788);
+        clock.offset_ns.store(-7_000_000_000, Ordering::Relaxed);
+        let anchor_ns = 1_000_000_000_000;
+        let first_audio = 100u32; // subtracting the lead must wrap, not saturate.
+        let lead_frames = 33075u32;
+        for elapsed in [0u64, 1_000_000_000, 7_000_000_000] {
+            let packet = sync_packet_at(
+                first_audio,
+                anchor_ns,
+                lead_frames,
+                &clock,
+                true,
+                elapsed == 0,
+                anchor_ns + elapsed,
+            );
+            assert_eq!(
+                4 * (u16::from_be_bytes([packet[2], packet[3]]) as usize + 1),
+                packet.len()
+            );
+            let frame_1 = u32::from_be_bytes(packet[4..8].try_into().unwrap());
+            let frame_2 = u32::from_be_bytes(packet[16..20].try_into().unwrap());
+            assert_eq!(frame_2.wrapping_sub(frame_1), 77175);
+            let rendering = frame_1.wrapping_sub(11025);
+            let expected = first_audio
+                .wrapping_add((elapsed / 1_000_000_000) as u32 * crate::SAMPLE_RATE)
+                .wrapping_sub(lead_frames);
+            assert_eq!(rendering, expected);
+            let network = u64::from_be_bytes(packet[8..16].try_into().unwrap());
+            assert_eq!(network, anchor_ns + elapsed - 7_000_000_000);
+        }
+    }
+
     async fn next_kind(socket: &UdpSocket, kind: u8) -> Vec<u8> {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -471,6 +769,147 @@ mod tests {
         .await
         .expect("expected PTP message")
     }
+
+    #[test]
+    fn shared_ptp_hub_rebinds_after_the_owning_tokio_runtime_is_destroyed() {
+        let local: IpAddr = "127.0.0.30".parse().unwrap();
+        let peer: IpAddr = "127.0.0.31".parse().unwrap();
+        for identity in [0x4444, 0x5555] {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let timing = TimingRuntime::ptp(local, peer, identity, false)
+                    .await
+                    .unwrap();
+                assert_eq!(timing.clock.master_id.load(Ordering::Acquire), identity);
+                drop(timing);
+                // The interface authority deliberately survives its final peer.
+                assert!(std::net::UdpSocket::bind(SocketAddr::new(local, 319)).is_err());
+                tokio::task::yield_now().await;
+            });
+            // All socket-using futures are destroyed here. On the next pass the
+            // registry must remove the stale hub before rebinding the same ports.
+            drop(runtime);
+        }
+    }
+
+    #[tokio::test]
+    async fn two_ptp_receivers_share_fixed_ports_but_keep_clock_domains_and_lifetimes_separate() {
+        // Distinct loopback addresses model two devices on one interface and
+        // exercise the production registry/fixed-port path, not SO_REUSEPORT.
+        let local: IpAddr = "127.0.0.10".parse().unwrap();
+        let first: IpAddr = "127.0.0.11".parse().unwrap();
+        let second: IpAddr = "127.0.0.12".parse().unwrap();
+        let first_event = UdpSocket::bind(SocketAddr::new(first, 319)).await.unwrap();
+        let first_general = UdpSocket::bind(SocketAddr::new(first, 320)).await.unwrap();
+        let second_event = UdpSocket::bind(SocketAddr::new(second, 319)).await.unwrap();
+        let second_general = UdpSocket::bind(SocketAddr::new(second, 320)).await.unwrap();
+        let one = TimingRuntime::ptp(local, first, 0x1111, false)
+            .await
+            .unwrap();
+        let two = TimingRuntime::ptp(local, second, 0x2222, true)
+            .await
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &one.ptp_registration.as_ref().unwrap().hub,
+            &two.ptp_registration.as_ref().unwrap().hub
+        ));
+        assert_eq!(one.port, 319);
+        assert_eq!(two.port, 319);
+        assert_eq!(one.clock.epoch_ns, two.clock.epoch_ns);
+        assert!(matches!(
+            TimingRuntime::ptp(local, first, 0x3333, false).await,
+            Err(Error::InvalidArgument(_))
+        ));
+
+        let sync = next_kind(&first_event, 0).await;
+        assert_eq!(&sync[20..28], &0x1111u64.to_be_bytes());
+        let subscription = next_kind(&second_general, 12).await;
+        assert_eq!(&subscription[20..28], &0x1111u64.to_be_bytes());
+        assert_eq!(&subscription[34..44], &[0xff; 10]);
+        assert_eq!(&subscription[44..48], &[0, 4, 0, 6]);
+        assert_eq!(subscription[48] >> 4, 0);
+        assert!(!two.clock.offset_ready.load(Ordering::Acquire));
+
+        let delay = ptp_header(1, 44, 0xaaaa, 77, 0x0400);
+        first_event
+            .send_to(&delay, SocketAddr::new(local, 319))
+            .await
+            .unwrap();
+        let response = next_kind(&first_general, 9).await;
+        assert_eq!(&response[44..54], &delay[20..30]);
+        assert_eq!(one.clock.exchanges.load(Ordering::Acquire), 1);
+        assert_eq!(
+            two.clock.exchanges.load(Ordering::Acquire),
+            0,
+            "another peer's delay request must not make this clock ready"
+        );
+
+        let remote_id = 0xf123_4567_89ab_cdefu64;
+        let mut announce = ptp_header(11, 64, remote_id, 1, 0x0400);
+        announce[53..61].copy_from_slice(&remote_id.to_be_bytes());
+        second_general
+            .send_to(&announce, SocketAddr::new(local, 320))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !two.clock.following.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for seq in 2..5 {
+            let origin = two.clock.local_ns() + 5_000_000_000;
+            let sync = ptp_header(0, 44, remote_id, seq, 0x0600);
+            second_event
+                .send_to(&sync, SocketAddr::new(local, 319))
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            let mut follow = ptp_header(8, 44, remote_id, seq, 0x0400);
+            put_timestamp(&mut follow[34..44], origin);
+            second_general
+                .send_to(&follow, SocketAddr::new(local, 320))
+                .await
+                .unwrap();
+        }
+        two.wait_for_ptp_exchange().await.unwrap();
+        assert_eq!(one.clock.master_id.load(Ordering::Acquire), 0x1111);
+        assert_eq!(one.clock.offset_ns.load(Ordering::Acquire), 0);
+        assert_eq!(two.clock.master_id.load(Ordering::Acquire), remote_id);
+        assert!(
+            (4_950_000_000..5_050_000_000).contains(&two.clock.offset_ns.load(Ordering::Acquire))
+        );
+
+        drop(one);
+        let before = two.clock.exchanges.load(Ordering::Acquire);
+        second_event
+            .send_to(
+                &ptp_header(1, 44, remote_id, 88, 0x0400),
+                SocketAddr::new(local, 319),
+            )
+            .await
+            .unwrap();
+        let response = next_kind(&second_general, 9).await;
+        assert_eq!(&response[30..32], &88u16.to_be_bytes());
+        assert!(two.clock.exchanges.load(Ordering::Acquire) > before);
+        two.check_health(true).unwrap();
+        let routes = two
+            .ptp_registration
+            .as_ref()
+            .unwrap()
+            .hub
+            .routes
+            .lock()
+            .unwrap();
+        assert!(!routes.contains_key(&first));
+        assert!(routes.contains_key(&second));
+        drop(routes);
+        drop(two);
+    }
     #[tokio::test]
     async fn ptp_master_sends_gptp_and_answers_delay_requests() {
         let peer_event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -478,16 +917,15 @@ mod tests {
         let event = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let address = event.local_addr().unwrap();
         let general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let clock = Arc::new(Clock::new(1234));
-        let task = tokio::spawn(run_ptp(
-            event,
-            general,
-            peer_event.local_addr().unwrap(),
-            peer_general.local_addr().unwrap(),
-            1234,
-            false,
-            clock.clone(),
-        ));
+        let hub = PtpHub::from_sockets(event, general, 1234);
+        let runtime = hub
+            .attach(
+                peer_event.local_addr().unwrap(),
+                peer_general.local_addr().unwrap(),
+                false,
+            )
+            .unwrap();
+        let clock = runtime.clock.clone();
         let sync = next_kind(&peer_event, 0).await;
         assert_eq!(sync[0], 0x10);
         assert_eq!(sync[6] & 2, 2);
@@ -500,8 +938,7 @@ mod tests {
         assert_eq!(&response[44..54], &request[20..30]);
         assert!(timestamp(&response[34..44]).unwrap() > 0);
         assert_eq!(clock.exchanges.load(Ordering::Relaxed), 1);
-        task.abort();
-        let _ = task.await;
+        drop(runtime);
     }
     #[tokio::test]
     async fn ptp_follower_uses_receiver_clock_identity_and_timebase() {
@@ -511,17 +948,16 @@ mod tests {
         let event_address = event.local_addr().unwrap();
         let general = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let general_address = general.local_addr().unwrap();
-        let clock = Arc::new(Clock::new(1234));
         let remote_id = 0x1122334455667788u64;
-        let task = tokio::spawn(run_ptp(
-            event,
-            general,
-            peer_event.local_addr().unwrap(),
-            peer_general.local_addr().unwrap(),
-            1234,
-            true,
-            clock.clone(),
-        ));
+        let hub = PtpHub::from_sockets(event, general, 1234);
+        let runtime = hub
+            .attach(
+                peer_event.local_addr().unwrap(),
+                peer_general.local_addr().unwrap(),
+                true,
+            )
+            .unwrap();
+        let clock = runtime.clock.clone();
         let mut announce = ptp_header(11, 64, remote_id, 1, 0x0400);
         announce[47] = 248;
         announce[53..61].copy_from_slice(&remote_id.to_be_bytes());
@@ -559,8 +995,7 @@ mod tests {
         let packet = sync_packet(100_000, clock.local_ns(), 11025, &clock, true, true);
         assert_eq!(&packet[..2], &[0x90, 0xd7]);
         assert_eq!(&packet[20..28], &remote_id.to_be_bytes());
-        task.abort();
-        let _ = task.await;
+        drop(runtime);
     }
     #[test]
     fn timestamps_and_ptp_frames_use_network_order() {

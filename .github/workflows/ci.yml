@@ -26,7 +26,13 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Allow real PTP listener ports in this disposable test runner
+        run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=319
       - run: cargo test --workspace --locked
+      - name: Verify updater version and checksum policy
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror native/Updater/UpdatePolicyTests.cpp -o /tmp/airloom-update-policy-tests
+          /tmp/airloom-update-policy-tests
       - name: Verify ALAC with an independent decoder
         run: |
           if ! command -v ffmpeg >/dev/null; then
@@ -52,6 +58,9 @@ jobs:
       - name: Package installer
         shell: pwsh
         run: ./scripts/package-windows.ps1
+      - name: Verify native updater lifecycle and cleanup
+        shell: pwsh
+        run: ./scripts/test-updater.ps1
       - name: Launch native UI and capture evidence
         shell: pwsh
         run: ./scripts/smoke-windows.ps1

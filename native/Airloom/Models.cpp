@@ -66,6 +66,11 @@ namespace airloom::native
         result.state = Text(json, L"state", L"idle");
         result.statusMessage = Text(json, L"status_message");
         result.selectedDeviceId = Text(json, L"selected_device_id");
+        for (auto const& item : Array(json, L"selected_device_ids"))
+        {
+            if (item.ValueType() == JsonValueType::String && result.selectedDeviceIds.size() < 256)
+                result.selectedDeviceIds.push_back(item.GetString());
+        }
         result.selectedSourceId = Text(json, L"selected_source_id");
         result.volume = std::clamp(Number(json, L"volume", 0.75), 0.0, 1.0);
         result.muteLocal = Boolean(json, L"mute_local");
@@ -75,9 +80,19 @@ namespace airloom::native
         {
             if (item.ValueType() != JsonValueType::Object || result.devices.size() >= 256) continue;
             auto const object = item.GetObject();
-            Device device{Text(object, L"id"), Text(object, L"name", L"AirPlay 扬声器"),
-                Text(object, L"model"), Text(object, L"address"),
-                Boolean(object, L"password_required"), Boolean(object, L"online", true)};
+            Device device;
+            device.id = Text(object, L"id");
+            device.name = Text(object, L"name", L"AirPlay 扬声器");
+            device.model = Text(object, L"model");
+            device.address = Text(object, L"address");
+            device.passwordRequired = Boolean(object, L"password_required");
+            device.online = Boolean(object, L"online", true);
+            device.selected = Boolean(object, L"selected", result.IsSelected(device.id));
+            device.state = Text(object, L"state", L"idle");
+            device.statusMessage = Text(object, L"status_message");
+            device.errorMessage = Text(Object(object, L"error"), L"message");
+            device.packetsSent = Counter(object, L"packets_sent");
+            device.timingExchanges = Counter(object, L"timing_exchanges");
             if (!device.id.empty()) result.devices.push_back(std::move(device));
         }
         for (auto const& item : Array(json, L"sources"))
@@ -104,8 +119,14 @@ namespace airloom::native
         auto const auth = Object(json, L"auth");
         result.authKind = Text(auth, L"kind");
         result.authDeviceId = Text(auth, L"device_id");
+        result.authDeviceName = Text(auth, L"device_name");
         result.authMessage = Text(auth, L"message");
         result.authRequestId = Counter(auth, L"request_id");
+        auto const capture = Object(json, L"capture");
+        result.captureState = Text(capture, L"state", L"idle");
+        result.captureMessage = Text(capture, L"message");
+        result.captureSourceName = Text(capture, L"source_name");
+        result.testToneActive = Boolean(json, L"test_tone_active");
         auto const metrics = Object(json, L"metrics");
         result.packetsSent = Counter(metrics, L"packets_sent");
         result.sampleRate = static_cast<uint32_t>(std::clamp(Number(metrics, L"sample_rate"), 0.0, 768000.0));
@@ -119,8 +140,24 @@ namespace airloom::native
 
     Device const* Snapshot::SelectedDevice() const noexcept
     {
-        auto const match = std::find_if(devices.begin(), devices.end(), [this](Device const& device)
-            { return device.id == selectedDeviceId; });
+        return FindDevice(selectedDeviceId);
+    }
+
+    Device const* Snapshot::FindDevice(hstring const& id) const noexcept
+    {
+        auto const match = std::find_if(devices.begin(), devices.end(), [&id](Device const& device)
+            { return device.id == id; });
         return match == devices.end() ? nullptr : &*match;
+    }
+
+    bool Snapshot::IsSelected(hstring const& id) const noexcept
+    {
+        return std::find(selectedDeviceIds.begin(), selectedDeviceIds.end(), id) != selectedDeviceIds.end();
+    }
+
+    size_t Snapshot::StreamingCount() const noexcept
+    {
+        return static_cast<size_t>(std::count_if(devices.begin(), devices.end(), [](Device const& device)
+            { return device.state == L"streaming"; }));
     }
 }

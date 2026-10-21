@@ -85,7 +85,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>WindowsApp.lib;user32.lib;shell32.lib;comctl32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsApp.lib;user32.lib;shell32.lib;comctl32.lib;advapi32.lib;ole32.lib;winhttp.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -110,6 +110,7 @@
     <ClInclude Include="EngineBridge.h" />
     <ClInclude Include="Models.h" />
     <ClInclude Include="DesktopIntegration.h" />
+    <ClInclude Include="Updater.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -119,6 +120,7 @@
     <ClCompile Include="EngineBridge.cpp" />
     <ClCompile Include="Models.cpp" />
     <ClCompile Include="DesktopIntegration.cpp" />
+    <ClCompile Include="Updater.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup>

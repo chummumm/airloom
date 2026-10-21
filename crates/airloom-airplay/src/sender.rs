@@ -291,28 +291,28 @@ impl Sender {
             TimingMode::Ptp => true,
             TimingMode::Ntp => false,
         };
-        let standalone_homepod = device
-            .model
-            .as_deref()
-            .is_some_and(|m| m.starts_with("AudioAccessory"))
-            && device.txt.get("igl").is_some_and(|v| v == "1")
-            && device
-                .txt
-                .get("osvers")
-                .and_then(|v| v.split('.').next())
-                .and_then(|v| v.parse::<u32>().ok())
-                .is_some_and(|version| version >= 27)
-            && device.txt.get("tsid").is_none_or(|v| v.is_empty())
-            && device.txt.get("pgid").is_none_or(|v| v.is_empty());
+        let standalone_homepod = receiver_owns_clock(&device);
         let timing = if ptp {
             TimingRuntime::ptp(local, remote.ip(), identity, standalone_homepod).await?
         } else {
             TimingRuntime::ntp(local, remote.ip(), identity).await?
         };
+        if ptp && standalone_homepod {
+            // This receiver retains its own clock. Learn that clock before
+            // advertising the session's timeline; a later sync announcing a
+            // different ClockID would not match the accepted SETUP.
+            timing.wait_for_ptp_exchange().await?;
+        }
         let transport = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
         let control = Arc::new(UdpSocket::bind(SocketAddr::new(local, 0)).await?);
-        let session =
-            build_session_setup(identity, &connection.session_uuid, local, ptp, timing.port);
+        let session = build_session_setup(
+            identity,
+            &connection.session_uuid,
+            local,
+            ptp,
+            timing.port,
+            timing.clock.master_id.load(Ordering::Acquire),
+        );
         let session_response =
             exchange_plist(&mut connection, "SETUP", session, "session SETUP").await?;
         let event_port = optional_port(&session_response, "eventPort")?;
@@ -352,7 +352,10 @@ impl Sender {
             ("controlPort", control.local_addr()?.port() as u64),
             ("dataPort", transport.local_addr()?.port() as u64),
             ("latencyMin", 11025),
-            ("latencyMax", desired_frames as u64),
+            // The receive window is distinct from the desired render lead.
+            // Apple's PTP announcement uses an 88200-frame window by default;
+            // preserve room for it while scheduling playback at the chosen lead.
+            ("latencyMax", desired_frames.max(SAMPLE_RATE * 2) as u64),
             ("streamConnectionID", stream_id as u64),
         ] {
             stream.insert(name.into(), number(value));
@@ -620,12 +623,41 @@ fn number(value: u64) -> Value {
     Value::Integer(value.into())
 }
 
+fn receiver_owns_clock(device: &Device) -> bool {
+    let version = |key: &str| {
+        device
+            .txt
+            .get(key)
+            .and_then(|v| v.split('.').next())
+            .and_then(|v| v.parse::<u32>().ok())
+    };
+    // Explicit OS version takes priority over the firmware fallback. The ov/vs
+    // aliases are advertised on RAOP services; osvers/srcvers on AirPlay ones.
+    let newer_os = version("osvers")
+        .or_else(|| version("ov"))
+        .map(|v| v >= 27)
+        .unwrap_or_else(|| {
+            version("srcvers")
+                .or_else(|| version("vs"))
+                .is_some_and(|v| v >= 980)
+        });
+    device
+        .model
+        .as_deref()
+        .is_some_and(|m| m.starts_with("AudioAccessory"))
+        && newer_os
+        && device.txt.get("igl").is_some_and(|v| v == "1")
+        && device.txt.get("tsid").is_none_or(|v| v.is_empty())
+        && device.txt.get("pgid").is_none_or(|v| v.is_empty())
+}
+
 fn build_session_setup(
     identity: u64,
     session_uuid: &str,
     local: IpAddr,
     ptp: bool,
     timing_port: u16,
+    clock_identity: u64,
 ) -> Value {
     // deviceID follows the 64-bit DACP identity. macAddress is a separate,
     // six-octet field; sending the eight-octet device ID there is malformed.
@@ -659,7 +691,10 @@ fn build_session_setup(
         peer.insert("DeviceType".into(), number(0));
         // PTP's identity is a 64-bit bit pattern, but the plist field is signed.
         // A positive u64 above i64::MAX would be serialized as a 128-bit integer.
-        peer.insert("ClockID".into(), Value::Integer((identity as i64).into()));
+        peer.insert(
+            "ClockID".into(),
+            Value::Integer((clock_identity as i64).into()),
+        );
         peer.insert(
             "SupportsClockPortMatchingOverride".into(),
             Value::Boolean(false),
@@ -865,7 +900,50 @@ mod session_setup_contract_tests {
     const SESSION: &str = "9dff3e7a-ec6d-4fa7-8666-b416d376897d";
 
     fn setup(ptp: bool) -> Value {
-        build_session_setup(ID, SESSION, "192.0.2.25".parse().unwrap(), ptp, 64123)
+        build_session_setup(ID, SESSION, "192.0.2.25".parse().unwrap(), ptp, 64123, ID)
+    }
+
+    #[test]
+    fn session_setup_uses_selected_clock_without_changing_device_identity() {
+        let clock_id = 0xe001_2233_4455_6677u64;
+        let value = build_session_setup(
+            ID,
+            SESSION,
+            "192.0.2.25".parse().unwrap(),
+            true,
+            319,
+            clock_id,
+        );
+        let session = value.as_dictionary().unwrap();
+        assert_eq!(
+            session["deviceID"].as_string(),
+            Some("F8:42:88:5F:71:75:00:08")
+        );
+        assert_eq!(
+            session["timingPeerInfo"].as_dictionary().unwrap()["ClockID"]
+                .as_signed_integer()
+                .unwrap() as u64,
+            clock_id
+        );
+    }
+
+    #[test]
+    fn receiver_clock_rule_uses_version_aliases_without_overriding_an_older_os() {
+        let mut device = Device::manual("192.0.2.25".parse().unwrap(), 7000);
+        device.model = Some("AudioAccessory5,1".into());
+        device.txt.insert("igl".into(), "1".into());
+        assert!(!receiver_owns_clock(&device));
+        device.txt.insert("srcvers".into(), "980.4".into());
+        assert!(receiver_owns_clock(&device));
+        device.txt.insert("ov".into(), "26.4".into());
+        assert!(!receiver_owns_clock(&device));
+        device.txt.insert("osvers".into(), "27.0".into());
+        assert!(receiver_owns_clock(&device));
+        device.txt.insert("tsid".into(), "stereo-partner".into());
+        assert!(!receiver_owns_clock(&device));
+        device.txt.remove("tsid");
+        device.txt.insert("pgid".into(), "apple-tv-parent".into());
+        assert!(!receiver_owns_clock(&device));
     }
 
     // These wire constraints come from independent senders, not our mock:

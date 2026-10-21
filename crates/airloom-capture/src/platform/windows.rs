@@ -2,7 +2,9 @@
 
 use crate::mute_policy::MuteOwnership;
 use crate::pipeline::{levels, Encoding, NativeFormat, StereoResampler};
-use crate::{AudioChunk, CaptureConfig, CaptureError, CaptureSource, Result, DEFAULT_SOURCE_ID};
+use crate::{
+    AudioChunk, CaptureConfig, CaptureError, CaptureInfo, CaptureSource, Result, DEFAULT_SOURCE_ID,
+};
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 use std::ffi::c_void;
 use std::ptr;
@@ -130,6 +132,7 @@ enum Command {
 }
 
 pub(crate) struct Stream {
+    pub(crate) info: CaptureInfo,
     audio: Receiver<AudioChunk>,
     commands: Sender<Command>,
     cancelled: Arc<AtomicBool>,
@@ -168,6 +171,7 @@ impl Stream {
             })
             .map_err(CaptureError::WorkerStart)?;
         let mut stream = Self {
+            info: CaptureInfo::default(),
             audio,
             commands,
             cancelled,
@@ -175,7 +179,10 @@ impl Stream {
             worker: Some(worker),
         };
         match ready.recv() {
-            Ok(Ok(())) => Ok(stream),
+            Ok(Ok(info)) => {
+                stream.info = info;
+                Ok(stream)
+            }
             Ok(Err(error)) => {
                 let _ = stream.stop();
                 Err(error)
@@ -239,7 +246,7 @@ fn run_worker(
     discard: &Receiver<AudioChunk>,
     commands: Receiver<Command>,
     cancelled: &AtomicBool,
-    ready: Sender<Result<()>>,
+    ready: Sender<Result<CaptureInfo>>,
 ) -> Result<()> {
     // Declared before Session so every COM interface is released before COM.
     let _apartment = match ComApartment::initialize() {
@@ -256,7 +263,7 @@ fn run_worker(
             return Ok(());
         }
     };
-    if ready.send(Ok(())).is_err() {
+    if ready.send(Ok(session.info.clone())).is_err() {
         return session.stop();
     }
     let mut sequence = 0u64;
@@ -349,6 +356,7 @@ struct Session {
     buffer_frames: u32,
     local_mute: Option<LocalMute>,
     started: bool,
+    info: CaptureInfo,
 }
 
 impl Session {
@@ -361,6 +369,11 @@ impl Session {
             unsafe { enumerator.GetDevice(PCWSTR(source.as_ptr())) }
         }
         .map_err(|e| failure("Select playback endpoint", e))?;
+        let source_id = device_id(&device)?;
+        let info = CaptureInfo {
+            source_name: friendly_name(&device).unwrap_or_else(|_| source_id.clone()),
+            source_id,
+        };
         let client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None) }
             .map_err(|e| failure("Activate WASAPI client", e))?;
         let mix = unsafe { client.GetMixFormat() }.map_err(|e| failure("Get mix format", e))?;
@@ -398,6 +411,7 @@ impl Session {
             buffer_frames,
             local_mute: None,
             started: false,
+            info,
         };
         unsafe { session.client.Start() }.map_err(|e| failure("Start WASAPI capture", e))?;
         session.started = true;
@@ -531,7 +545,7 @@ unsafe fn parse_mix_format(pointer: *const WAVEFORMATEX) -> Result<NativeFormat>
         _ => {
             return Err(CaptureError::UnsupportedFormat(format!(
                 "format tag {tag}, {bits}-bit samples"
-            )))
+            )));
         }
     };
     NativeFormat::new(

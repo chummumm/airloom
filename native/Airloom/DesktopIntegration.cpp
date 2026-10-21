@@ -212,6 +212,69 @@ namespace airloom::native
         WriteSetting(L"Visualizer", enabled ? 1u : 0u);
     }
 
+    std::vector<HiddenDevice> Preferences::HiddenDevices()
+    {
+        // Store names with identities so an offline hidden device can still be restored.
+        DWORD bytes{};
+        if (RegGetValueW(HKEY_CURRENT_USER, SettingsKey, L"HiddenDevices", RRF_RT_REG_SZ,
+            nullptr, nullptr, &bytes) != ERROR_SUCCESS || bytes < sizeof(wchar_t) ||
+            bytes > 262144 || bytes % sizeof(wchar_t) != 0)
+            return {};
+        std::wstring stored(bytes / sizeof(wchar_t), L'\0');
+        if (RegGetValueW(HKEY_CURRENT_USER, SettingsKey, L"HiddenDevices", RRF_RT_REG_SZ,
+            nullptr, stored.data(), &bytes) != ERROR_SUCCESS)
+            return {};
+        auto const terminator = stored.find(L'\0');
+        if (terminator != std::wstring::npos) stored.resize(terminator);
+        winrt::Windows::Data::Json::JsonArray array;
+        if (!winrt::Windows::Data::Json::JsonArray::TryParse(stored, array)) return {};
+        std::vector<HiddenDevice> result;
+        for (auto const& item : array)
+        {
+            using winrt::Windows::Data::Json::JsonValueType;
+            if (item.ValueType() != JsonValueType::Object || result.size() >= 256) continue;
+            auto const object = item.GetObject();
+            if (!object.HasKey(L"id") || !object.HasKey(L"name")) continue;
+            auto const id = object.GetNamedValue(L"id");
+            auto const name = object.GetNamedValue(L"name");
+            if (id.ValueType() != JsonValueType::String || name.ValueType() != JsonValueType::String) continue;
+            auto const identifier = id.GetString();
+            if (identifier.empty() || identifier.size() > 1024 || name.GetString().size() > 1024) continue;
+            if (std::any_of(result.begin(), result.end(), [&identifier](HiddenDevice const& device)
+                { return device.id == identifier; })) continue;
+            result.push_back({identifier, name.GetString()});
+        }
+        return result;
+    }
+
+    void Preferences::SaveHiddenDevices(std::vector<HiddenDevice> const& devices)
+    {
+        using namespace winrt::Windows::Data::Json;
+        if (devices.size() > 256) throw winrt::hresult_invalid_argument(L"隐藏设备列表已达到上限。");
+        JsonArray array;
+        for (auto const& device : devices)
+        {
+            if (device.id.empty() || device.id.size() > 1024 || device.name.size() > 1024)
+                throw winrt::hresult_invalid_argument(L"设备标识或名称格式无效。");
+            JsonObject item;
+            item.Insert(L"id", JsonValue::CreateStringValue(device.id));
+            item.Insert(L"name", JsonValue::CreateStringValue(device.name));
+            array.Append(item);
+        }
+        auto const value = array.Stringify();
+        if ((value.size() + 1) * sizeof(wchar_t) > 262144)
+            throw winrt::hresult_invalid_argument(L"隐藏设备列表过大。");
+        HKEY key{};
+        auto result = RegCreateKeyExW(HKEY_CURRENT_USER, SettingsKey, 0, nullptr, 0,
+            KEY_SET_VALUE, nullptr, &key, nullptr);
+        if (result != ERROR_SUCCESS) winrt::throw_hresult(HRESULT_FROM_WIN32(result));
+        result = RegSetValueExW(key, L"HiddenDevices", 0, REG_SZ,
+            reinterpret_cast<BYTE const*>(value.c_str()),
+            static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+        RegCloseKey(key);
+        if (result != ERROR_SUCCESS) winrt::throw_hresult(HRESULT_FROM_WIN32(result));
+    }
+
     bool Preferences::StartsWithWindows()
     {
         DWORD bytes{};

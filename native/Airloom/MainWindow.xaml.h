@@ -4,6 +4,7 @@
 #include "DesktopIntegration.h"
 #include "EngineBridge.h"
 #include "Models.h"
+#include "Updater.h"
 
 namespace winrt::Airloom::implementation
 {
@@ -26,6 +27,12 @@ namespace winrt::Airloom::implementation
         void OnVisualizerChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnStartupChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnForgetCredentials(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnOpenSettings(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnCloseSettings(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnTestTone(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnCheckUpdates(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnInstallUpdate(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnCancelUpdate(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnExitClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnWaveformSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
 
@@ -38,6 +45,11 @@ namespace winrt::Airloom::implementation
         void RenderSources(airloom::native::Snapshot const& snapshot);
         void RenderAudio(airloom::native::Snapshot const& snapshot);
         void RenderError(airloom::native::Snapshot const& snapshot);
+        void RenderDeviceVisibility(airloom::native::Snapshot const& snapshot);
+        void RenderUpdate();
+        void ShowSettings(bool visible);
+        bool IsDeviceHidden(hstring const& id) const;
+        void SetDeviceHidden(hstring const& id, hstring const& name, bool hidden);
         void ApplyTheme();
         void AnimateStateChange();
         void ShowWindow();
@@ -51,7 +63,9 @@ namespace winrt::Airloom::implementation
 
         airloom::native::EngineBridge m_engine;
         airloom::native::DesktopIntegration m_desktop;
+        airloom::native::UpdateService m_updater;
         airloom::native::Snapshot m_snapshot;
+        std::vector<airloom::native::HiddenDevice> m_hiddenDevices;
         Microsoft::UI::Xaml::DispatcherTimer m_pollTimer{nullptr};
         Microsoft::UI::Xaml::DispatcherTimer m_volumeTimer{nullptr};
         Microsoft::UI::Xaml::Controls::ContentDialog m_authDialog{nullptr};
@@ -67,6 +81,8 @@ namespace winrt::Airloom::implementation
         bool m_devicesRendered{};
         bool m_sourcesRendered{};
         bool m_forceDeviceRender{};
+        bool m_settingsOpen{};
+        bool m_visibilityRendered{};
         bool m_volumePending{};
         double m_pendingVolume{0.75};
         uint64_t m_tickCount{};

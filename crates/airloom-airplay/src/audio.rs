@@ -106,7 +106,21 @@ mod tests {
         let samples: Vec<i16> = (0..FRAMES_PER_PACKET * CHANNELS)
             .map(|i| (i as i16).wrapping_mul(97).wrapping_add(i16::MIN))
             .collect();
-        let packet = alac_packet(&samples).unwrap();
+        // Exercise the actual encrypted RTP payload, not only the standalone
+        // encoder: a receiver reconstructs the nonce from the wire suffix,
+        // authenticates the RTP timestamp/SSRC, then decodes the ALAC frame.
+        let key = [0x5a; 32];
+        let (_, wire) = PacketEncoder::new(key, 0xffff_ff00, 0)
+            .packet(&samples)
+            .unwrap();
+        let suffix: [u8; 8] = wire[wire.len() - 8..].try_into().unwrap();
+        let packet = crypto::open(
+            &key,
+            &crypto::named_nonce(&suffix),
+            &wire[4..12],
+            &wire[12..wire.len() - 8],
+        )
+        .unwrap();
         // Minimal CAF container, fixed-size packets, ALACSpecificConfig cookie.
         let mut caf = b"caff\x00\x01\x00\x00".to_vec();
         fn chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {

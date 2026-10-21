@@ -12,6 +12,12 @@ namespace airloom::native
         winrt::hstring address;
         bool passwordRequired{};
         bool online{true};
+        bool selected{};
+        winrt::hstring state{L"idle"};
+        winrt::hstring statusMessage;
+        winrt::hstring errorMessage;
+        uint64_t packetsSent{};
+        uint64_t timingExchanges{};
     };
 
     struct Source
@@ -28,6 +34,7 @@ namespace airloom::native
         std::vector<Device> devices;
         std::vector<Source> sources;
         winrt::hstring selectedDeviceId;
+        std::vector<winrt::hstring> selectedDeviceIds;
         winrt::hstring selectedSourceId;
         double volume{0.75};
         bool muteLocal{};
@@ -38,14 +45,22 @@ namespace airloom::native
         winrt::hstring errorMessage;
         winrt::hstring authKind;
         winrt::hstring authDeviceId;
+        winrt::hstring authDeviceName;
         winrt::hstring authMessage;
         uint64_t authRequestId{};
         uint64_t elapsedSeconds{};
         uint64_t packetsSent{};
         uint32_t sampleRate{};
         std::optional<double> bufferMs;
+        winrt::hstring captureState{L"idle"};
+        winrt::hstring captureMessage;
+        winrt::hstring captureSourceName;
+        bool testToneActive{};
 
         static Snapshot Parse(winrt::Windows::Data::Json::JsonObject const& json);
         Device const* SelectedDevice() const noexcept;
+        Device const* FindDevice(winrt::hstring const& id) const noexcept;
+        bool IsSelected(winrt::hstring const& id) const noexcept;
+        size_t StreamingCount() const noexcept;
     };
 }

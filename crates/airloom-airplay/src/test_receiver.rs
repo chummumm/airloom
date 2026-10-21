@@ -7,7 +7,12 @@ use num_bigint::BigUint;
 use plist::{Dictionary, Value};
 use sha2::Sha512;
 use srp::groups::G_3072;
-use std::{collections::BTreeMap, io::Cursor, net::SocketAddr, time::Duration};
+use std::{
+    collections::BTreeMap,
+    io::Cursor,
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 use tokio::{
     net::{TcpListener, UdpSocket},
     sync::oneshot,
@@ -176,6 +181,7 @@ struct AudioOffer {
     control: SocketAddr,
     timing: SocketAddr,
     event_ack: oneshot::Receiver<()>,
+    ptp_clock_id: Option<u64>,
 }
 #[derive(Default, Debug)]
 struct Report {
@@ -209,10 +215,24 @@ async fn info(wire: &mut Wire) {
 }
 
 async fn start_receiver(password: &str, require_digest: bool, max_attempts: usize) -> Receiver {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let events = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let data = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let control = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    start_receiver_on(
+        "127.0.0.1".parse().unwrap(),
+        password,
+        require_digest,
+        max_attempts,
+    )
+    .await
+}
+async fn start_receiver_on(
+    local: IpAddr,
+    password: &str,
+    require_digest: bool,
+    max_attempts: usize,
+) -> Receiver {
+    let listener = TcpListener::bind(SocketAddr::new(local, 0)).await.unwrap();
+    let events = TcpListener::bind(SocketAddr::new(local, 0)).await.unwrap();
+    let data = UdpSocket::bind(SocketAddr::new(local, 0)).await.unwrap();
+    let control = UdpSocket::bind(SocketAddr::new(local, 0)).await.unwrap();
     let data_port = data.local_addr().unwrap().port();
     let control_port = control.local_addr().unwrap().port();
     let address = listener.local_addr().unwrap();
@@ -315,13 +335,29 @@ async fn serve_media(
             .count(),
         6
     );
-    assert_eq!(dictionary["timingProtocol"].as_string(), Some("NTP"));
-    assert!(!dictionary.contains_key("timingPeerInfo"));
-    assert!(!dictionary.contains_key("timingPeerList"));
-    let timing = SocketAddr::new(
-        peer.ip(),
-        dictionary["timingPort"].as_unsigned_integer().unwrap() as u16,
-    );
+    let ptp_clock_id = match dictionary["timingProtocol"].as_string().unwrap() {
+        "PTP" => {
+            assert!(!dictionary.contains_key("timingPort"));
+            assert_eq!(
+                dictionary["timingPeerList"].as_array().unwrap()[0],
+                dictionary["timingPeerInfo"]
+            );
+            let info = dictionary["timingPeerInfo"].as_dictionary().unwrap();
+            Some(info["ClockID"].as_signed_integer().unwrap() as u64)
+        }
+        "NTP" => {
+            assert!(!dictionary.contains_key("timingPeerInfo"));
+            assert!(!dictionary.contains_key("timingPeerList"));
+            None
+        }
+        _ => panic!("unknown timing protocol"),
+    };
+    let timing_port = if ptp_clock_id.is_some() {
+        319
+    } else {
+        dictionary["timingPort"].as_unsigned_integer().unwrap() as u16
+    };
+    let timing = SocketAddr::new(peer.ip(), timing_port);
     reply(
         &mut wire,
         &session,
@@ -398,6 +434,7 @@ async fn serve_media(
             control,
             timing,
             event_ack,
+            ptp_clock_id,
         })
         .ok();
     loop {
@@ -506,6 +543,146 @@ async fn password_digest_encrypted_stream_events_ntp_and_retransmission() {
     let report = receiver.task.await.unwrap();
     assert!(report.digest_verified && report.event_ack);
     assert_eq!(report.volumes.len(), 2);
+}
+
+fn decode_uncompressed_stereo_frame(payload: &[u8]) -> Vec<i16> {
+    // Read the published ALAC element layout independently of the sender's
+    // bit writer. The optional FFmpeg test also decodes its encrypted RTP path.
+    let mut position = 0usize;
+    let mut read = |width: usize| {
+        let mut value = 0u32;
+        for _ in 0..width {
+            value = (value << 1) | ((payload[position / 8] >> (7 - position % 8)) & 1) as u32;
+            position += 1;
+        }
+        value
+    };
+    assert_eq!(read(3), 1); // stereo channel-pair element
+    assert_eq!(read(4), 0);
+    assert_eq!(read(12), 0);
+    assert_eq!(read(1), 0); // negotiated 352-frame size
+    assert_eq!(read(2), 0);
+    assert_eq!(read(1), 1); // uncompressed
+    let samples = (0..704).map(|_| read(16) as u16 as i16).collect();
+    assert_eq!(read(3), 7); // end element
+    samples
+}
+
+#[tokio::test]
+async fn ptp_encrypted_nonzero_audio_has_a_valid_receiver_playback_anchor() {
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+    let remote: IpAddr = "127.0.0.20".parse().unwrap();
+    let event = UdpSocket::bind(SocketAddr::new(remote, 319)).await.unwrap();
+    let general = UdpSocket::bind(SocketAddr::new(remote, 320)).await.unwrap();
+    let observed = Arc::new(AtomicU64::new(0));
+    let observed_clock = observed.clone();
+    let clock_receiver = tokio::spawn(async move {
+        let mut event_buffer = [0; 2048];
+        let mut general_buffer = [0; 2048];
+        loop {
+            tokio::select! {
+                received = event.recv_from(&mut event_buffer) => {
+                    let (size, address) = received.unwrap();
+                    if event_buffer[0] & 15 != 0 { continue; }
+                    assert_eq!(size, 44);
+                    assert_eq!(event_buffer[1], 2);
+                    observed_clock.store(u64::from_be_bytes(event_buffer[20..28].try_into().unwrap()), Ordering::Release);
+                    // A receiver asks for a real delay exchange. Construct this
+                    // PTP request without the sender's packet builder.
+                    let mut delay = [0u8; 44];
+                    delay[0] = 0x11;
+                    delay[1] = 2;
+                    delay[2..4].copy_from_slice(&44u16.to_be_bytes());
+                    delay[6..8].copy_from_slice(&0x0400u16.to_be_bytes());
+                    delay[20..28].copy_from_slice(&0x8899aabbccddeeffu64.to_be_bytes());
+                    delay[29] = 1;
+                    delay[30..32].copy_from_slice(&event_buffer[30..32]);
+                    delay[32] = 1;
+                    event.send_to(&delay, address).await.unwrap();
+                }
+                received = general.recv_from(&mut general_buffer) => {
+                    let (size, _) = received.unwrap();
+                    assert!(size >= 34);
+                    assert_eq!(u16::from_be_bytes([general_buffer[2], general_buffer[3]]) as usize, size);
+                }
+            }
+        }
+    });
+    let receiver = start_receiver_on(remote, PASSWORD, false, 1).await;
+    let mut config = options(PASSWORD);
+    config.timing = TimingMode::Ptp;
+    let mut sender = Sender::connect(receiver.device, config).await.unwrap();
+    let offer = receiver.offer.await.unwrap();
+    offer.event_ack.await.unwrap();
+    let clock_id = offer.ptp_clock_id.expect("PTP SETUP required");
+    assert_eq!(
+        clock_id,
+        observed.load(Ordering::Acquire),
+        "SETUP must advertise the active timing authority"
+    );
+    let pcm: Vec<i16> = (0..704 * 3)
+        .map(|i| (i * 197 % 60001 - 30000) as i16)
+        .collect();
+    sender.send_pcm(&pcm).await.unwrap();
+    let mut buffer = [0u8; 2048];
+    let mut first_timestamp: Option<u32> = None;
+    for frame in 0..3 {
+        let (size, _) = timeout(Duration::from_secs(1), receiver.data.recv_from(&mut buffer))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(buffer[1] & 127, 96);
+        assert_eq!(&buffer[8..12], &[0; 4]); // PTP realtime SSRC
+        let timestamp = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
+        if let Some(first) = first_timestamp {
+            assert_eq!(timestamp, first.wrapping_add(frame as u32 * 352));
+        } else {
+            first_timestamp = Some(timestamp);
+        }
+        let suffix: [u8; 8] = buffer[size - 8..size].try_into().unwrap();
+        let plain = crypto::open(
+            &offer.key,
+            &crypto::named_nonce(&suffix),
+            &buffer[4..12],
+            &buffer[12..size - 8],
+        )
+        .unwrap();
+        let decoded = decode_uncompressed_stereo_frame(&plain);
+        assert_eq!(decoded, pcm[frame * 704..(frame + 1) * 704]);
+        assert!(decoded.iter().any(|sample| sample.unsigned_abs() > 10000));
+    }
+    let (size, _) = timeout(
+        Duration::from_secs(1),
+        receiver.control.recv_from(&mut buffer),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(size, 28);
+    assert_eq!(&buffer[..4], &[0x90, 0xd7, 0, 6]);
+    assert_eq!(
+        u64::from_be_bytes(buffer[20..28].try_into().unwrap()),
+        clock_id
+    );
+    let frame_1 = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
+    let frame_2 = u32::from_be_bytes(buffer[16..20].try_into().unwrap());
+    assert_eq!(frame_2.wrapping_sub(frame_1), 77175);
+    let rendering = frame_1.wrapping_sub(11025);
+    let lead = first_timestamp.unwrap().wrapping_sub(rendering);
+    assert!(
+        (32723..=33075).contains(&lead),
+        "first PCM frame must be scheduled about 750ms after the anchor, got {lead}"
+    );
+    assert_eq!(sender.metrics().packets_sent, 3);
+    assert!(sender.metrics().timing_exchanges >= 3);
+    sender.stop().await.unwrap();
+    let report = receiver.task.await.unwrap();
+    assert!(report.event_ack);
+    clock_receiver.abort();
+    let _ = clock_receiver.await;
 }
 
 #[tokio::test]

@@ -16,6 +16,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native NuGet restore failed.' }
     & msbuild native/Airloom/Airloom.sln /m /p:Configuration=$Configuration /p:Platform=x64 /verbosity:minimal
     if ($LASTEXITCODE -ne 0) { throw 'WinUI application build failed.' }
+    & msbuild native/Updater/Airloom.Update.vcxproj /m /p:Configuration=$Configuration /p:Platform=x64 /verbosity:minimal
+    if ($LASTEXITCODE -ne 0) { throw 'Native updater build failed.' }
     $OutputPath = Join-Path $ProjectRoot "native/Airloom/bin/x64/$Configuration"
     if (-not (Test-Path (Join-Path $OutputPath 'Airloom.exe'))) { throw 'Native executable not found at expected output path.' }
     $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'

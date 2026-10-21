@@ -72,4 +72,5 @@ jobs:
             release-assets/dist/airloom-windows-x64-portable.zip \
             release-assets/dist/SHA256SUMS.txt \
             release-assets/artifacts/native-window.png \
+            release-assets/artifacts/settings-window.png \
             release-assets/artifacts/native-smoke.json

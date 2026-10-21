@@ -38,6 +38,12 @@ namespace airloom::native
         std::function<void()> m_exit;
     };
 
+    struct HiddenDevice
+    {
+        winrt::hstring id;
+        winrt::hstring name;
+    };
+
     class Preferences final
     {
     public:
@@ -45,6 +51,8 @@ namespace airloom::native
         static bool Visualizer();
         static void SaveTheme(uint32_t theme);
         static void SaveVisualizer(bool enabled);
+        static std::vector<HiddenDevice> HiddenDevices();
+        static void SaveHiddenDevices(std::vector<HiddenDevice> const& devices);
         static bool StartsWithWindows();
         static void SetStartsWithWindows(bool enabled);
         static bool IsBackgroundLaunch();

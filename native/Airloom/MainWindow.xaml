@@ -22,12 +22,12 @@
                 </Grid>
                 <TextBlock Text="Airloom" FontFamily="Segoe UI Variable Display" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <Border Background="{ThemeResource BrandSoftBrush}" CornerRadius="5" Padding="6,3" Margin="3,0,0,0">
-                    <TextBlock Text="PREVIEW" Foreground="{ThemeResource BrandBrush}" FontSize="9" FontWeight="SemiBold" CharacterSpacing="70" />
+                    <TextBlock Text="0.2.0" Foreground="{ThemeResource BrandBrush}" FontSize="9" FontWeight="SemiBold" CharacterSpacing="70" />
                 </Border>
             </StackPanel>
         </Grid>
 
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,0,12">
+        <ScrollViewer x:Name="HomeScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,0,12">
             <Grid x:Name="PageContent" MaxWidth="1380" Margin="30,20,30,20" RowSpacing="20">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -53,27 +53,8 @@
                                 <TextBlock x:Name="StatusBadge" Text="等待连接" FontSize="12" AutomationProperties.LiveSetting="Polite" />
                             </StackPanel>
                         </Border>
-                        <Button Style="{StaticResource SubtleButtonStyle}" Width="38" Height="38" AutomationProperties.Name="设置" ToolTipService.ToolTip="设置">
+                        <Button x:Name="SettingsButton" Style="{StaticResource SubtleButtonStyle}" Width="38" Height="38" Click="OnOpenSettings" AutomationProperties.Name="设置" ToolTipService.ToolTip="设置与更新">
                             <FontIcon Glyph="&#xE713;" FontSize="18" />
-                            <Button.Flyout>
-                                <Flyout Placement="BottomEdgeAlignedRight">
-                                    <StackPanel Width="300" Spacing="18" Padding="5">
-                                        <TextBlock Text="随心设置" FontSize="21" FontWeight="SemiBold" />
-                                        <ComboBox x:Name="ThemePicker" Header="外观" HorizontalAlignment="Stretch" SelectionChanged="OnThemeChanged" AutomationProperties.Name="应用主题">
-                                            <ComboBoxItem Content="跟随 Windows" />
-                                            <ComboBoxItem Content="浅色" />
-                                            <ComboBoxItem Content="深色" />
-                                        </ComboBox>
-                                        <ToggleSwitch x:Name="VisualizerToggle" Header="动态波形" OnContent="显示实时音频" OffContent="只显示电平" Toggled="OnVisualizerChanged" />
-                                        <TextBlock Text="转场会遵循 Windows 的动画设置。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" Margin="0,-12,0,0" />
-                                        <ToggleSwitch x:Name="StartupToggle" Header="登录 Windows 后启动" OnContent="在托盘中启动" OffContent="手动打开" Toggled="OnStartupChanged" />
-                                        <Border Height="1" Background="{ThemeResource HairlineBrush}" />
-                                        <Button x:Name="ForgetButton" Content="忘记所选设备的凭据" HorizontalAlignment="Stretch" IsEnabled="False" Click="OnForgetCredentials" />
-                                        <TextBlock Text="Airloom · 开源预览版" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
-                                        <Button Content="退出 Airloom" HorizontalAlignment="Stretch" Click="OnExitClick" />
-                                    </StackPanel>
-                                </Flyout>
-                            </Button.Flyout>
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -119,8 +100,9 @@
                                     </Grid>
                                     <StackPanel Spacing="7">
                                         <TextBlock x:Name="EmptyDeviceTitle" Text="还没有发现扬声器" FontSize="14" FontWeight="SemiBold" TextAlignment="Center" />
-                                        <TextBlock Text="让电脑和 HomePod 连接同一网络，&#x0a;然后点右上角重新发现。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap" LineHeight="20" />
+                                        <TextBlock x:Name="EmptyDeviceDescription" Text="让电脑和 HomePod 连接同一网络，&#x0a;然后点右上角重新发现。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap" LineHeight="20" />
                                     </StackPanel>
+                                    <Button Content="管理设备显示" Click="OnOpenSettings" Style="{StaticResource SubtleButtonStyle}" />
                                     <ProgressRing x:Name="DiscoveryRing" IsActive="False" Width="20" Height="20" Visibility="Collapsed" />
                                 </StackPanel>
                             </Grid>
@@ -128,7 +110,7 @@
                             <Border Grid.Row="2" CornerRadius="12" Background="{ThemeResource InsetBrush}" Padding="12">
                                 <StackPanel Orientation="Horizontal" Spacing="9">
                                     <FontIcon Glyph="&#xE71B;" FontSize="14" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Top" Margin="0,2,0,0" />
-                                    <TextBlock Text="设备设有密码？&#x0a;连接时会安全地提示你输入。" FontSize="12" Foreground="{ThemeResource MutedBrush}" LineHeight="18" TextWrapping="Wrap" />
+                                    <TextBlock Text="可同时选择多台扬声器。&#x0a;需要密码时会分别提示输入。" FontSize="12" Foreground="{ThemeResource MutedBrush}" LineHeight="18" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -151,7 +133,20 @@
                                 </Border>
                                 <StackPanel Grid.Column="1" Spacing="7">
                                     <TextBlock Text="声音来源" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
-                                    <ComboBox x:Name="SourcePicker" PlaceholderText="正在读取 Windows 音频输出…" HorizontalAlignment="Stretch" SelectionChanged="OnSourceChanged" AutomationProperties.Name="声音来源，Windows 播放设备" MinWidth="160" />
+                                    <ComboBox x:Name="SourcePicker" PlaceholderText="正在读取 Windows 音频输出…" HorizontalAlignment="Stretch" SelectionChanged="OnSourceChanged" AutomationProperties.Name="声音来源，Windows 播放设备" MinWidth="160" ToolTipService.ToolTip="选择正在播放音乐的 Windows 输出设备。传输时切换会重新连接扬声器。" />
+                                    <Grid ColumnSpacing="12" Margin="0,3,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="CaptureStatusText" Text="连接后会显示采集状态。" FontSize="11" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                        <Button x:Name="TestToneButton" Grid.Column="1" Click="OnTestTone" IsEnabled="False" Style="{StaticResource SubtleButtonStyle}" ToolTipService.ToolTip="向已连接的扬声器播放 3 秒测试音，用来区分声源与连接问题。">
+                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                <FontIcon Glyph="&#xE767;" FontSize="12" />
+                                                <TextBlock x:Name="TestToneLabel" Text="试播 3 秒" FontSize="12" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -277,6 +272,116 @@
                     <TextBlock Grid.Column="1" Text="关掉窗口，音乐继续。" FontSize="11" Foreground="{ThemeResource MutedBrush}" VerticalAlignment="Top" />
                 </Grid>
             </Grid>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,0,12">
+            <StackPanel x:Name="SettingsContent" MaxWidth="1000" Margin="30,20,30,24" Spacing="20">
+                <Grid ColumnSpacing="16" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="SettingsBackButton" Width="40" Height="40" Click="OnCloseSettings" Style="{StaticResource SubtleButtonStyle}" VerticalAlignment="Center" AutomationProperties.Name="返回声音投放" ToolTipService.ToolTip="返回声音投放">
+                        <FontIcon Glyph="&#xE72B;" FontSize="18" />
+                    </Button>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="随心设置" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="让 Airloom 更贴合你的房间与习惯。" FontSize="14" Foreground="{ThemeResource MutedBrush}" />
+                    </StackPanel>
+                </Grid>
+
+                <InfoBar x:Name="SettingsErrorBanner" IsOpen="False" IsClosable="False" Severity="Error" Title="操作需要处理" />
+
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <StackPanel Spacing="20">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="外观与启动" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="主题、动效和后台体验。" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
+                        </StackPanel>
+                        <Grid ColumnSpacing="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="ThemePicker" Header="应用主题" HorizontalAlignment="Stretch" SelectionChanged="OnThemeChanged" AutomationProperties.Name="应用主题">
+                                <ComboBoxItem Content="跟随 Windows" />
+                                <ComboBoxItem Content="浅色" />
+                                <ComboBoxItem Content="深色" />
+                            </ComboBox>
+                            <ToggleSwitch x:Name="VisualizerToggle" Grid.Column="1" Header="动态波形" OnContent="实时音频" OffContent="只显示电平" Toggled="OnVisualizerChanged" />
+                            <ToggleSwitch x:Name="StartupToggle" Grid.Column="2" Header="登录 Windows 后启动" OnContent="在托盘中启动" OffContent="手动打开" Toggled="OnStartupChanged" />
+                        </Grid>
+                        <TextBlock Text="转场与波形动效会遵循 Windows 的动画设置。" FontSize="11" Foreground="{ThemeResource MutedBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <StackPanel Spacing="18">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="48" Height="48" CornerRadius="14" Background="{ThemeResource BrandSoftBrush}" VerticalAlignment="Top">
+                                <FontIcon Glyph="&#xE895;" FontSize="22" Foreground="{ThemeResource BrandBrush}" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                                <TextBlock Text="保持新鲜" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock x:Name="CurrentVersionText" Text="Airloom" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
+                                <TextBlock x:Name="UpdateStatusText" Text="检查是否有可用的新版本。" FontSize="13" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                            </StackPanel>
+                        </Grid>
+                        <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Visibility="Collapsed" Foreground="{ThemeResource BrandBrush}" AutomationProperties.Name="更新下载进度" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="CheckUpdatesButton" Content="检查更新" Click="OnCheckUpdates" />
+                            <Button x:Name="InstallUpdateButton" Content="下载并安装" Click="OnInstallUpdate" Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" />
+                            <Button x:Name="CancelUpdateButton" Content="取消" Click="OnCancelUpdate" Visibility="Collapsed" />
+                            <HyperlinkButton Content="版本说明" NavigateUri="https://github.com/chummumm/airloom/releases/latest" />
+                        </StackPanel>
+                        <TextBlock Text="安装前会结束当前传输并退出。更新完成后自动重新打开，下载的安装包与临时文件会自动清理。" FontSize="11" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <StackPanel Spacing="18">
+                        <Grid ColumnSpacing="20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="设备显示" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="隐藏不常用的设备，让首页只留下你想听的房间。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="重新发现" Click="OnRefresh" Style="{StaticResource SubtleButtonStyle}" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock x:Name="VisibilitySummary" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
+                        <StackPanel x:Name="DeviceVisibilityList" Spacing="8" />
+                        <TextBlock x:Name="VisibilityEmptyText" Text="尚未发现设备。连接同一网络后，点击“重新发现”。" FontSize="12" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="隐藏正在使用的设备会停止向它传输。可在这里随时恢复，隐藏设置会保存在这台电脑上。" FontSize="11" Foreground="{ThemeResource MutedBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}" Padding="24,20">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="5" VerticalAlignment="Center">
+                            <TextBlock Text="Airloom · 开源音频投放" FontSize="14" FontWeight="SemiBold" />
+                            <TextBlock Text="原生 Windows 界面，让声音自由流动。" FontSize="12" Foreground="{ThemeResource MutedBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="ForgetButton" IsEnabled="False" Click="OnForgetCredentials">
+                                <TextBlock x:Name="ForgetLabel" Text="忘记设备凭据" MaxWidth="210" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                            <Button Content="退出 Airloom" Click="OnExitClick" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
         </ScrollViewer>
     </Grid>
 </Window>

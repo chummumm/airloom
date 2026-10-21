@@ -55,6 +55,13 @@ pub struct CaptureSource {
     pub is_default: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct CaptureInfo {
+    /// Resolved endpoint ID, including when capture was requested as `default`.
+    pub source_id: String,
+    pub source_name: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct CaptureConfig {
     pub source_id: String,
@@ -163,6 +170,18 @@ impl CaptureStream {
         #[cfg(not(windows))]
         {
             let _ = timeout;
+            Err(CaptureError::UnsupportedPlatform)
+        }
+    }
+
+    /// Identifies the endpoint actually opened by the COM capture worker.
+    pub fn info(&self) -> Result<CaptureInfo> {
+        #[cfg(windows)]
+        {
+            Ok(self.inner.info.clone())
+        }
+        #[cfg(not(windows))]
+        {
             Err(CaptureError::UnsupportedPlatform)
         }
     }
