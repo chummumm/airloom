@@ -1,4 +1,5 @@
 use crate::{Error, Result};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
@@ -24,6 +25,11 @@ pub struct Clock {
     pub following: AtomicBool,
     offset_ready: AtomicBool,
     last_exchange_ms: AtomicU64,
+    consecutive_exchanges: AtomicU64,
+    settled_at_ms: AtomicU64,
+    incoming_sync: AtomicU64,
+    incoming_announce: AtomicU64,
+    incoming_probes: AtomicU64,
 }
 impl Clock {
     pub fn new(identity: u64) -> Self {
@@ -46,6 +52,11 @@ impl Clock {
             following: AtomicBool::new(false),
             offset_ready: AtomicBool::new(false),
             last_exchange_ms: AtomicU64::new(0),
+            consecutive_exchanges: AtomicU64::new(0),
+            settled_at_ms: AtomicU64::new(0),
+            incoming_sync: AtomicU64::new(0),
+            incoming_announce: AtomicU64::new(0),
+            incoming_probes: AtomicU64::new(0),
         }
     }
     pub fn local_ns(&self) -> u64 {
@@ -67,11 +78,27 @@ impl Clock {
         self.offset_ready.store(true, Ordering::Release);
     }
     fn exchanged(&self) {
+        self.exchanged_at(self.epoch.elapsed().as_millis() as u64 + 1);
+    }
+    fn exchanged_at(&self, now_ms: u64) {
         self.exchanges.fetch_add(1, Ordering::Relaxed);
-        self.last_exchange_ms.store(
-            self.epoch.elapsed().as_millis() as u64 + 1,
-            Ordering::Release,
-        );
+        let last = self.last_exchange_ms.swap(now_ms, Ordering::AcqRel);
+        if last == 0 || now_ms.saturating_sub(last) > 3_000 {
+            self.consecutive_exchanges.store(1, Ordering::Release);
+            self.settled_at_ms.store(0, Ordering::Release);
+        } else if self.consecutive_exchanges.fetch_add(1, Ordering::AcqRel) == 2 {
+            // The receiver's servo still needs to settle after its third live
+            // exchange. A lifetime packet count also accepts a stale clock.
+            self.settled_at_ms.store(now_ms + 250, Ordering::Release);
+        }
+    }
+    fn settled_at(&self, now_ms: u64) -> bool {
+        let settled = self.settled_at_ms.load(Ordering::Acquire);
+        let last = self.last_exchange_ms.load(Ordering::Acquire);
+        settled != 0 && now_ms >= settled && now_ms.saturating_sub(last) <= 3_000
+    }
+    fn settled(&self) -> bool {
+        self.settled_at(self.epoch.elapsed().as_millis() as u64 + 1)
     }
     fn last_exchange_age(&self) -> Option<Duration> {
         let last = self.last_exchange_ms.load(Ordering::Acquire);
@@ -81,6 +108,18 @@ impl Clock {
             )
         })
     }
+}
+
+/// A deliberately limited report: no network addresses or clock identities.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TimingDiagnostics {
+    pub role: String,
+    pub exchanges: u64,
+    pub last_exchange_age_ms: Option<u64>,
+    pub ready: bool,
+    pub incoming_sync: u64,
+    pub incoming_announce: u64,
+    pub incoming_probes: u64,
 }
 
 pub struct TimingRuntime {
@@ -99,9 +138,36 @@ impl Drop for TimingRuntime {
 }
 
 impl TimingRuntime {
+    pub fn diagnostics(&self) -> TimingDiagnostics {
+        let ptp = self.ptp_registration.is_some();
+        TimingDiagnostics {
+            role: if !ptp {
+                "ntp"
+            } else if self.following_required {
+                "receiver"
+            } else {
+                "sender"
+            }
+            .into(),
+            exchanges: self.clock.exchanges.load(Ordering::Acquire),
+            last_exchange_age_ms: self
+                .clock
+                .last_exchange_age()
+                .map(|age| age.as_millis() as u64),
+            ready: self.check_health(ptp).is_ok()
+                && if ptp {
+                    self.clock.settled()
+                } else {
+                    self.clock.exchanges.load(Ordering::Acquire) > 0
+                },
+            incoming_sync: self.clock.incoming_sync.load(Ordering::Relaxed),
+            incoming_announce: self.clock.incoming_announce.load(Ordering::Relaxed),
+            incoming_probes: self.clock.incoming_probes.load(Ordering::Relaxed),
+        }
+    }
     pub async fn wait_for_ptp_exchange(&self) -> Result<()> {
         let start = Instant::now();
-        while self.clock.exchanges.load(Ordering::Acquire) < 3
+        while !self.clock.settled()
             || (self.following_required && !self.clock.offset_ready.load(Ordering::Acquire))
         {
             if self.tasks.iter().any(JoinHandle::is_finished)
@@ -150,6 +216,7 @@ impl TimingRuntime {
                 if address.ip() != peer || size < 32 || buffer[1] & 0x7f != 0x52 {
                     continue;
                 }
+                task_clock.incoming_probes.fetch_add(1, Ordering::Relaxed);
                 let received = ntp_time(task_clock.local_ns());
                 let mut response = [0; 32];
                 response[0] = 0x80;
@@ -450,17 +517,80 @@ fn ptp_header(kind: u8, length: usize, identity: u64, sequence: u16, flags: u16)
     out[2..4].copy_from_slice(&(length as u16).to_be_bytes());
     out[6..8].copy_from_slice(&flags.to_be_bytes());
     out[20..28].copy_from_slice(&identity.to_be_bytes());
-    out[29] = 1;
+    out[28..30].copy_from_slice(&0x8005u16.to_be_bytes());
     out[30..32].copy_from_slice(&sequence.to_be_bytes());
-    out[32] = match kind {
-        0 => 0,
-        1 => 1,
-        8 => 2,
-        9 => 3,
-        _ => 5,
+    // AirPlay uses the 802.1AS profile, whose ordinary messages leave the
+    // legacy PTPv1 control field zero. Signaling retains control value 5.
+    out[32] = if kind == 12 { 5 } else { 0 };
+    out[33] = match kind {
+        11 => 0,
+        12 => 0x80,
+        _ => (-3i8) as u8,
     };
-    out[33] = if kind == 0 || kind == 8 { 0xfd } else { 0 };
     out
+}
+
+fn announce_packet(identity: u64, sequence: u16) -> Vec<u8> {
+    let mut packet = ptp_header(11, 76, identity, sequence, 0x0408);
+    // Profile dataset and Path Trace identify the selected sender's clock.
+    // These fields describe wire compatibility, not hardware clock precision.
+    packet[47..53].copy_from_slice(&[128, 6, 0x21, 0x43, 0x6a, 128]);
+    packet[53..61].copy_from_slice(&identity.to_be_bytes());
+    packet[63] = 0x20;
+    packet[64..68].copy_from_slice(&[0, 8, 0, 8]);
+    packet[68..76].copy_from_slice(&identity.to_be_bytes());
+    packet
+}
+
+fn follow_up_packet(identity: u64, sequence: u16, sent_ns: u64) -> Vec<u8> {
+    let mut packet = ptp_header(8, 96, identity, sequence, 0x0408);
+    put_timestamp(&mut packet[34..44], sent_ns);
+    // IEEE 802.1AS Follow_Up Information (OUI 00:80:C2, subtype 1).
+    // Rate and phase corrections remain zero for our single local timebase.
+    packet[44..54].copy_from_slice(&[0, 3, 0, 28, 0, 0x80, 0xc2, 0, 0, 1]);
+    // The AirPlay extension repeats the grandmaster identity (subtype 4).
+    packet[76..86].copy_from_slice(&[0, 3, 0, 16, 0, 0x0d, 0x93, 0, 0, 4]);
+    packet[86..94].copy_from_slice(&identity.to_be_bytes());
+    packet
+}
+
+fn signaling_packet(identity: u64, sequence: u16) -> Vec<u8> {
+    let mut packet = ptp_header(12, 106, identity, sequence, 0x0408);
+    // Apple's periodic organization extensions, with a wildcard target.
+    for (offset, length, subtype) in [(44, 22, 1), (70, 32, 5)] {
+        packet[offset..offset + 14]
+            .copy_from_slice(&[0, 3, 0, length, 0, 0x0d, 0x93, 0, 0, subtype, 0, 0, 3, 1]);
+    }
+    packet
+}
+
+fn unicast_grant(identity: u64, request: &[u8]) -> Option<Vec<u8>> {
+    let sequence = u16::from_be_bytes(request.get(30..32)?.try_into().ok()?);
+    let source = request.get(20..30)?;
+    let mut grants = Vec::new();
+    let mut remaining = request.get(44..)?;
+    while remaining.len() >= 4 && grants.len() < 8 * 12 {
+        let tag = u16::from_be_bytes(remaining[..2].try_into().ok()?);
+        let size = u16::from_be_bytes(remaining[2..4].try_into().ok()?) as usize;
+        let Some(value) = remaining.get(4..4 + size) else {
+            break;
+        };
+        if tag == 4 && size >= 6 {
+            let duration = u32::from_be_bytes(value[2..6].try_into().ok()?);
+            grants.extend_from_slice(&[0, 5, 0, 8, value[0] & 0xf0, value[1]]);
+            grants.extend_from_slice(&if duration == 0 { 300u32 } else { duration }.to_be_bytes());
+            grants.extend_from_slice(&[0, 1]); // Renewal invited.
+        }
+        remaining = &remaining[4 + size..];
+    }
+    if grants.is_empty() {
+        return None;
+    }
+    let mut packet = ptp_header(12, 44 + grants.len(), identity, sequence, 0x0400);
+    packet[33] = 0x7f; // Request-driven, rather than a periodic message.
+    packet[34..44].copy_from_slice(source);
+    packet[44..].copy_from_slice(&grants);
+    Some(packet)
 }
 fn put_timestamp(out: &mut [u8], ns: u64) {
     let sec = (ns / 1_000_000_000).to_be_bytes();
@@ -495,6 +625,7 @@ fn unicast_subscription(
     target: Option<[u8; 10]>,
 ) -> Vec<u8> {
     let mut request = ptp_header(12, 54, identity, sequence, 0x0408);
+    request[33] = 0x7f;
     request[34..44].copy_from_slice(&target.unwrap_or([0xff; 10]));
     request[44..48].copy_from_slice(&[0, 4, 0, 6]); // REQUEST_UNICAST_TRANSMISSION
     request[48] = kind << 4;
@@ -515,6 +646,8 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
     let mut tick = interval(Duration::from_millis(125));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut sequence = 0u16;
+    let mut announce_sequence = 0u16;
+    let mut signaling_sequence = 0u16;
     let mut subscription_sequence = 0u16;
     let mut followed_source = None::<[u8; 10]>;
     let mut sync_received = None::<(u16, u64, i64)>;
@@ -533,19 +666,18 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                     clock.master_id.store(identity,Ordering::Relaxed);clock.offset_ns.store(0,Ordering::Relaxed);
                 }
                 if !prefer_receiver {
-                    let sync=ptp_header(0,44,identity,sequence,0x0600);
-                    let sent=clock.local_ns();if event.send_to(&sync,event_peer).await.is_err(){return;}
-                    let mut follow=ptp_header(8,44,identity,sequence,0x0400);put_timestamp(&mut follow[34..44],sent);
-                    if general.send_to(&follow,general_peer).await.is_err(){return;}
                     if sequence%8==1 {
-                        let mut announce=ptp_header(11,64,identity,sequence,0x0400);
-                        // AirPlay senders use this grandmaster dataset. It is a
-                        // wire-compatibility advertisement, not a precision claim.
-                        announce[47]=128;announce[48]=6;announce[49]=0x21;
-                        announce[50..52].copy_from_slice(&0x436au16.to_be_bytes());announce[52]=128;
-                        announce[53..61].copy_from_slice(&identity.to_be_bytes());announce[63]=0x20;
+                        let announce=announce_packet(identity,announce_sequence);
+                        announce_sequence=announce_sequence.wrapping_add(1);
                         if general.send_to(&announce,general_peer).await.is_err(){return;}
+                        let signaling=signaling_packet(identity,signaling_sequence);
+                        signaling_sequence=signaling_sequence.wrapping_add(1);
+                        if general.send_to(&signaling,general_peer).await.is_err(){return;}
                     }
+                    let sync=ptp_header(0,44,identity,sequence,0x0608);
+                    if event.send_to(&sync,event_peer).await.is_err(){return;}
+                    let follow=follow_up_packet(identity,sequence,clock.local_ns());
+                    if general.send_to(&follow,general_peer).await.is_err(){return;}
                 } else if sequence%8==1 {
                     // A receiver clock may send unicast Sync/Announce only after
                     // subscription. Request it before session SETUP as well as
@@ -556,7 +688,7 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                         if general.send_to(&request,general_peer).await.is_err(){return;}
                     }
                     if clock.following.load(Ordering::Acquire) {
-                        let request=ptp_header(1,44,identity,sequence,0x0400);
+                        let request=ptp_header(1,44,identity,sequence,0x0408);
                         pending_delay=Some((sequence,clock.local_ns()));
                         if event.send_to(&request,event_peer).await.is_err(){return;}
                     }
@@ -585,6 +717,7 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
         let source: [u8; 10] = data[20..30].try_into().unwrap();
         match kind {
             11 if length >= 64 => {
+                clock.incoming_announce.fetch_add(1, Ordering::Relaxed);
                 if prefer_receiver {
                     followed_source = Some(source);
                     last_peer = Instant::now();
@@ -596,6 +729,7 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                 }
             }
             0 if length >= 44 && followed_source == Some(source) => {
+                clock.incoming_sync.fetch_add(1, Ordering::Relaxed);
                 last_peer = Instant::now();
                 let flags = u16::from_be_bytes([data[6], data[7]]);
                 if flags & 0x0200 != 0 {
@@ -637,7 +771,7 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                 }
             }
             9 if length >= 54 && followed_source == Some(source) => {
-                if data[44..52] == identity.to_be_bytes() {
+                if data[44..52] == identity.to_be_bytes() && data[52..54] == [0x80, 0x05] {
                     if let (Some((pending, sent)), Some(remote), Some(forward)) =
                         (pending_delay, timestamp(&data[34..44]), sync_offset)
                     {
@@ -656,7 +790,8 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                 }
             }
             1 if length >= 44 => {
-                let mut response = ptp_header(9, 54, identity, seq, 0x0400);
+                clock.incoming_probes.fetch_add(1, Ordering::Relaxed);
+                let mut response = ptp_header(9, 54, identity, seq, 0x0608);
                 put_timestamp(&mut response[34..44], arrived);
                 response[44..54].copy_from_slice(&source);
                 if general.send_to(&response, general_peer).await.is_ok() {
@@ -664,15 +799,15 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
                 }
             }
             2 if length >= 54 => {
-                let mut response = ptp_header(3, 54, identity, seq, 0x0600);
+                clock.incoming_probes.fetch_add(1, Ordering::Relaxed);
+                let mut response = ptp_header(3, 54, identity, seq, 0x0608);
                 put_timestamp(&mut response[34..44], arrived);
                 response[44..54].copy_from_slice(&source);
-                let sent = clock.local_ns();
                 if event.send_to(&response, event_peer).await.is_err() {
                     return;
                 }
-                let mut follow = ptp_header(10, 54, identity, seq, 0x0400);
-                put_timestamp(&mut follow[34..44], sent);
+                let mut follow = ptp_header(10, 54, identity, seq, 0x0408);
+                put_timestamp(&mut follow[34..44], clock.local_ns());
                 follow[44..54].copy_from_slice(&source);
                 if general.send_to(&follow, general_peer).await.is_ok() {
                     clock.exchanged();
@@ -680,22 +815,10 @@ async fn run_ptp(transport: PtpTransport, identity: u64, prefer_receiver: bool, 
             }
             12 if length >= 50 => {
                 // IEEE 1588 unicast grant, bounded to this selected receiver.
-                let mut offset = 44;
-                while offset + 4 <= length {
-                    let tag = u16::from_be_bytes([data[offset], data[offset + 1]]);
-                    let size = u16::from_be_bytes([data[offset + 2], data[offset + 3]]) as usize;
-                    if offset + 4 + size > length {
-                        break;
+                if let Some(grant) = unicast_grant(identity, &data[..length]) {
+                    if general.send_to(&grant, general_peer).await.is_err() {
+                        return;
                     }
-                    if tag == 4 && size == 6 {
-                        let mut grant = ptp_header(12, 56, identity, seq, 0x0400);
-                        grant[34..44].copy_from_slice(&source);
-                        grant[44..46].copy_from_slice(&5u16.to_be_bytes());
-                        grant[46..48].copy_from_slice(&8u16.to_be_bytes());
-                        grant[48..54].copy_from_slice(&data[offset + 4..offset + 10]);
-                        let _ = general.send_to(&grant, general_peer).await;
-                    }
-                    offset += 4 + size;
                 }
             }
             _ => {}
@@ -768,6 +891,91 @@ mod tests {
         })
         .await
         .expect("expected PTP message")
+    }
+
+    #[test]
+    fn gptp_follow_up_matches_the_documented_receiver_wire_profile() {
+        // Fixed protocol fixture, not encoded with the production helpers.
+        // IEEE 802.1AS Table 11-11 is decoded independently by nqptp's
+        // nqptp-message-handlers.c:550; Apple's second TLV and port/profile
+        // fields are described in airplay-cli 1701bc25/src/ap2_ptp.c:340-502.
+        let expected = hex::decode(concat!(
+            "1802006000000408",
+            "0000000000000000",
+            "00000000",
+            "0102030405060708",
+            "8005000900fd",
+            "00006553f100075bcd15",
+            "0003001c0080c2000001",
+            "00000000",
+            "0000",
+            "000000000000000000000000",
+            "00000000",
+            "00030010000d93000004",
+            "0102030405060708",
+            "0000"
+        ))
+        .unwrap();
+        assert_eq!(expected.len(), 96);
+        assert_eq!(
+            follow_up_packet(0x0102030405060708, 9, 1_700_000_000_123_456_789),
+            expected
+        );
+
+        let announce = announce_packet(0x0102030405060708, 9);
+        assert_eq!(announce.len(), 76);
+        assert_eq!(
+            &announce[64..],
+            &hex::decode("000800080102030405060708").unwrap()
+        );
+        assert_eq!(&announce[6..8], &[4, 8]);
+        assert_eq!(&announce[32..34], &[0, 0]);
+        let signaling = signaling_packet(0x0102030405060708, 9);
+        assert_eq!(signaling.len(), 106);
+        assert_eq!(&signaling[32..44], &[5, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            &signaling[44..58],
+            &[0, 3, 0, 22, 0, 13, 147, 0, 0, 1, 0, 0, 3, 1]
+        );
+        assert_eq!(
+            &signaling[70..84],
+            &[0, 3, 0, 32, 0, 13, 147, 0, 0, 5, 0, 0, 3, 1]
+        );
+    }
+
+    #[test]
+    fn clock_readiness_requires_a_live_settled_exchange_streak() {
+        let clock = Clock::new(1);
+        for now in [1_000, 1_125, 1_250] {
+            clock.exchanged_at(now);
+        }
+        assert!(!clock.settled_at(1_499));
+        assert!(clock.settled_at(1_500));
+        assert!(!clock.settled_at(4_251));
+        clock.exchanged_at(5_000);
+        assert_eq!(clock.exchanges.load(Ordering::Relaxed), 4);
+        assert!(
+            !clock.settled_at(5_300),
+            "lifetime total must not approve a cold clock"
+        );
+        for now in [5_125, 5_250] {
+            clock.exchanged_at(now);
+        }
+        assert!(clock.settled_at(5_500));
+    }
+
+    #[test]
+    fn unicast_negotiation_grants_each_requested_type_and_invites_renewal() {
+        let mut request = ptp_header(12, 64, 0x1111, 42, 0x0400);
+        request[44..54].copy_from_slice(&[0, 4, 0, 6, 0, 0xfd, 0, 0, 0, 30]);
+        request[54..64].copy_from_slice(&[0, 4, 0, 6, 0xb0, 0, 0, 0, 0, 0]);
+        let grant = unicast_grant(0x2222, &request).unwrap();
+        assert_eq!(grant.len(), 68);
+        assert_eq!(&grant[30..34], &[0, 42, 5, 0x7f]);
+        assert_eq!(&grant[34..44], &request[20..30]);
+        assert_eq!(&grant[44..56], &[0, 5, 0, 8, 0, 0xfd, 0, 0, 0, 30, 0, 1]);
+        assert_eq!(&grant[56..68], &[0, 5, 0, 8, 0xb0, 0, 0, 0, 1, 44, 0, 1]);
+        assert!(unicast_grant(0x2222, &request[..51]).is_none());
     }
 
     #[test]
@@ -928,9 +1136,17 @@ mod tests {
         let clock = runtime.clock.clone();
         let sync = next_kind(&peer_event, 0).await;
         assert_eq!(sync[0], 0x10);
-        assert_eq!(sync[6] & 2, 2);
+        assert_eq!(&sync[6..8], &[6, 8]);
+        assert_eq!(&sync[28..30], &[0x80, 5]);
         let announce = next_kind(&peer_general, 11).await;
         assert_eq!(announce[47], 128);
+        assert_eq!(&announce[64..68], &[0, 8, 0, 8]);
+        let signaling = next_kind(&peer_general, 12).await;
+        assert_eq!(signaling.len(), 106);
+        let follow = next_kind(&peer_general, 8).await;
+        assert_eq!(follow.len(), 96);
+        assert_eq!(&follow[30..32], &sync[30..32]);
+        assert_eq!(&follow[44..54], &[0, 3, 0, 28, 0, 0x80, 0xc2, 0, 0, 1]);
         let request = ptp_header(1, 44, 5678, 42, 0x0400);
         peer_event.send_to(&request, address).await.unwrap();
         let response = next_kind(&peer_general, 9).await;
@@ -938,6 +1154,8 @@ mod tests {
         assert_eq!(&response[44..54], &request[20..30]);
         assert!(timestamp(&response[34..44]).unwrap() > 0);
         assert_eq!(clock.exchanges.load(Ordering::Relaxed), 1);
+        assert_eq!(runtime.diagnostics().incoming_probes, 1);
+        assert!(!runtime.diagnostics().ready);
         drop(runtime);
     }
     #[tokio::test]

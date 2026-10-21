@@ -56,6 +56,7 @@ namespace airloom::native
         winrt::hstring captureMessage;
         winrt::hstring captureSourceName;
         bool testToneActive{};
+        winrt::hstring diagnosticsJson;
 
         static Snapshot Parse(winrt::Windows::Data::Json::JsonObject const& json);
         Device const* SelectedDevice() const noexcept;

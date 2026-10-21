@@ -3,6 +3,7 @@
 
 mod audio;
 mod crypto;
+mod diagnostics;
 mod discovery;
 mod pairing;
 mod rtsp;
@@ -12,9 +13,13 @@ mod test_receiver;
 mod timing;
 mod tlv;
 
+pub use diagnostics::{
+    ReceiverDiagnostics, SenderDiagnostics, StreamDiagnostics, TransportDiagnostics,
+};
 pub use discovery::{discover, Device};
 pub use pairing::{pair, PairingCredentials, PairingSession};
 pub use sender::{ConnectOptions, Sender, SenderMetrics, TimingMode, VolumeControl};
+pub use timing::TimingDiagnostics;
 
 use serde::{Deserialize, Serialize};
 

@@ -8,7 +8,7 @@ namespace airloom::native
     struct UpdateSnapshot
     {
         std::wstring state{L"idle"};
-        std::wstring currentVersion{L"0.2.0"};
+        std::wstring currentVersion{L"0.2.1"};
         std::wstring availableVersion;
         std::wstring message{L"检查 GitHub 上的最新版本。安装结束后会自动清理下载包。"};
         double progress{};
@@ -31,6 +31,7 @@ namespace airloom::native
         void Check();
         void Install();
         void Cancel();
+        void PrepareForExit() noexcept;
 
     private:
         std::shared_ptr<UpdateShared> m_state;

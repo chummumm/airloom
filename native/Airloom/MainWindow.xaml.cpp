@@ -5,6 +5,8 @@
 #endif
 
 #include <cstdio>
+#include <iterator>
+#include <winrt/Windows.ApplicationModel.DataTransfer.h>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -106,29 +108,11 @@ namespace
         Automation::AutomationProperties::SetName(element, name);
     }
 
-    Grid SpeakerIcon(Media::Brush const& accent, Media::Brush const& body)
+    void SetText(TextBlock const& target, hstring const& value)
     {
-        Grid icon;
-        icon.Width(40);
-        icon.Height(47);
-        Microsoft::UI::Xaml::Shapes::Rectangle shell;
-        shell.Width(33);
-        shell.Height(40);
-        shell.RadiusX(13);
-        shell.RadiusY(13);
-        shell.Fill(body);
-        shell.VerticalAlignment(VerticalAlignment::Bottom);
-        icon.Children().Append(shell);
-        Microsoft::UI::Xaml::Shapes::Ellipse top;
-        top.Width(31);
-        top.Height(9);
-        top.Fill(accent);
-        top.Opacity(0.65);
-        top.VerticalAlignment(VerticalAlignment::Top);
-        top.Margin(Thickness{0, 5, 0, 0});
-        icon.Children().Append(top);
-        return icon;
+        if (target.Text() != value) target.Text(value);
     }
+
 }
 
 namespace winrt::Airloom::implementation
@@ -151,13 +135,20 @@ namespace winrt::Airloom::implementation
             {
                 if (auto self = weak.get())
                 {
-                    self->m_volumeTimer.Stop();
-                    self->m_volumePending = false;
-                    auto command = MakeCommand(L"set_volume");
-                    command.Insert(L"volume", JsonValue::CreateNumberValue(self->m_pendingVolume));
-                    self->Send(command);
+                    self->FlushVolume();
                 }
             });
+
+        // Slider handles pointer events internally. Observe the handled events too,
+        // without capturing the pointer or changing the control's native behavior.
+        VolumeSlider().AddHandler(UIElement::PointerPressedEvent(), box_value(Input::PointerEventHandler(
+            [weak = get_weak()](auto const&, auto const&)
+            { if (auto self = weak.get()) self->m_volumePointerDown = true; })), true);
+        auto finishVolume = Input::PointerEventHandler([weak = get_weak()](auto const&, auto const&)
+            { if (auto self = weak.get()) self->FinishVolumeInteraction(); });
+        VolumeSlider().AddHandler(UIElement::PointerReleasedEvent(), box_value(finishVolume), true);
+        VolumeSlider().AddHandler(UIElement::PointerCaptureLostEvent(), box_value(finishVolume), true);
+        VolumeSlider().AddHandler(UIElement::PointerCanceledEvent(), box_value(finishVolume), true);
 
         Closed([weak = get_weak()](auto const&, auto const&)
             {
@@ -355,15 +346,15 @@ namespace winrt::Airloom::implementation
         DiscoveryRing().Visibility(discovering ? Visibility::Visible : Visibility::Collapsed);
 
         hstring badge = L"等待连接";
-        hstring eyebrow = L"你的声音，即将出发";
-        hstring description = device ? L"准备好了，就开始连接。" : L"在左侧选择一台或多台设备，然后开始连接。";
+        hstring eyebrow = L"尚未连接";
+        hstring description = device ? L"使用当前声音来源连接已选扬声器。" : L"在左侧选择一台或多台扬声器，然后开始连接。";
         hstring action = L"开始连接";
         if (discovering) { badge = L"正在发现"; description = L"正在寻找同一网络中的 AirPlay 扬声器。"; }
-        if (streaming) { badge = L"正在传输"; eyebrow = L"已连接 " + to_hstring(streamingCount) + L" 台 · 可继续添加设备"; action = L"全部断开"; }
-        if (next.state == L"connecting") { badge = L"正在连接"; eyebrow = L"让声音准备就绪"; description = L"正在与扬声器建立连接…"; action = L"取消连接"; }
-        if (next.state == L"reconnecting") { badge = L"正在重连"; eyebrow = L"正在找回声音"; description = L"连接暂时中断，正在尝试恢复…"; action = L"停止重连"; }
+        if (streaming) { badge = L"正在传输"; eyebrow = L"正在向 " + to_hstring(streamingCount) + L" 台扬声器发送音频"; action = L"全部断开"; }
+        if (next.state == L"connecting") { badge = L"正在连接"; eyebrow = L"正在建立连接"; description = L"正在与扬声器建立连接…"; action = L"取消连接"; }
+        if (next.state == L"reconnecting") { badge = L"正在重连"; eyebrow = L"连接恢复中"; description = L"连接暂时中断，正在尝试恢复…"; action = L"停止重连"; }
         if (auth) { badge = streaming ? L"传输中 · 待验证" : L"需要验证"; description = L"所选设备需要访问密码或配对码。"; action = next.authKind == L"pin" ? L"输入配对码" : L"输入访问密码"; }
-        if (next.state == L"error") { badge = L"连接未完成"; eyebrow = L"稍作调整，再出发"; description = L"查看上方提示后，再试一次。"; action = L"重新连接"; }
+        if (next.state == L"error") { badge = L"连接未完成"; eyebrow = L"连接需要处理"; description = L"查看上方提示后，再试一次。"; action = L"重新连接"; }
         if (!next.statusMessage.empty()) description = next.statusMessage;
 
         hstring targets;
@@ -373,12 +364,14 @@ namespace winrt::Airloom::implementation
             if (!targets.empty()) targets = targets + L" · ";
             targets = targets + entry.name;
         }
-        StatusBadge().Text(badge);
-        SessionEyebrow().Text(eyebrow);
-        TargetName().Text(targets.empty() ? L"选择你的扬声器" : targets);
-        StatusDescription().Text(description);
+        SetText(StatusBadge(), badge);
+        SetText(SessionEyebrow(), eyebrow);
+        SetText(TargetName(), targets.empty() ? L"选择扬声器" : targets);
+        SetText(StatusDescription(), description);
+        ToolTipService::SetToolTip(StatusDescription(), box_value(description));
+        ToolTipService::SetToolTip(TargetName(), box_value(targets));
         StatusDot().Fill(Brush(streaming ? L"AudioBrush" : busy || auth ? L"BrandBrush" : L"MutedBrush"));
-        ConnectLabel().Text(action);
+        SetText(ConnectLabel(), action);
         bool const selectedOnline = std::any_of(next.devices.begin(), next.devices.end(), [&next](Device const& entry)
             { return next.IsSelected(entry.id) && entry.online; });
         ConnectButton().IsEnabled(active || (selectedOnline && hasSource));
@@ -391,26 +384,41 @@ namespace winrt::Airloom::implementation
         ForgetButton().IsEnabled(device != nullptr && !active);
         ForgetLabel().Text(device ? L"忘记“" + device->name + L"”凭据" : L"忘记设备凭据");
         ToolTipService::SetToolTip(ForgetButton(), box_value(ForgetLabel().Text()));
-        VolumeSlider().IsEnabled(!next.selectedDeviceIds.empty());
-        if (!m_volumePending)
+        // Volume is editable before connection. Local input remains authoritative
+        // through the debounce AND acknowledgement, not just until command enqueue.
+        VolumeSlider().IsEnabled(m_engine.Available());
+        if (m_volumeAwaitingAck && !m_volumePending)
         {
-            VolumeSlider().Value(std::round(next.volume * 100.0));
-            VolumeLabel().Text(to_hstring(static_cast<int>(std::round(next.volume * 100.0))) + L"%");
+            if (std::abs(next.volume - m_pendingVolume) < 0.0005)
+                m_volumeAwaitingAck = false;
+            else if (!m_volumePointerDown && std::chrono::steady_clock::now() >= m_volumeAckDeadline)
+            {
+                m_volumeAwaitingAck = false;
+                ShowLocalError(L"音量调整尚未确认，已恢复显示当前音量。请重试。");
+            }
+        }
+        if (!m_volumePending && !m_volumeAwaitingAck && !m_volumePointerDown)
+        {
+            auto const value = std::round(next.volume * 100.0);
+            if (VolumeSlider().Value() != value) VolumeSlider().Value(value);
+            SetText(VolumeLabel(), to_hstring(static_cast<int>(value)) + L"%");
         }
         LocalMuteToggle().IsEnabled(hasSource);
         LocalMuteToggle().IsOn(next.muteLocal);
         TestToneButton().IsEnabled(streaming);
-        TestToneLabel().Text(next.testToneActive ? L"停止试播" : L"试播 3 秒");
-        CaptureStatusText().Text(next.testToneActive ? L"正在播放测试音，结束后自动恢复电脑声音。" :
-            !next.captureMessage.empty() ? next.captureMessage : L"连接后会显示声音采集状态。");
+        CopyDiagnosticsButton().IsEnabled(!next.diagnosticsJson.empty() && next.diagnosticsJson != L"{}");
+        SetText(TestToneLabel(), next.testToneActive ? L"停止试播" : L"试播 3 秒");
+        SetText(CaptureStatusText(), next.testToneActive ? L"正在播放测试音，结束后恢复电脑声音。" :
+            !next.captureMessage.empty() ? next.captureMessage : L"连接后显示实际声音采集状态。");
         CaptureStatusText().Foreground(Brush(next.captureState == L"signal" ? L"AudioBrush" :
-            next.captureState == L"silent" || next.captureState == L"quiet" || next.captureState == L"error" ? L"BrandBrush" : L"MutedBrush"));
+            next.captureState == L"error" ? L"DangerBrush" :
+            next.captureState == L"silent" || next.captureState == L"quiet" ? L"WarningBrush" : L"MutedBrush"));
 
         if (m_desktop.HasTrayIcon())
         {
             FooterMessage().Text(next.muteLocal
                 ? L"电脑静音会影响同一输出上的其他应用；如果采集无声，可先关闭此选项。"
-                : L"可同时投放多台设备 · 隐藏与恢复设备请打开设置");
+                : L"关闭窗口后继续在托盘运行。要结束传输，请选择“全部断开”或退出 Airloom。");
         }
         if (next.state != m_snapshot.state || next.selectedDeviceIds != m_snapshot.selectedDeviceIds)
         {
@@ -423,89 +431,77 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::RenderDevices(Snapshot const& next)
     {
-        DeviceCards().Children().Clear();
+        std::vector<hstring> visibleIds;
+        for (auto const& device : next.devices)
+            if (!IsDeviceHidden(device.id)) visibleIds.push_back(device.id);
+        m_deviceRows.erase(std::remove_if(m_deviceRows.begin(), m_deviceRows.end(), [&visibleIds](auto const& row)
+            { return std::find(visibleIds.begin(), visibleIds.end(), row.id) == visibleIds.end(); }), m_deviceRows.end());
+
+        auto children = DeviceCards().Children();
+        uint32_t position{};
         for (auto const& device : next.devices)
         {
             if (IsDeviceHidden(device.id)) continue;
-            bool const selected = next.IsSelected(device.id);
-            Button card;
-            card.HorizontalAlignment(HorizontalAlignment::Stretch);
-            card.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-            card.Padding(Thickness{12, 12, 12, 12});
-            card.CornerRadius(CornerRadius{14});
-            card.BorderThickness(Thickness{1});
-            card.BorderBrush(Brush(selected ? L"BrandBrush" : L"HairlineBrush"));
-            card.Background(Brush(selected ? L"BrandSoftBrush" : L"InsetBrush"));
-            card.IsEnabled(device.online || selected);
-            SetAccessibleName(card, device.name + (selected ? L"，已选择" : L"，选择扬声器") + (device.passwordRequired ? L"，需要验证" : L""));
-            ToolTipService::SetToolTip(card, box_value(device.address));
-
-            Grid contents;
-            contents.ColumnSpacing(11);
-            ColumnDefinition iconColumn;
-            iconColumn.Width(GridLength{40, GridUnitType::Pixel});
-            ColumnDefinition textColumn;
-            textColumn.Width(GridLength{1, GridUnitType::Star});
-            ColumnDefinition checkColumn;
-            checkColumn.Width(GridLength{16, GridUnitType::Pixel});
-            contents.ColumnDefinitions().Append(iconColumn);
-            contents.ColumnDefinitions().Append(textColumn);
-            contents.ColumnDefinitions().Append(checkColumn);
-            contents.Children().Append(SpeakerIcon(Brush(L"BrandBrush"), Brush(L"SpeakerBodyBrush")));
-
-            StackPanel labels;
-            Grid::SetColumn(labels, 1);
-            labels.Spacing(5);
-            labels.VerticalAlignment(VerticalAlignment::Center);
-            TextBlock name;
-            name.Text(device.name);
-            name.FontSize(14);
-            name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
-            name.TextTrimming(TextTrimming::CharacterEllipsis);
-            labels.Children().Append(name);
-            TextBlock detail;
-            detail.FontSize(11);
-            detail.Foreground(Brush(L"MutedBrush"));
-            detail.TextTrimming(TextTrimming::CharacterEllipsis);
-            hstring stateLabel = !device.online ? L"暂时离线" : device.model.empty() ? L"AirPlay 扬声器" : device.model;
-            if (device.state == L"streaming") stateLabel = L"正在传输";
-            else if (device.state == L"connecting") stateLabel = L"正在连接…";
-            else if (device.state == L"reconnecting") stateLabel = L"正在重连…";
-            else if (device.state == L"auth_required") stateLabel = L"等待密码或配对码";
-            else if (device.state == L"error") stateLabel = L"连接失败 · 右键重试";
-            else if (selected) stateLabel = L"已选择 · 准备连接";
-            detail.Text(stateLabel);
-            detail.Foreground(Brush(device.state == L"streaming" ? L"AudioBrush" : L"MutedBrush"));
-            if (!device.errorMessage.empty()) ToolTipService::SetToolTip(card, box_value(device.errorMessage));
-            labels.Children().Append(detail);
-            contents.Children().Append(labels);
-
-            if (selected || device.passwordRequired)
+            auto found = std::find_if(m_deviceRows.begin(), m_deviceRows.end(), [&device](auto const& row)
+                { return row.id == device.id; });
+            if (found == m_deviceRows.end())
             {
-                FontIcon marker;
-                Grid::SetColumn(marker, 2);
-                marker.Glyph(selected ? L"\uE73E" : L"\uE72E");
-                marker.FontSize(selected ? 13 : 11);
-                marker.Foreground(Brush(selected ? L"BrandBrush" : L"MutedBrush"));
-                contents.Children().Append(marker);
-            }
-            card.Content(contents);
-            card.Click([weak = get_weak(), id = device.id, selected](auto const&, auto const&)
-                {
-                    if (auto self = weak.get())
+                DeviceRow created;
+                created.id = device.id;
+                created.button = Button();
+                created.button.HorizontalAlignment(HorizontalAlignment::Stretch);
+                created.button.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+                created.button.Padding(Thickness{10, 10, 10, 10});
+                created.button.Height(72);
+                created.button.CornerRadius(CornerRadius{8});
+                Automation::AutomationProperties::SetAutomationId(created.button, L"Receiver:" + device.id);
+
+                Grid contents;
+                contents.ColumnSpacing(10);
+                ColumnDefinition iconColumn, textColumn, markerColumn;
+                iconColumn.Width(GridLength{18, GridUnitType::Pixel});
+                textColumn.Width(GridLength{1, GridUnitType::Star});
+                markerColumn.Width(GridLength{14, GridUnitType::Pixel});
+                contents.ColumnDefinitions().Append(iconColumn);
+                contents.ColumnDefinitions().Append(textColumn);
+                contents.ColumnDefinitions().Append(markerColumn);
+                created.icon = FontIcon();
+                created.icon.Glyph(L"\uE767");
+                created.icon.FontSize(16);
+                contents.Children().Append(created.icon);
+                StackPanel labels;
+                Grid::SetColumn(labels, 1);
+                labels.Spacing(5);
+                labels.VerticalAlignment(VerticalAlignment::Center);
+                created.name = TextBlock();
+                created.name.FontSize(14);
+                created.name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+                created.name.TextTrimming(TextTrimming::CharacterEllipsis);
+                created.detail = TextBlock();
+                created.detail.FontSize(12);
+                created.detail.TextTrimming(TextTrimming::CharacterEllipsis);
+                labels.Children().Append(created.name);
+                labels.Children().Append(created.detail);
+                contents.Children().Append(labels);
+                created.marker = FontIcon();
+                Grid::SetColumn(created.marker, 2);
+                created.marker.FontSize(12);
+                contents.Children().Append(created.marker);
+                created.button.Content(contents);
+                created.button.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
                     {
-                        auto command = MakeCommand(L"toggle_device");
-                        command.Insert(L"device_id", JsonValue::CreateStringValue(id));
-                        command.Insert(L"selected", JsonValue::CreateBooleanValue(!selected));
-                        self->Send(command);
-                    }
-                });
-            MenuFlyout actions;
-            if (selected && device.state != L"streaming")
-            {
-                MenuFlyoutItem retry;
-                retry.Text(L"重新连接此设备");
-                retry.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
+                        if (auto self = weak.get())
+                        {
+                            auto command = MakeCommand(L"toggle_device");
+                            command.Insert(L"device_id", JsonValue::CreateStringValue(id));
+                            command.Insert(L"selected", JsonValue::CreateBooleanValue(!self->m_snapshot.IsSelected(id)));
+                            self->Send(command);
+                        }
+                    });
+                MenuFlyout actions;
+                created.retry = MenuFlyoutItem();
+                created.retry.Text(L"重新连接此设备");
+                created.retry.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
                     {
                         if (auto self = weak.get())
                         {
@@ -514,17 +510,64 @@ namespace winrt::Airloom::implementation
                             self->Send(command);
                         }
                     });
-                actions.Items().Append(retry);
+                actions.Items().Append(created.retry);
+                created.hide = MenuFlyoutItem();
+                created.hide.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
+                    {
+                        if (auto self = weak.get())
+                        {
+                            if (auto current = self->m_snapshot.FindDevice(id)) self->SetDeviceHidden(id, current->name, true);
+                        }
+                    });
+                actions.Items().Append(created.hide);
+                created.button.ContextFlyout(actions);
+                m_deviceRows.push_back(std::move(created));
+                found = std::prev(m_deviceRows.end());
             }
-            MenuFlyoutItem hide;
-            hide.Text(selected ? L"断开并隐藏设备" : L"隐藏设备");
-            hide.Click([weak = get_weak(), id = device.id, name = device.name](auto const&, auto const&)
-                { if (auto self = weak.get()) self->SetDeviceHidden(id, name, true); });
-            actions.Items().Append(hide);
-            card.ContextFlyout(actions);
-            DeviceCards().Children().Append(card);
+
+            auto& row = *found;
+            bool const selected = next.IsSelected(device.id);
+            row.button.BorderThickness(Thickness{m_highContrast ? 1.0 : 0.0});
+            row.button.BorderBrush(Brush(L"ControlOutlineBrush"));
+            row.button.Background(Brush(selected ? L"BrandSoftBrush" : L"AppCanvasBrush"));
+            row.button.IsEnabled(device.online || selected);
+            SetText(row.name, device.name);
+            row.name.Foreground(Brush(selected ? L"BrandBrush" : L"InkBrush"));
+            row.icon.Foreground(Brush(selected ? L"BrandBrush" : L"MutedBrush"));
+            hstring stateLabel = !device.online ? L"暂时离线" : L"可连接";
+            if (device.state == L"streaming") stateLabel = L"正在传输";
+            else if (device.state == L"connecting") stateLabel = L"正在连接…";
+            else if (device.state == L"reconnecting") stateLabel = L"正在重连…";
+            else if (device.state == L"auth_required") stateLabel = L"等待密码或配对码";
+            else if (device.state == L"error") stateLabel = L"连接失败 · 右键重试";
+            else if (selected) stateLabel = L"已选择";
+            else if (device.passwordRequired) stateLabel = L"需要密码";
+            SetText(row.detail, stateLabel);
+            row.detail.Foreground(Brush(m_highContrast && selected ? L"BrandBrush" :
+                device.state == L"streaming" ? L"AudioBrush" : device.state == L"error" ? L"DangerBrush" : L"MutedBrush"));
+            row.marker.Glyph(selected ? L"\uE73E" : L"\uE72E");
+            row.marker.Foreground(Brush(selected ? L"BrandBrush" : L"MutedBrush"));
+            // Hidden keeps the same marker slot for every state.
+            row.marker.Opacity(selected || device.passwordRequired ? 1.0 : 0.0);
+            row.retry.Visibility(selected && device.state != L"streaming" ? Visibility::Visible : Visibility::Collapsed);
+            row.hide.Text(selected ? L"断开并隐藏设备" : L"隐藏设备");
+            SetAccessibleName(row.button, device.name + (selected ? L"，已选择，" : L"，未选择，") + stateLabel);
+            ToolTipService::SetToolTip(row.button, box_value(!device.errorMessage.empty() ? device.errorMessage :
+                device.name + (device.model.empty() ? L"" : L" · " + device.model)));
+
+            // Preserve the same native Button and focus object across snapshots.
+            // Only insert/remove/move when the actual device identity list changes.
+            uint32_t current{};
+            if (!children.IndexOf(row.button, current)) children.InsertAt(position, row.button);
+            else if (current != position)
+            {
+                children.RemoveAt(current);
+                children.InsertAt(position, row.button);
+            }
+            ++position;
         }
-        DevicesEmptyState().Visibility(DeviceCards().Children().Size() == 0 ? Visibility::Visible : Visibility::Collapsed);
+        while (children.Size() > position) children.RemoveAtEnd();
+        DevicesEmptyState().Visibility(position == 0 ? Visibility::Visible : Visibility::Collapsed);
         m_devicesRendered = true;
         m_forceDeviceRender = false;
     }
@@ -556,11 +599,11 @@ namespace winrt::Airloom::implementation
         double const right = streaming ? next.rightLevel : 0.0;
         LeftMeter().Value(left);
         RightMeter().Value(right);
-        LeftDb().Text(Decibels(left));
-        RightDb().Text(Decibels(right));
-        SampleRateText().Text(SampleRateLabel(next.sampleRate));
-        ElapsedText().Text(streaming || next.elapsedSeconds > 0 ? DurationText(next.elapsedSeconds) : L"—");
-        PacketsText().Text(next.packetsSent > 0 ? to_hstring(next.packetsSent) : L"—");
+        SetText(LeftDb(), Decibels(left));
+        SetText(RightDb(), Decibels(right));
+        SetText(SampleRateText(), SampleRateLabel(next.sampleRate));
+        SetText(ElapsedText(), streaming || next.elapsedSeconds > 0 ? DurationText(next.elapsedSeconds) : L"—");
+        SetText(PacketsText(), to_hstring(next.packetsSent));
 
         auto const width = std::max(1.0, WaveformCanvas().ActualWidth());
         auto const height = std::max(1.0, WaveformCanvas().ActualHeight());
@@ -685,9 +728,30 @@ namespace winrt::Airloom::implementation
         if (m_rendering || !m_loaded || !m_volumeTimer) return;
         m_pendingVolume = std::clamp(args.NewValue() / 100.0, 0.0, 1.0);
         m_volumePending = true;
-        VolumeLabel().Text(to_hstring(static_cast<int>(std::round(args.NewValue()))) + L"%");
+        SetText(VolumeLabel(), to_hstring(static_cast<int>(std::round(args.NewValue()))) + L"%");
         m_volumeTimer.Stop();
         m_volumeTimer.Start();
+    }
+
+    void MainWindow::FlushVolume()
+    {
+        m_volumeTimer.Stop();
+        if (!m_volumePending || m_exiting) return;
+        auto command = MakeCommand(L"set_volume");
+        command.Insert(L"volume", JsonValue::CreateNumberValue(m_pendingVolume));
+        bool const accepted = Send(command);
+        m_volumePending = false;
+        m_volumeAwaitingAck = accepted;
+        m_volumeAckDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    }
+
+    void MainWindow::FinishVolumeInteraction()
+    {
+        if (!m_volumePointerDown) return;
+        m_volumePointerDown = false;
+        // Commit the last pointer position immediately; keyboard and automation
+        // changes still use the same debounce and acknowledgement path.
+        FlushVolume();
     }
 
     void MainWindow::OnMuteLocalChanged(IInspectable const&, RoutedEventArgs const&)
@@ -924,8 +988,8 @@ namespace winrt::Airloom::implementation
     {
         m_settingsOpen = visible;
         if (visible && !m_visibilityRendered) RenderDeviceVisibility(m_snapshot);
-        HomeScrollViewer().Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
-        SettingsScrollViewer().Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+        HomeView().Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
+        SettingsView().Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
         if (visible) SettingsBackButton().Focus(FocusState::Programmatic);
         else SettingsButton().Focus(FocusState::Programmatic);
         if (m_motionAllowed)
@@ -960,6 +1024,12 @@ namespace winrt::Airloom::implementation
     void MainWindow::RenderUpdate()
     {
         auto const update = m_updater.Snapshot();
+        if (update.exitRequested) { ExitNow(); return; }
+        if (m_updateRendered && update.state == m_lastUpdate.state && update.currentVersion == m_lastUpdate.currentVersion &&
+            update.availableVersion == m_lastUpdate.availableVersion && update.message == m_lastUpdate.message &&
+            update.progress == m_lastUpdate.progress) return;
+        m_lastUpdate = update;
+        m_updateRendered = true;
         CurrentVersionText().Text(L"当前版本 " + hstring(update.currentVersion));
         UpdateStatusText().Text(hstring(update.message));
         bool const checking = update.state == L"checking";
@@ -975,7 +1045,6 @@ namespace winrt::Airloom::implementation
         UpdateProgress().Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
         UpdateProgress().IsIndeterminate(checking || launching);
         UpdateProgress().Value(std::clamp(update.progress, 0.0, 1.0) * 100.0);
-        if (update.exitRequested) ExitNow();
     }
 
     void MainWindow::OnCheckUpdates(IInspectable const&, RoutedEventArgs const&)
@@ -994,6 +1063,25 @@ namespace winrt::Airloom::implementation
     {
         m_updater.Cancel();
         RenderUpdate();
+    }
+
+    void MainWindow::OnCopyDiagnostics(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_snapshot.diagnosticsJson.empty() || m_snapshot.diagnosticsJson == L"{}") return;
+        try
+        {
+            // The core exports a separate allowlisted diagnostics object. Never
+            // copy the raw snapshot, device identities, addresses or auth data.
+            Windows::ApplicationModel::DataTransfer::DataPackage package;
+            package.SetText(m_snapshot.diagnosticsJson);
+            Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(package);
+            Windows::ApplicationModel::DataTransfer::Clipboard::Flush();
+            DiagnosticsCopyStatus().Text(L"诊断信息已复制，可粘贴到问题反馈中。");
+        }
+        catch (hresult_error const&)
+        {
+            ShowLocalError(L"未能写入剪贴板，请稍后重试。");
+        }
     }
 
     void MainWindow::OnThemeChanged(IInspectable const&, SelectionChangedEventArgs const&)
@@ -1084,6 +1172,8 @@ namespace winrt::Airloom::implementation
     {
         if (m_exiting) return;
         m_exiting = true;
+        m_desktop.BeginExit();
+        m_updater.PrepareForExit();
         if (m_pollTimer) m_pollTimer.Stop();
         if (m_volumeTimer) m_volumeTimer.Stop();
         if (m_authDialog) m_authDialog.Hide();

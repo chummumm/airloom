@@ -33,9 +33,9 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-    <Link><SubSystem>$(UpdaterSubsystem)</SubSystem><AdditionalDependencies>shell32.lib;ole32.lib;advapi32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>$(UpdaterSubsystem)</SubSystem><AdditionalDependencies>user32.lib;shell32.lib;ole32.lib;advapi32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="$(UpdaterSource)" /></ItemGroup>
-  <ItemGroup><ClInclude Include="UpdateCommon.h" /><ClInclude Include="UpdatePolicy.h" /></ItemGroup>
+  <ItemGroup><ClInclude Include="UpdateCommon.h" /><ClInclude Include="UpdatePolicy.h" /><ClInclude Include="ExitProtocol.h" /><ClInclude Include="ApplicationExit.h" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

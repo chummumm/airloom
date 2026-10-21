@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "airloom-airplay"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "airloom-capture"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crossbeam-channel",
  "rubato",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "airloom-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "airloom-airplay",
  "airloom-capture",

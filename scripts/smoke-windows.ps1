@@ -11,6 +11,32 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class AirloomUiProbe {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+    public static string ReadClipboard() {
+        string value = null;
+        Exception failure = null;
+        var thread = new Thread(() => {
+            try { value = System.Windows.Forms.Clipboard.GetText(); }
+            catch (Exception error) { failure = error; }
+        });
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(3000)) throw new TimeoutException("Clipboard read timed out.");
+        if (failure != null) throw failure;
+        return value;
+    }
+}
+'@
 
 function Save-NativeScreenshot([string] $Destination) {
     $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -51,6 +77,101 @@ function Invoke-NativeButton([System.Windows.Automation.AutomationElement] $Butt
     $Pattern = $Button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     if ($null -eq $Pattern) { throw "Button '$($Button.Current.Name)' does not support InvokePattern." }
     ([System.Windows.Automation.InvokePattern] $Pattern).Invoke()
+}
+
+function Wait-NativeId([string] $Id) {
+    $Condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+    $ControlDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $Process.Refresh()
+        if ($Process.HasExited) { throw "Native UI exited while waiting for '$Id'." }
+        try {
+            $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+            $Control = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $Condition)
+            if ($null -ne $Control) { return $Control }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $ControlDeadline)
+    throw "Native automation ID '$Id' was not available within 10 seconds."
+}
+
+function Get-NativeLayout {
+    $Geometry = [ordered]@{}
+    foreach ($Id in @('DeviceRail', 'PageContent', 'SignalPanel', 'TransportPanel', 'VolumeSlider', 'VolumeValue')) {
+        $Control = Wait-NativeId $Id
+        $Rect = $Control.Current.BoundingRectangle
+        if ($Rect.IsEmpty -or $Rect.Width -le 0 -or $Rect.Height -le 0) { throw "Empty geometry for $Id." }
+        $Geometry[$Id] = [ordered]@{ x = $Rect.X; y = $Rect.Y; width = $Rect.Width; height = $Rect.Height }
+    }
+    return $Geometry
+}
+
+function Assert-StableLayout($Expected, $Actual, [string] $Context) {
+    foreach ($Id in $Expected.Keys) {
+        foreach ($Dimension in @('x', 'y', 'width', 'height')) {
+            $Delta = [Math]::Abs([double]$Expected[$Id][$Dimension] - [double]$Actual[$Id][$Dimension])
+            if ($Delta -gt 1.0) { throw "$Context moved $Id $Dimension by $Delta px." }
+        }
+    }
+}
+
+function Test-NativeVolumeLayout {
+    $Measurements = @()
+    $DragVerified = $false
+    foreach ($Size in @(@(880, 680), @(1100, 800), @(1600, 1000))) {
+        if (-not [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Size[0], $Size[1], 0x0004)) {
+            throw "Could not resize the real native window to $($Size[0]) x $($Size[1])."
+        }
+        Start-Sleep -Milliseconds 500
+        $Slider = Wait-NativeId 'VolumeSlider'
+        if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
+        $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+        $Baseline = $null
+        foreach ($Volume in @(0, 9, 10, 99, 100)) {
+            $Range.SetValue($Volume)
+            # Covers debounce, engine acknowledgement, and several UI polls.
+            Start-Sleep -Milliseconds 350
+            if ([Math]::Abs($Range.Current.Value - $Volume) -gt 0.01) {
+                throw "Volume snapped back after setting $Volume at $($Size[0]) px."
+            }
+            $Geometry = Get-NativeLayout
+            if ($null -eq $Baseline) { $Baseline = $Geometry }
+            else { Assert-StableLayout $Baseline $Geometry "Volume $Volume at $($Size[0]) px" }
+            $Measurements += [ordered]@{ window_width = $Size[0]; window_height = $Size[1]; volume = $Volume; bounds = $Geometry }
+        }
+        # Use real pointer input once, while the slider lies on the runner's
+        # actual display. Wide-window geometry can exceed that display.
+        $Rect = $Slider.Current.BoundingRectangle
+        $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        if (-not $DragVerified -and -not $Slider.Current.IsOffscreen -and
+            $Rect.Right -lt $Screen.Right -and $Rect.Bottom -lt $Screen.Bottom) {
+            $Range.SetValue(25)
+            Start-Sleep -Milliseconds 350
+            $Baseline = Get-NativeLayout
+            $Y = [int]($Rect.Y + $Rect.Height / 2)
+            $StartX = [int]($Rect.X + 12 + ($Rect.Width - 24) * 0.25)
+            $null = [AirloomUiProbe]::SetForegroundWindow($Process.MainWindowHandle)
+            $null = [AirloomUiProbe]::SetCursorPos($StartX, $Y)
+            [AirloomUiProbe]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+            try {
+                foreach ($Fraction in @(0.35, 0.45, 0.55, 0.65, 0.75)) {
+                    $X = [int]($Rect.X + 12 + ($Rect.Width - 24) * $Fraction)
+                    $null = [AirloomUiProbe]::SetCursorPos($X, $Y)
+                    Start-Sleep -Milliseconds 120
+                    Assert-StableLayout $Baseline (Get-NativeLayout) 'Pointer volume drag'
+                }
+            } finally { [AirloomUiProbe]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+            $DraggedValue = $Range.Current.Value
+            if ($DraggedValue -lt 60) { throw "Pointer drag did not change the real slider: $DraggedValue." }
+            Start-Sleep -Milliseconds 400
+            if ([Math]::Abs($Range.Current.Value - $DraggedValue) -gt 0.01) { throw 'Volume snapped back after releasing the pointer.' }
+            $DragVerified = $true
+        }
+    }
+    if (-not $DragVerified) { throw 'No real pointer volume drag could be verified on the native display.' }
+    $Range.SetValue(50)
+    return [ordered]@{ measurements = $Measurements; pointer_drag_verified = $DragVerified }
 }
 
 function Wait-NativeUpdateCheck {
@@ -108,6 +229,12 @@ try {
     if ($Process.MainWindowHandle -eq 0) { throw 'No native window appeared within 20 seconds.' }
     if ($Process.MainWindowTitle -ne 'Airloom') { throw "Unexpected startup window: $($Process.MainWindowTitle)" }
     Start-Sleep -Seconds 3
+    $VolumeProof = Test-NativeVolumeLayout
+    # Capture a fully visible compact window on the runner's actual desktop.
+    $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0,
+        [Math]::Min(1100, $Screen.Width), [Math]::Min(800, $Screen.Height), 0x0004)
+    Start-Sleep -Milliseconds 500
     $SettingsButton = Wait-NativeButton '设置'
     Save-NativeScreenshot (Join-Path $EvidencePath 'native-window.png')
     Invoke-NativeButton $SettingsButton
@@ -120,6 +247,14 @@ try {
     $null = Wait-NativeButton '检查更新' $false
     Start-Sleep -Milliseconds 400
     Save-NativeScreenshot (Join-Path $EvidencePath 'settings-window.png')
+    $CopyDiagnostics = Wait-NativeId 'CopyDiagnosticsButton'
+    Invoke-NativeButton $CopyDiagnostics
+    Start-Sleep -Milliseconds 250
+    $CopiedDiagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
+    if ($CopiedDiagnostics.schema_version -ne 1 -or -not $CopiedDiagnostics.app_version -or
+        $null -eq $CopiedDiagnostics.capture -or $null -eq $CopiedDiagnostics.receivers) {
+        throw 'Copied diagnostics did not contain the expected allowlisted schema.'
+    }
     Invoke-NativeButton $BackButton
     $null = Wait-NativeButton '设置'
     $Process.Refresh()
@@ -133,8 +268,12 @@ try {
         update_check_verified = $true
         update_status = $UpdateStatus
         returned_home = $true
-        note = 'Real UI launch from a clean extracted distribution; settings and the live GitHub metadata update check verified using UI Automation, then returned home. No installer was downloaded and no physical HomePod was connected.'
-    } | ConvertTo-Json
+        volume_layout_verified = $true
+        pointer_drag_verified = $VolumeProof.pointer_drag_verified
+        volume_measurements = $VolumeProof.measurements
+        diagnostics_copy_verified = $true
+        note = 'Real WinUI launch from the shipped archive; volume geometry verified at 880/1100/1600 pixels with 0/9/10/99/100 values and a real pointer drag. Settings, live GitHub update metadata, and diagnostics clipboard verified. No physical HomePod was connected.'
+    } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))
 } catch {

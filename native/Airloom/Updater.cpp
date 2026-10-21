@@ -90,7 +90,7 @@ namespace
         Require(TrustedHost(host), "Unexpected update host");
         std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
         if (parts.dwExtraInfoLength) path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-        InternetHandle session(WinHttpOpen(L"Airloom/0.2.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        InternetHandle session(WinHttpOpen(L"Airloom/0.2.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
         NetworkCheck(WinHttpSetTimeouts(session.value, 10000, 10000, 10000, 10000));
         InternetHandle connection(WinHttpConnect(session.value, host.c_str(), parts.nPort, 0));
@@ -281,6 +281,13 @@ namespace airloom::native
 
     UpdateService::~UpdateService()
     {
+        PrepareForExit();
+    }
+
+    void UpdateService::PrepareForExit() noexcept
+    {
+        // Stop this process's network/cache work. An accepted helper handoff is
+        // independent and must remain alive until this process has fully exited.
         m_state->stopped.store(true);
         m_state->cancelled.store(true);
     }
@@ -371,13 +378,29 @@ namespace airloom::native
             SetState(state, L"launching", L"校验通过，正在准备安装…");
             Handle parent(OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, GetCurrentProcessId()));
             Require(static_cast<bool>(parent), "Cannot prepare update handoff");
-            Require(StartHelper(helper, installer, application, *checksum, job.lock.value, parent.value), "Update helper did not accept the verified package");
+            Handle helperProcess;
+            Require(StartHelper(helper, installer, application, *checksum, job.lock.value, parent.value, &helperProcess), "Update helper did not accept the verified package");
             job.handedOff = true;
-            std::lock_guard lock(state->mutex);
-            state->snapshot.state = L"launching";
-            state->snapshot.message = L"校验通过，即将安装并重新打开 Airloom…";
-            state->snapshot.progress = 1;
-            state->snapshot.exitRequested = true;
+            {
+                std::lock_guard lock(state->mutex);
+                state->snapshot.state = L"launching";
+                state->snapshot.message = L"校验通过，正在停止音频并退出 Airloom，随后安装并重新打开…";
+                state->snapshot.progress = 1;
+                state->snapshot.exitRequested = true;
+            }
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(35);
+            while (!state->stopped.load())
+            {
+                if (WaitForSingleObject(helperProcess.value, 100) != WAIT_TIMEOUT
+                    || std::chrono::steady_clock::now() >= deadline)
+                {
+                    std::lock_guard lock(state->mutex);
+                    state->snapshot.exitRequested = false;
+                    state->snapshot.state = L"error";
+                    state->snapshot.message = L"应用未能完成退出，更新没有完成。请从托盘选择“退出 Airloom”后重新运行安装包。";
+                    break;
+                }
+            }
         });
     }
 

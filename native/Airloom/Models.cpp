@@ -127,6 +127,7 @@ namespace airloom::native
         result.captureMessage = Text(capture, L"message");
         result.captureSourceName = Text(capture, L"source_name");
         result.testToneActive = Boolean(json, L"test_tone_active");
+        result.diagnosticsJson = Object(json, L"diagnostics").Stringify();
         auto const metrics = Object(json, L"metrics");
         result.packetsSent = Counter(metrics, L"packets_sent");
         result.sampleRate = static_cast<uint32_t>(std::clamp(Number(metrics, L"sample_rate"), 0.0, 768000.0));

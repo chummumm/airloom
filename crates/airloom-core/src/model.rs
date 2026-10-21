@@ -99,6 +99,66 @@ impl Default for CaptureView {
     }
 }
 
+/// This is the only object the UI may copy for troubleshooting. Keep it
+/// separate from Snapshot: normal UI state contains names and identifiers.
+#[derive(Clone, Serialize)]
+pub struct Diagnostics {
+    pub schema_version: u8,
+    pub app_version: &'static str,
+    pub session_state: Phase,
+    pub volume_percent: u8,
+    pub mute_local: bool,
+    pub test_tone_active: bool,
+    pub capture: CaptureDiagnostics,
+    pub receivers: Vec<ReceiverDiagnostics>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct CaptureDiagnostics {
+    pub state: &'static str,
+    pub frames_received: u64,
+    pub chunks_received: u64,
+    pub last_packet_ms: Option<u64>,
+    pub silent_ms: u64,
+    pub level: Levels,
+    pub buffer_ms: Option<f32>,
+    pub dropped_frames: u64,
+    pub underrun_frames: u64,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ReceiverDiagnostics {
+    /// Position in the current selection, not a persistent device identity.
+    pub slot: usize,
+    pub state: Phase,
+    pub session: airloom_airplay::SenderDiagnostics,
+}
+
+impl Diagnostics {
+    pub fn from_snapshot(snapshot: &Snapshot, receivers: Vec<ReceiverDiagnostics>) -> Self {
+        Self {
+            schema_version: 1,
+            app_version: env!("CARGO_PKG_VERSION"),
+            session_state: snapshot.state,
+            volume_percent: (snapshot.volume.clamp(0.0, 1.0) * 100.0).round() as u8,
+            mute_local: snapshot.mute_local,
+            test_tone_active: snapshot.test_tone_active,
+            capture: CaptureDiagnostics {
+                state: snapshot.capture.state,
+                frames_received: snapshot.capture.frames_received,
+                chunks_received: snapshot.capture.chunks_received,
+                last_packet_ms: snapshot.capture.last_packet_ms,
+                silent_ms: snapshot.capture.silent_ms,
+                level: snapshot.capture.level.clone(),
+                buffer_ms: snapshot.metrics.buffer_ms,
+                dropped_frames: snapshot.metrics.dropped_frames,
+                underrun_frames: snapshot.metrics.underrun_frames,
+            },
+            receivers,
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct Snapshot {
     pub version: u8,
@@ -121,11 +181,12 @@ pub struct Snapshot {
     pub capture: CaptureView,
     pub test_tone_active: bool,
     pub test_tone_remaining_ms: u32,
+    pub diagnostics: Option<Diagnostics>,
 }
 
 impl Default for Snapshot {
     fn default() -> Self {
-        Self {
+        let mut snapshot = Self {
             version: 1,
             revision: 0,
             state: Phase::Idle,
@@ -146,7 +207,10 @@ impl Default for Snapshot {
             capture: CaptureView::default(),
             test_tone_active: false,
             test_tone_remaining_ms: 0,
-        }
+            diagnostics: None,
+        };
+        snapshot.diagnostics = Some(Diagnostics::from_snapshot(&snapshot, Vec::new()));
+        snapshot
     }
 }
 
@@ -300,6 +364,62 @@ mod tests {
         assert!(json.get("password").is_none());
         assert!(json.get("credentials").is_none());
         assert!(json["auth"].is_null());
+    }
+
+    #[test]
+    fn copied_diagnostics_include_signal_and_session_progress_but_no_ui_identity() {
+        let mut snapshot = Snapshot {
+            selected_device_id: "private-device-identity".into(),
+            selected_device_ids: vec!["private-device-identity".into()],
+            selected_source_id: "private-endpoint-identity".into(),
+            status_message: "private receiver response".into(),
+            volume: 0.37,
+            state: Phase::Streaming,
+            auth: Some(AuthPrompt {
+                request_id: 7,
+                kind: "password",
+                device_id: "private-device-identity".into(),
+                device_name: "private room name".into(),
+                message: "private authentication text".into(),
+            }),
+            ..Snapshot::default()
+        };
+        snapshot.capture.source_id = "private-endpoint-identity".into();
+        snapshot.capture.source_name = "private microphone name".into();
+        snapshot.capture.message = "private capture error".into();
+        snapshot.capture.state = "signal";
+        snapshot.capture.frames_received = 44_100;
+        snapshot.capture.level.left = 0.25;
+        let mut session = airloom_airplay::SenderDiagnostics::default();
+        session.transport.non_silent_audio_packets_sent = 125;
+        let diagnostic = Diagnostics::from_snapshot(
+            &snapshot,
+            vec![ReceiverDiagnostics {
+                slot: 1,
+                state: Phase::Streaming,
+                session,
+            }],
+        );
+        let json = serde_json::to_value(diagnostic).unwrap();
+        assert_eq!(json["volume_percent"], 37);
+        assert_eq!(json["capture"]["frames_received"], 44_100);
+        assert_eq!(
+            json["receivers"][0]["session"]["transport"]["non_silent_audio_packets_sent"],
+            125
+        );
+        let text = json.to_string();
+        for excluded in [
+            "private",
+            "password",
+            "device_id",
+            "source_name",
+            "request_id",
+        ] {
+            assert!(
+                !text.contains(excluded),
+                "unexpected export field: {excluded}"
+            );
+        }
     }
 
     #[test]

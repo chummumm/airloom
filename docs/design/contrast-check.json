@@ -1,0 +1,186 @@
+{
+  "method": "WCAG sRGB luminance formula on opaque XAML resource pairs; not a rendered accessibility audit",
+  "minimum_ratio": 5.5,
+  "pairs": [
+    {
+      "theme": "Default",
+      "foreground": "InkBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 19.6
+    },
+    {
+      "theme": "Default",
+      "foreground": "InkBrush",
+      "background": "PanelBrush",
+      "ratio": 17.63
+    },
+    {
+      "theme": "Default",
+      "foreground": "InkBrush",
+      "background": "InsetBrush",
+      "ratio": 13.4
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 10.13
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "PanelBrush",
+      "ratio": 9.11
+    },
+    {
+      "theme": "Default",
+      "foreground": "MutedBrush",
+      "background": "InsetBrush",
+      "ratio": 6.92
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 12.41
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "PanelBrush",
+      "ratio": 11.16
+    },
+    {
+      "theme": "Default",
+      "foreground": "AudioBrush",
+      "background": "InsetBrush",
+      "ratio": 8.48
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 12.06
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "PanelBrush",
+      "ratio": 10.84
+    },
+    {
+      "theme": "Default",
+      "foreground": "WarningBrush",
+      "background": "InsetBrush",
+      "ratio": 8.24
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 10.05
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "PanelBrush",
+      "ratio": 9.04
+    },
+    {
+      "theme": "Default",
+      "foreground": "DangerBrush",
+      "background": "InsetBrush",
+      "ratio": 6.87
+    },
+    {
+      "theme": "Light",
+      "foreground": "InkBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 16.13
+    },
+    {
+      "theme": "Light",
+      "foreground": "InkBrush",
+      "background": "PanelBrush",
+      "ratio": 17.58
+    },
+    {
+      "theme": "Light",
+      "foreground": "InkBrush",
+      "background": "InsetBrush",
+      "ratio": 15.15
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 6.23
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "PanelBrush",
+      "ratio": 6.79
+    },
+    {
+      "theme": "Light",
+      "foreground": "MutedBrush",
+      "background": "InsetBrush",
+      "ratio": 5.85
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 5.86
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "PanelBrush",
+      "ratio": 6.39
+    },
+    {
+      "theme": "Light",
+      "foreground": "AudioBrush",
+      "background": "InsetBrush",
+      "ratio": 5.5
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 6.16
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "PanelBrush",
+      "ratio": 6.71
+    },
+    {
+      "theme": "Light",
+      "foreground": "WarningBrush",
+      "background": "InsetBrush",
+      "ratio": 5.78
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "AppCanvasBrush",
+      "ratio": 6.0
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "PanelBrush",
+      "ratio": 6.54
+    },
+    {
+      "theme": "Light",
+      "foreground": "DangerBrush",
+      "background": "InsetBrush",
+      "ratio": 5.63
+    }
+  ]
+}

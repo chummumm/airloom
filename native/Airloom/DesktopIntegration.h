@@ -1,11 +1,12 @@
 #pragma once
 
 #include "pch.h"
+#include "../Updater/ExitProtocol.h"
 
 namespace airloom::native
 {
     inline constexpr UINT ShowWindowMessage = WM_APP + 43;
-    inline constexpr wchar_t WindowIdentity[] = L"Airloom.MainWindow.v1";
+    inline constexpr auto& WindowIdentity = airloom::updates::WindowIdentity;
 
     class DesktopIntegration final
     {
@@ -17,6 +18,7 @@ namespace airloom::native
 
         bool Attach(HWND window, std::function<void()> show, std::function<void()> exit);
         void Detach() noexcept;
+        void BeginExit() noexcept { m_exitPending = true; }
         void Show() const;
         void Hide();
         void SetTooltip(winrt::hstring const& text);
@@ -27,13 +29,16 @@ namespace airloom::native
             LPARAM lParam, UINT_PTR subclassId, DWORD_PTR instance);
         bool AddIcon();
         void ShowMenu();
+        void RequestExit();
 
         HWND m_window{};
         HICON m_icon{};
         NOTIFYICONDATAW m_data{};
         UINT m_taskbarCreated{};
+        UINT m_exitRequestMessage{};
         bool m_added{};
         bool m_balloonShown{};
+        bool m_exitPending{};
         std::function<void()> m_show;
         std::function<void()> m_exit;
     };

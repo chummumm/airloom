@@ -181,6 +181,7 @@ struct AudioOffer {
     control: SocketAddr,
     timing: SocketAddr,
     event_ack: oneshot::Receiver<()>,
+    peers_ready: oneshot::Receiver<()>,
     ptp_clock_id: Option<u64>,
 }
 #[derive(Default, Debug)]
@@ -229,6 +230,15 @@ async fn start_receiver_on(
     require_digest: bool,
     max_attempts: usize,
 ) -> Receiver {
+    start_receiver_with_info(local, password, require_digest, max_attempts, None).await
+}
+async fn start_receiver_with_info(
+    local: IpAddr,
+    password: &str,
+    require_digest: bool,
+    max_attempts: usize,
+    receiver_info: Option<Vec<u8>>,
+) -> Receiver {
     let listener = TcpListener::bind(SocketAddr::new(local, 0)).await.unwrap();
     let events = TcpListener::bind(SocketAddr::new(local, 0)).await.unwrap();
     let data = UdpSocket::bind(SocketAddr::new(local, 0)).await.unwrap();
@@ -247,7 +257,13 @@ async fn start_receiver_on(
                 .unwrap()
                 .unwrap();
             let mut wire = Wire::new(stream);
-            info(&mut wire).await;
+            if let Some(body) = &receiver_info {
+                let message = request(&mut wire).await;
+                assert!(message.0.starts_with("GET /info "));
+                reply(&mut wire, &message, 200, body, "").await;
+            } else {
+                info(&mut wire).await;
+            }
             let Some(shared) = server_srp(&mut wire, &password, true).await else {
                 report.auth_failures += 1;
                 continue;
@@ -378,13 +394,26 @@ async fn serve_media(
             crypto::derive(&shared, b"Events-Salt", b"Events-Read-Encryption-Key"),
             crypto::derive(&shared, b"Events-Salt", b"Events-Write-Encryption-Key"),
         );
-        event
-            .write(b"POST /event RTSP/1.0\r\nCSeq: 77\r\nContent-Length: 0\r\n\r\n")
-            .await
-            .unwrap();
-        let ack = request(&mut event).await;
-        assert!(ack.0.starts_with("RTSP/1.0 200"));
-        assert_eq!(ack.1["cseq"], "77");
+        // pyatv's EventChannel and the independently implemented MA receiver
+        // command channel preserve the request's protocol and delimit an empty
+        // reply. Exercise both forms, not just the sender's historical RTSP path.
+        for (protocol, sequence) in [("RTSP/1.0", 77), ("HTTP/1.1", 78)] {
+            event
+                .write(
+                    format!(
+                        "POST /event {protocol}\r\nCSeq: {sequence}\r\nContent-Length: 0\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let ack = request(&mut event).await;
+            assert_eq!(ack.0, format!("{protocol} 200 OK"));
+            assert_eq!(ack.1["cseq"], sequence.to_string());
+            assert_eq!(ack.1["content-length"], "0");
+            assert_eq!(ack.1["audio-latency"], "0");
+            assert!(ack.2.is_empty());
+        }
         event_ack_tx.send(()).ok();
         let _ = close_event.await;
         true
@@ -428,12 +457,15 @@ async fn serve_media(
         "",
     )
     .await;
+    let (peers_ready, peers_observed) = oneshot::channel();
+    let mut peers_ready = Some(peers_ready);
     offer
         .send(AudioOffer {
             key,
             control,
             timing,
             event_ack,
+            peers_ready: peers_observed,
             ptp_clock_id,
         })
         .ok();
@@ -445,7 +477,18 @@ async fn serve_media(
                 .push(String::from_utf8(message.2.clone()).unwrap());
         }
         let teardown = message.0.starts_with("TEARDOWN ");
-        reply(&mut wire, &message, 200, &[], "").await;
+        let body = if message.0.starts_with("POST /feedback ") {
+            // An empty receiver stream list is legal even during playback.
+            plist([("streams", Value::Array(Vec::new()))])
+        } else {
+            Vec::new()
+        };
+        reply(&mut wire, &message, 200, &body, "").await;
+        if message.0.starts_with("SETPEERS ") {
+            if let Some(ready) = peers_ready.take() {
+                ready.send(()).ok();
+            }
+        }
         if teardown {
             break;
         }
@@ -539,6 +582,27 @@ async fn password_digest_encrypted_stream_events_ntp_and_retransmission() {
     assert_eq!(metrics.packets_sent, 3);
     assert_eq!(metrics.retransmissions_sent, 1);
     assert_eq!(metrics.timing_exchanges, 1);
+    let diagnostic = sender.diagnostics();
+    assert_eq!(diagnostic.transport.non_silent_audio_packets_sent, 3);
+    assert_eq!(diagnostic.transport.sync_packets_sent, 1);
+    assert_eq!(diagnostic.transport.control_packets_received, 1);
+    assert_eq!(diagnostic.transport.event_requests, 2);
+    assert_eq!(diagnostic.transport.event_responses, 2);
+    assert_eq!(diagnostic.stream.receiver_latency_min_frames, Some(11025));
+    assert_eq!(diagnostic.stream.receiver_latency_max_frames, Some(88200));
+    assert!(diagnostic.transport.last_audio_peak_dbfs.unwrap() > -10.0);
+    timeout(Duration::from_secs(3), async {
+        while sender.diagnostics().transport.feedback_responses == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let diagnostic = sender.diagnostics();
+    assert_eq!(diagnostic.transport.feedback_last_status, Some(200));
+    assert_eq!(diagnostic.transport.feedback_reported_streams, Some(0));
+    assert!(diagnostic.transport.feedback_last_response_age_ms.unwrap() < 1000);
+    assert!(diagnostic.last_failure_stage.is_none());
     sender.stop().await.unwrap();
     let report = receiver.task.await.unwrap();
     assert!(report.digest_verified && report.event_ack);
@@ -572,42 +636,107 @@ fn decode_uncompressed_stereo_frame(payload: &[u8]) -> Vec<i16> {
 async fn ptp_encrypted_nonzero_audio_has_a_valid_receiver_playback_anchor() {
     use std::sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     };
     let remote: IpAddr = "127.0.0.20".parse().unwrap();
     let event = UdpSocket::bind(SocketAddr::new(remote, 319)).await.unwrap();
     let general = UdpSocket::bind(SocketAddr::new(remote, 320)).await.unwrap();
     let observed = Arc::new(AtomicU64::new(0));
     let observed_clock = observed.clone();
+    let observed_time = Arc::new(Mutex::new(None));
+    let clock_time = observed_time.clone();
     let clock_receiver = tokio::spawn(async move {
         let mut event_buffer = [0; 2048];
         let mut general_buffer = [0; 2048];
+        let mut pending_sync = BTreeMap::new();
+        let mut pending_followup = BTreeMap::new();
+        let mut announced_clock = None;
         loop {
             tokio::select! {
                 received = event.recv_from(&mut event_buffer) => {
                     let (size, address) = received.unwrap();
                     if event_buffer[0] & 15 != 0 { continue; }
                     assert_eq!(size, 44);
-                    assert_eq!(event_buffer[1], 2);
-                    observed_clock.store(u64::from_be_bytes(event_buffer[20..28].try_into().unwrap()), Ordering::Release);
-                    // A receiver asks for a real delay exchange. Construct this
-                    // PTP request without the sender's packet builder.
-                    let mut delay = [0u8; 44];
-                    delay[0] = 0x11;
-                    delay[1] = 2;
-                    delay[2..4].copy_from_slice(&44u16.to_be_bytes());
-                    delay[6..8].copy_from_slice(&0x0400u16.to_be_bytes());
-                    delay[20..28].copy_from_slice(&0x8899aabbccddeeffu64.to_be_bytes());
-                    delay[29] = 1;
-                    delay[30..32].copy_from_slice(&event_buffer[30..32]);
-                    delay[32] = 1;
-                    event.send_to(&delay, address).await.unwrap();
+                    assert_eq!(&event_buffer[..2], &[0x10, 2]);
+                    assert_eq!(&event_buffer[6..8], &[0x06, 0x08]);
+                    assert_eq!(&event_buffer[28..30], &[0x80, 0x05]);
+                    assert_eq!(event_buffer[32], 0);
+                    let identity = u64::from_be_bytes(event_buffer[20..28].try_into().unwrap());
+                    observed_clock.store(identity, Ordering::Release);
+                    pending_sync.insert(u16::from_be_bytes(event_buffer[30..32].try_into().unwrap()), (address, identity));
                 }
                 received = general.recv_from(&mut general_buffer) => {
                     let (size, _) = received.unwrap();
                     assert!(size >= 34);
                     assert_eq!(u16::from_be_bytes([general_buffer[2], general_buffer[3]]) as usize, size);
+                    match general_buffer[0] & 15 {
+                        11 => {
+                            // IEEE1588 PATH_TRACE carries the active grandmaster;
+                            // Apple-profile senders include it in their Announce.
+                            assert_eq!(size, 76);
+                            assert_eq!(&general_buffer[..2], &[0x1b, 2]);
+                            assert_eq!(&general_buffer[6..8], &[0x04, 0x08]);
+                            assert_eq!(&general_buffer[28..30], &[0x80, 0x05]);
+                            assert_eq!(&general_buffer[64..68], &[0, 8, 0, 8]);
+                            assert_eq!(&general_buffer[68..76], &general_buffer[53..61]);
+                            announced_clock = Some(u64::from_be_bytes(general_buffer[53..61].try_into().unwrap()));
+                        }
+                        8 => {
+                            // Independent receive contract from nqptp's IEEE802.1AS
+                            // Table11-11 parser and Apple clock-ID offset86. Primary:
+                            // music-assistant/airplay-cli@1701bc25e9d303b42532569f624b64c0d0afb1f6
+                            // src/ap2_ptp.c; mikebrady/nqptp/nqptp-message-handlers.c.
+                            assert_eq!(size, 96, "bare IEEE1588 FollowUp is insufficient for this profile");
+                            assert_eq!(&general_buffer[..2], &[0x18, 2]);
+                            assert_eq!(&general_buffer[6..8], &[0x04, 0x08]);
+                            assert_eq!(&general_buffer[28..30], &[0x80, 0x05]);
+                            assert_eq!(&general_buffer[44..54], &[0, 3, 0, 28, 0, 0x80, 0xc2, 0, 0, 1]);
+                            assert_eq!(&general_buffer[76..86], &[0, 3, 0, 16, 0, 0x0d, 0x93, 0, 0, 4]);
+                            assert_eq!(&general_buffer[86..94], &general_buffer[20..28]);
+                            assert_eq!(&general_buffer[94..96], &[0, 0]);
+                            let seconds = general_buffer[34..40].iter().fold(0u64, |n, b| (n << 8) | *b as u64);
+                            let nanos = u32::from_be_bytes(general_buffer[40..44].try_into().unwrap());
+                            assert!(nanos < 1_000_000_000);
+                            let sequence = u16::from_be_bytes(general_buffer[30..32].try_into().unwrap());
+                            let identity = u64::from_be_bytes(general_buffer[20..28].try_into().unwrap());
+                            pending_followup.insert(sequence, (seconds * 1_000_000_000 + nanos as u64, std::time::Instant::now(), identity));
+                        }
+                        _ => {}
+                    }
                 }
+            }
+            // UDP319 and UDP320 are independent receive queues. Pair by sequence
+            // instead of assuming select! observes those queues in wire order.
+            let matched: Vec<_> = pending_sync
+                .keys()
+                .filter(|sequence| pending_followup.contains_key(sequence))
+                .copied()
+                .collect();
+            for sequence in matched {
+                let (address, identity) = pending_sync.remove(&sequence).unwrap();
+                let (nanos, received_at, follow_identity) =
+                    pending_followup.remove(&sequence).unwrap();
+                assert_eq!(identity, follow_identity);
+                if announced_clock != Some(identity) {
+                    continue;
+                }
+                *clock_time.lock().unwrap() = Some((nanos, received_at));
+                // Only accept the clock after complete matching messages.
+                let mut delay = [0u8; 44];
+                delay[0] = 0x11;
+                delay[1] = 2;
+                delay[2..4].copy_from_slice(&44u16.to_be_bytes());
+                delay[6..8].copy_from_slice(&0x0408u16.to_be_bytes());
+                delay[20..28].copy_from_slice(&0x8899aabbccddeeffu64.to_be_bytes());
+                delay[28..30].copy_from_slice(&0x8005u16.to_be_bytes());
+                delay[30..32].copy_from_slice(&sequence.to_be_bytes());
+                event.send_to(&delay, address).await.unwrap();
+            }
+            while pending_sync.len() > 16 {
+                pending_sync.pop_first();
+            }
+            while pending_followup.len() > 16 {
+                pending_followup.pop_first();
             }
         }
     });
@@ -663,6 +792,13 @@ async fn ptp_encrypted_nonzero_audio_has_a_valid_receiver_playback_anchor() {
     .unwrap();
     assert_eq!(size, 28);
     assert_eq!(&buffer[..4], &[0x90, 0xd7, 0, 6]);
+    let anchor_ns = u64::from_be_bytes(buffer[8..16].try_into().unwrap());
+    let (clock_ns, observed_at) = observed_time.lock().unwrap().unwrap();
+    let expected_ns = clock_ns + observed_at.elapsed().as_nanos() as u64;
+    assert!(
+        anchor_ns.abs_diff(expected_ns) < 500_000_000,
+        "audio anchor must use the clock actually accepted by the receiver"
+    );
     assert_eq!(
         u64::from_be_bytes(buffer[20..28].try_into().unwrap()),
         clock_id
@@ -681,6 +817,153 @@ async fn ptp_encrypted_nonzero_audio_has_a_valid_receiver_playback_anchor() {
     sender.stop().await.unwrap();
     let report = receiver.task.await.unwrap();
     assert!(report.event_ack);
+    clock_receiver.abort();
+    let _ = clock_receiver.await;
+    // Keep both real sessions on the same runtime, as the application's shared
+    // timing hub does; separate #[tokio::test] runtimes would share127.0.0.1
+    // until the earlier runtime destroyed its sockets underneath the other.
+    followed_receiver_starts_its_clock_only_after_session_and_peers_are_established().await;
+}
+
+async fn followed_receiver_starts_its_clock_only_after_session_and_peers_are_established() {
+    // MA's hardware report (DESIGN.md at commit
+    // 1701bc25e9d303b42532569f624b64c0d0afb1f6, "Followed receivers")
+    // explicitly permits SETUP naming our clock before the HomePod announces.
+    // The receiver below refuses to emit any clock until SETPEERS has arrived.
+    const RECEIVER_CLOCK: u64 = 0x8877_6655_4433_2211;
+    const RECEIVER_EPOCH_NS: u64 = 10_000_000_000_000;
+    let remote: IpAddr = "127.0.0.23".parse().unwrap();
+    let event = UdpSocket::bind(SocketAddr::new(remote, 319)).await.unwrap();
+    let general = UdpSocket::bind(SocketAddr::new(remote, 320)).await.unwrap();
+    let Receiver {
+        mut device,
+        data,
+        control,
+        offer,
+        task,
+    } = start_receiver_with_info(
+        remote,
+        PASSWORD,
+        false,
+        1,
+        Some(plist([
+            ("model", Value::String("AudioAccessory5,1".into())),
+            ("osVersion", Value::String("27.0".into())),
+            ("sourceVersion", Value::String("980.2".into())),
+            ("features", integer((1u64 << 41) | (1u64 << 48))),
+        ])),
+    )
+    .await;
+    // The discovered record intentionally omits model and OS version. The
+    // runtime /info response must complete clock-role selection.
+    device.txt.insert("igl".into(), "1".into());
+    let (accepted, negotiated) = oneshot::channel();
+    let clock_start = std::time::Instant::now();
+    let clock_receiver = tokio::spawn(async move {
+        let offer = offer.await.unwrap();
+        offer.peers_ready.await.unwrap();
+        offer.event_ack.await.unwrap();
+        accepted
+            .send((offer.key, offer.ptp_clock_id.unwrap()))
+            .unwrap();
+        let destination = offer.timing.ip();
+        let mut ticks = tokio::time::interval(Duration::from_millis(125));
+        for sequence in 1..=u16::MAX {
+            ticks.tick().await;
+            let header = |kind: u8, size: usize, flags: u16| {
+                let mut packet = vec![0; size];
+                packet[0] = 0x10 | kind;
+                packet[1] = 2;
+                packet[2..4].copy_from_slice(&(size as u16).to_be_bytes());
+                packet[6..8].copy_from_slice(&flags.to_be_bytes());
+                packet[20..28].copy_from_slice(&RECEIVER_CLOCK.to_be_bytes());
+                packet[28..30].copy_from_slice(&0x8005u16.to_be_bytes());
+                packet[30..32].copy_from_slice(&sequence.to_be_bytes());
+                packet[33] = (-3i8) as u8;
+                packet
+            };
+            if sequence % 8 == 1 {
+                let mut announce = header(11, 76, 0x0408);
+                announce[33] = 0;
+                announce[47] = 248;
+                announce[48] = 248;
+                announce[49] = 0xfe;
+                announce[50..52].copy_from_slice(&0xffffu16.to_be_bytes());
+                announce[52] = 248;
+                announce[53..61].copy_from_slice(&RECEIVER_CLOCK.to_be_bytes());
+                announce[63] = 0xa0;
+                announce[64..68].copy_from_slice(&[0, 8, 0, 8]);
+                announce[68..76].copy_from_slice(&RECEIVER_CLOCK.to_be_bytes());
+                general
+                    .send_to(&announce, SocketAddr::new(destination, 320))
+                    .await
+                    .unwrap();
+            }
+            let sync = header(0, 44, 0x0608);
+            event
+                .send_to(&sync, SocketAddr::new(destination, 319))
+                .await
+                .unwrap();
+            let mut follow = header(8, 96, 0x0408);
+            let now = RECEIVER_EPOCH_NS + clock_start.elapsed().as_nanos() as u64;
+            follow[34..40].copy_from_slice(&(now / 1_000_000_000).to_be_bytes()[2..]);
+            follow[40..44].copy_from_slice(&((now % 1_000_000_000) as u32).to_be_bytes());
+            follow[44..54].copy_from_slice(&[0, 3, 0, 28, 0, 0x80, 0xc2, 0, 0, 1]);
+            follow[76..86].copy_from_slice(&[0, 3, 0, 16, 0, 0x0d, 0x93, 0, 0, 4]);
+            follow[86..94].copy_from_slice(&RECEIVER_CLOCK.to_be_bytes());
+            general
+                .send_to(&follow, SocketAddr::new(destination, 320))
+                .await
+                .unwrap();
+        }
+    });
+    let mut config = options(PASSWORD);
+    config.timing = TimingMode::Auto;
+    let mut sender = timeout(Duration::from_secs(6), Sender::connect(device, config))
+        .await
+        .unwrap()
+        .unwrap();
+    let (key, setup_clock) = negotiated.await.unwrap();
+    assert_ne!(
+        setup_clock, RECEIVER_CLOCK,
+        "receiver has not announced during SETUP"
+    );
+    let pcm = vec![12345; FRAMES_PER_PACKET * CHANNELS];
+    sender.send_pcm(&pcm).await.unwrap();
+    let mut buffer = [0u8; 2048];
+    let (size, _) = timeout(Duration::from_secs(1), data.recv_from(&mut buffer))
+        .await
+        .unwrap()
+        .unwrap();
+    let nonce: [u8; 8] = buffer[size - 8..size].try_into().unwrap();
+    let plain = crypto::open(
+        &key,
+        &crypto::named_nonce(&nonce),
+        &buffer[4..12],
+        &buffer[12..size - 8],
+    )
+    .unwrap();
+    assert_eq!(decode_uncompressed_stereo_frame(&plain), pcm);
+    let (size, _) = timeout(Duration::from_secs(1), control.recv_from(&mut buffer))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(size, 28);
+    assert_eq!(
+        u64::from_be_bytes(buffer[20..28].try_into().unwrap()),
+        RECEIVER_CLOCK,
+        "first audio announce must use the subsequently learned receiver clock"
+    );
+    let anchor_ns = u64::from_be_bytes(buffer[8..16].try_into().unwrap());
+    let expected_ns = RECEIVER_EPOCH_NS + clock_start.elapsed().as_nanos() as u64;
+    assert!(anchor_ns.abs_diff(expected_ns) < 100_000_000);
+    let diagnostic = sender.diagnostics();
+    assert_eq!(diagnostic.timing.role, "receiver");
+    assert!(diagnostic.timing.ready);
+    assert!(diagnostic.timing.incoming_sync >= 3);
+    assert_eq!(diagnostic.receiver.os_version.as_deref(), Some("27.0"));
+    sender.stop().await.unwrap();
+    assert!(task.await.unwrap().event_ack);
     clock_receiver.abort();
     let _ = clock_receiver.await;
 }

@@ -9,75 +9,112 @@
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="AppCanvasBrush" Color="#A9161720" />
-                    <SolidColorBrush x:Key="PanelBrush" Color="#D421232E" />
-                    <SolidColorBrush x:Key="InsetBrush" Color="#B7181A24" />
-                    <SolidColorBrush x:Key="HairlineBrush" Color="#15FFFFFF" />
-                    <SolidColorBrush x:Key="BrandBrush" Color="#BFB1FF" />
-                    <SolidColorBrush x:Key="BrandSoftBrush" Color="#1FC5B9FF" />
-                    <SolidColorBrush x:Key="AudioBrush" Color="#8DE1CF" />
-                    <SolidColorBrush x:Key="AudioSoftBrush" Color="#188DE1CF" />
-                    <SolidColorBrush x:Key="MutedBrush" Color="#A2A5B8" />
-                    <SolidColorBrush x:Key="SpeakerBodyBrush" Color="#333540" />
-                    <SolidColorBrush x:Key="SpeakerTopBrush" Color="#494B59" />
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8067DE" />
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#927BE6" />
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#A28FEB" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="White" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#E6FFFFFF" />
+                    <SolidColorBrush x:Key="AppCanvasBrush" Color="#000000" />
+                    <SolidColorBrush x:Key="PanelBrush" Color="#111111" />
+                    <SolidColorBrush x:Key="InsetBrush" Color="#2A2A2A" />
+                    <SolidColorBrush x:Key="HairlineBrush" Color="#242424" />
+                    <SolidColorBrush x:Key="InkBrush" Color="#F7F7F7" />
+                    <SolidColorBrush x:Key="MutedBrush" Color="#B4B4B4" />
+                    <SolidColorBrush x:Key="BrandBrush" Color="#F7F7F7" />
+                    <SolidColorBrush x:Key="BrandSoftBrush" Color="#242424" />
+                    <SolidColorBrush x:Key="AudioBrush" Color="#7AD9B4" />
+                    <SolidColorBrush x:Key="AudioSoftBrush" Color="#172A23" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="#E8BE76" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#FF9696" />
+                    <SolidColorBrush x:Key="PrimaryActionBrush" Color="#F7F7F7" />
+                    <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="#111111" />
+                    <SolidColorBrush x:Key="ControlOutlineBrush" Color="#555555" />
+                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#F7F7F7" />
+                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#DDDDDD" />
+                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#C7C7C7" />
+                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#111111" />
+                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#333333" />
+                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#F7F7F7" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DDDDDD" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C7C7C7" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#F7F7F7" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="AppCanvasBrush" Color="#BAF5F5FA" />
-                    <SolidColorBrush x:Key="PanelBrush" Color="#EDFFFFFF" />
-                    <SolidColorBrush x:Key="InsetBrush" Color="#E8F5F5FA" />
-                    <SolidColorBrush x:Key="HairlineBrush" Color="#140E142D" />
-                    <SolidColorBrush x:Key="BrandBrush" Color="#6A53CC" />
-                    <SolidColorBrush x:Key="BrandSoftBrush" Color="#116A53CC" />
-                    <SolidColorBrush x:Key="AudioBrush" Color="#127B68" />
-                    <SolidColorBrush x:Key="AudioSoftBrush" Color="#10127B68" />
-                    <SolidColorBrush x:Key="MutedBrush" Color="#686B80" />
-                    <SolidColorBrush x:Key="SpeakerBodyBrush" Color="#E1DFEB" />
-                    <SolidColorBrush x:Key="SpeakerTopBrush" Color="#C7C3D8" />
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8067DE" />
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#927BE6" />
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#A28FEB" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="White" />
-                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#E6FFFFFF" />
+                    <SolidColorBrush x:Key="AppCanvasBrush" Color="#F5F5F5" />
+                    <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="InsetBrush" Color="#EEEEEE" />
+                    <SolidColorBrush x:Key="HairlineBrush" Color="#E4E4E4" />
+                    <SolidColorBrush x:Key="InkBrush" Color="#191919" />
+                    <SolidColorBrush x:Key="MutedBrush" Color="#5B5B5B" />
+                    <SolidColorBrush x:Key="BrandBrush" Color="#191919" />
+                    <SolidColorBrush x:Key="BrandSoftBrush" Color="#E8E8E8" />
+                    <SolidColorBrush x:Key="AudioBrush" Color="#176C4D" />
+                    <SolidColorBrush x:Key="AudioSoftBrush" Color="#E5F1EA" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="#80520A" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#B3261E" />
+                    <SolidColorBrush x:Key="PrimaryActionBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ControlOutlineBrush" Color="#B7B7B7" />
+                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#393939" />
+                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#505050" />
+                    <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#F0F0F0" />
+                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#202020" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#393939" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#505050" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#202020" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="AppCanvasBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="PanelBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="InsetBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="HairlineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-                    <SolidColorBrush x:Key="BrandBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="BrandSoftBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="InkBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="MutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="BrandBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="BrandSoftBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="AudioBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="AudioSoftBrush" Color="{ThemeResource SystemColorWindowColor}" />
-                    <SolidColorBrush x:Key="MutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-                    <SolidColorBrush x:Key="SpeakerBodyBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="SpeakerTopBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PrimaryActionBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="ControlOutlineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
                     <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource SystemColorHighlightColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+            <Style TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="Foreground" Value="{ThemeResource InkBrush}" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
             <Style x:Key="QuietLabelStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="12" />
                 <Setter Property="Foreground" Value="{ThemeResource MutedBrush}" />
             </Style>
             <Style x:Key="CardStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource PanelBrush}" />
-                <Setter Property="BorderBrush" Value="{ThemeResource HairlineBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="20" />
                 <Setter Property="Padding" Value="22" />
             </Style>
             <Style x:Key="SubtleButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource InkBrush}" />
                 <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="MinHeight" Value="36" />
+            </Style>
+            <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource PrimaryActionBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource PrimaryActionTextBrush}" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="18,7" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

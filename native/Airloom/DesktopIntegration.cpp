@@ -5,6 +5,7 @@
 namespace
 {
     constexpr UINT TrayMessage = WM_APP + 42;
+    constexpr UINT DeferredExitMessage = WM_APP + 44;
     constexpr UINT_PTR SubclassId = 0xA17;
     constexpr wchar_t SettingsKey[] = L"Software\\Airloom";
     constexpr wchar_t StartupKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -43,6 +44,7 @@ namespace airloom::native
         m_show = std::move(show);
         m_exit = std::move(exit);
         m_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+        m_exitRequestMessage = RegisterWindowMessageW(airloom::updates::ExitRequestMessageName);
         SetPropW(window, WindowIdentity, reinterpret_cast<HANDLE>(1));
         m_icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_AIRLOOM),
             IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
@@ -62,6 +64,8 @@ namespace airloom::native
         {
             return false;
         }
+        if (m_exitRequestMessage)
+            SetPropW(window, airloom::updates::GracefulExitCapability, reinterpret_cast<HANDLE>(1));
         return AddIcon();
     }
 
@@ -87,6 +91,7 @@ namespace airloom::native
         {
             RemoveWindowSubclass(m_window, SubclassProcedure, SubclassId);
             RemovePropW(m_window, WindowIdentity);
+            RemovePropW(m_window, airloom::updates::GracefulExitCapability);
             m_window = nullptr;
         }
         if (m_icon)
@@ -105,7 +110,7 @@ namespace airloom::native
     void DesktopIntegration::Hide()
     {
         // Never hide an app whose tray icon could not be registered.
-        if (!m_window || !m_added) return;
+        if (!m_window || !m_added || m_exitPending) return;
         ShowWindow(m_window, SW_HIDE);
         if (!m_balloonShown)
         {
@@ -148,14 +153,52 @@ namespace airloom::native
         if (selected == 2 && m_exit) m_exit();
     }
 
+    void DesktopIntegration::RequestExit()
+    {
+        if (m_exitPending) return;
+        m_exitPending = true;
+        // Leave the synchronous installer/session notification before destroying
+        // the XAML window. An intervening WM_CLOSE must never hide this shutdown.
+        if (!PostMessageW(m_window, DeferredExitMessage, 0, 0) && m_exit) m_exit();
+    }
+
     LRESULT CALLBACK DesktopIntegration::SubclassProcedure(HWND window, UINT message, WPARAM wParam,
         LPARAM lParam, UINT_PTR, DWORD_PTR instance)
     {
         auto self = reinterpret_cast<DesktopIntegration*>(instance);
         if (self->m_taskbarCreated != 0 && message == self->m_taskbarCreated)
         {
+            if (self->m_exitPending) return 0;
             self->m_added = false;
             if (!self->AddIcon()) self->Show();
+            return 0;
+        }
+        if (self->m_exitRequestMessage != 0 && message == self->m_exitRequestMessage)
+        {
+            self->RequestExit();
+            return 0;
+        }
+        if (message == DeferredExitMessage)
+        {
+            if (self->m_exit) self->m_exit();
+            return 0;
+        }
+        // Restart Manager queries readiness first. A cancelled session end must
+        // leave both playback and the ordinary close-to-tray preference intact.
+        if (message == WM_QUERYENDSESSION) return TRUE;
+        if (message == WM_ENDSESSION)
+        {
+            if (wParam)
+            {
+                if ((lParam & ENDSESSION_CLOSEAPP) != 0) self->RequestExit();
+                else
+                {
+                    // Windows can terminate a real logoff/shutdown as soon as
+                    // this returns. Restore owned audio/mute state synchronously.
+                    self->m_exitPending = true;
+                    if (self->m_exit) self->m_exit();
+                }
+            }
             return 0;
         }
         if (message == ShowWindowMessage)
@@ -176,6 +219,7 @@ namespace airloom::native
             }
             return 0;
         }
+        if (message == WM_CLOSE && self->m_exitPending) return 0;
         if (message == WM_CLOSE && self->m_added)
         {
             self->Hide();

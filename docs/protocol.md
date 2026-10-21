@@ -163,11 +163,16 @@ upstream observation [1]. Other sessions advertise the sender's clock. This is
 a deliberately narrow heuristic, not a general IEEE 1588 clock-management
 implementation. A followed clock applies measured two-step offsets and E2E
 path-delay estimates. Version detection accepts `osvers/ov` and `srcvers/vs`
-aliases, with an explicit OS version taking precedence. A receiver-owned clock
-is learned before session SETUP and used consistently in its peer description
-and later playback announcements. PTP connect waits for three actual exchanges
-and a valid offset when following, with a five-second bound; Announce/grant
-messages alone do not establish clock readiness.
+aliases, with an explicit OS version taking precedence. Validated GET `/info`
+versions fill missing discovery metadata. Receiver-owned clocks can first
+announce after session SETUP/SETPEERS: waiting for them before SETUP creates a
+startup dependency deadlock. After SETPEERS, the sender learns that receiver's
+identity/timebase and uses it in playback announcements. Before the first PCM
+packet, PTP connect waits for three consecutive exchanges, a 250 ms settling
+period, and a valid offset when following, with a five-second bound. A gap over
+three seconds resets the readiness streak; Announce/grant messages alone do
+not establish readiness. This is the documented Apple fast-start gate, not a
+claim that every receiver's servo converges within that period [1, 6].
 A later five-second timing stall is also surfaced.
 
 ### PTP playback announcement correction in 0.2.0
@@ -188,6 +193,41 @@ capture, computes sample playback time using Shairport Sync's receiver rule,
 and checks actual decrypted nonzero PCM across a full synthetic PTP session.
 This confirms those protocol defects are corrected; it does not establish an
 audible result on the user's HomePod.
+
+### gPTP profile correction in 0.2.1
+
+The user reported that 0.2.0 still lit the HomePod without audible playback.
+The timing sender was emitting minimal PTP messages: 44-byte Follow_Up and
+64-byte Announce, without the gPTP extension records used by the receiver
+profile. Tests accepted those shortened messages, so a passing loopback test
+did not establish real-device clock compatibility.
+
+The original Rust builders now emit the timescale flag, the profile's control
+and interval fields, a 76-byte Announce with Path Trace, a 96-byte Follow_Up
+with IEEE 802.1AS Follow_Up Information and Apple's clock-identity TLV, and a
+106-byte periodic Apple Signaling message [9, 10]. Delay and peer-delay replies
+use the same source port identity/profile, and unicast grants explicitly invite
+renewal. Messages are unicast only to the selected peer; a followed receiver
+does not receive a competing sender Announce/Sync.
+
+The fixed Follow_Up regression is assembled from externally documented wire
+fields, not a packet capture. The full-session receiver separately validates
+the required profile and TLVs before replying to timing probes. It therefore
+rejects the old 44/64-byte form. A separate follower session withholds its
+clock until SETPEERS to cover startup dependency order. Independent FFmpeg
+decoding still checks decrypted, nonzero ALAC output byte-for-byte.
+
+Event replies preserve the incoming HTTP/RTSP protocol version and include an
+empty-body length and audio-latency header. Receiver latency bounds remain
+optional: a minimum without a maximum no longer invents a contradictory
+maximum from the requested lead. These are concrete interoperability fixes,
+but their tests do not establish that the reported HomePod is now audible.
+
+Settings can copy a separate allowlisted diagnostic object containing model
+and firmware tokens, format/latency, clock role/readiness, real transport and
+receiver-response counters, and capture levels. It excludes names, addresses,
+clock/device identities, credentials, raw protocol bodies and free-text errors.
+Packets sent and successful feedback are observations, not playback receipts.
 
 ### Multiple receiver clocks
 
@@ -292,3 +332,10 @@ notices remain applicable.
    supplies a fixed expected packet independent of Airloom's constructor.
 8. [Shairport Sync AirPlay 2 control receiver](https://github.com/mikebrady/shairport-sync/blob/cf6998daa1876c5a8f97128a960c8afc0e731841/rtp.c):
    receiver-side PTP sample anchor, 11025-frame offset and receive-window math.
+9. [Music Assistant gPTP wire-profile descriptions](https://github.com/music-assistant/airplay-cli/blob/1701bc25e9d303b42532569f624b64c0d0afb1f6/src/ap2_ptp.c):
+   profile headers, Path Trace, IEEE/Apple Follow_Up extensions, periodic
+   Signaling and unicast negotiation. Only protocol facts inform Airloom's
+   independently written message builders; no upstream code is incorporated.
+10. [NQPTP receiver's Follow_Up Information parser](https://github.com/mikebrady/nqptp/blob/main/nqptp-message-handlers.c):
+    independently documents IEEE 802.1AS Table 11-11, the 28-byte TLV value,
+    standard OUI/subtype and Apple clock-identity position.

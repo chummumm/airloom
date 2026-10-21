@@ -66,6 +66,9 @@ jobs:
           assert proof.get('settings_verified') is True, 'Native settings check is missing.'
           assert proof.get('update_check_verified') is True, 'Live update check is missing.'
           assert proof.get('returned_home') is True, 'Native settings navigation check is missing.'
+          assert proof.get('volume_layout_verified') is True, 'Native volume geometry check is missing.'
+          assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
+          assert proof.get('diagnostics_copy_verified') is True, 'Diagnostics clipboard check is missing.'
           PY
           (cd release-assets/dist && sha256sum "$INSTALLER" airloom-windows-x64-portable.zip > SHA256SUMS.txt)
           gh release create "v$APP_VERSION" \

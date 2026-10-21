@@ -1,4 +1,5 @@
 #include "UpdateCommon.h"
+#include "ApplicationExit.h"
 #include <shellapi.h>
 #include <cwchar>
 
@@ -39,6 +40,8 @@ namespace
 
     int Run(int count, wchar_t** arguments)
     {
+        if (count == 3 && std::wstring_view(arguments[1]) == L"--request-exit")
+            return static_cast<int>(RequestApplicationExit(fs::path(arguments[2])));
         if (count != 13 || std::wstring_view(arguments[1]) != L"--parent" || std::wstring_view(arguments[3]) != L"--lock"
             || std::wstring_view(arguments[5]) != L"--ready" || std::wstring_view(arguments[7]) != L"--installer"
             || std::wstring_view(arguments[9]) != L"--application" || std::wstring_view(arguments[11]) != L"--sha256") return 2;
@@ -97,7 +100,18 @@ namespace
         lock.Reset();
 
         std::wstring cleanupMessage = packageRemoved ? L"下载包已清理。" : L"下载包仍被占用，Airloom 启动后会重试清理。";
-        if (installerResult == 3010)
+        if (parentExit != WAIT_OBJECT_0)
+        {
+            auto message = L"Airloom 仍在运行，更新已取消，尚未替换程序文件。\n\n"
+                L"请在任务栏通知区域右键 Airloom，选择“退出 Airloom”，然后重新运行安装包或再次检查更新。"
+                L"关闭主窗口只会收起到托盘。\n\n" + cleanupMessage;
+            SaveError(message);
+            // The parent may be hidden or blocked inside shutdown. Report the
+            // bounded failure here instead of leaving an invisible registry-only
+            // error which could only be seen after a later successful restart.
+            MessageBoxW(nullptr, message.c_str(), L"Airloom 更新未完成", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+        }
+        else if (installerResult == 3010)
             SaveError(L"更新已安装，部分文件需要重启 Windows 后生效。" + cleanupMessage);
         else if (installerResult != 0)
             SaveError(L"更新未完成或已取消（代码 " + std::to_wstring(installerResult) + L"）。" + cleanupMessage + L"可以重新检查更新。");

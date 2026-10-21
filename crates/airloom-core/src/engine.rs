@@ -492,8 +492,8 @@ impl TestTone {
 }
 
 enum Work {
-    Connected(Result<Sender, AirplayError>),
-    PairingStarted(Result<PairingSession, AirplayError>),
+    Connected(Result<Box<Sender>, AirplayError>),
+    PairingStarted(Result<Box<PairingSession>, AirplayError>),
     Paired(Result<PairingCredentials, AirplayError>),
 }
 struct ConnectionWork {
@@ -684,6 +684,18 @@ impl Actor {
                 None
             }
         });
+        let receiver_diagnostics = self
+            .selected
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| {
+                self.routes.get(id).map(|route| model::ReceiverDiagnostics {
+                    slot: index + 1,
+                    state: route.phase,
+                    session: route.metrics().diagnostics,
+                })
+            })
+            .collect();
         self.update(|s| {
             s.state = phase;
             s.status_message = status;
@@ -695,6 +707,7 @@ impl Actor {
             s.metrics.packets_sent = packets;
             s.test_tone_active = self.test_tone.is_some();
             s.test_tone_remaining_ms = self.test_tone.as_ref().map_or(0, TestTone::remaining_ms);
+            s.diagnostics = Some(model::Diagnostics::from_snapshot(s, receiver_diagnostics));
         });
     }
 
@@ -1314,7 +1327,8 @@ impl Actor {
                 Work::PairingStarted(
                     tokio::time::timeout(CONNECT_TIMEOUT, PairingSession::start(&device))
                         .await
-                        .unwrap_or(Err(AirplayError::Timeout("start pairing"))),
+                        .unwrap_or(Err(AirplayError::Timeout("start pairing")))
+                        .map(Box::new),
                 )
             })
         } else {
@@ -1332,7 +1346,8 @@ impl Actor {
                 Work::Connected(
                     tokio::time::timeout(CONNECT_TIMEOUT, Sender::connect(device, options))
                         .await
-                        .unwrap_or(Err(AirplayError::Timeout("connect"))),
+                        .unwrap_or(Err(AirplayError::Timeout("connect")))
+                        .map(Box::new),
                 )
             })
         };
@@ -1407,6 +1422,7 @@ impl Actor {
     fn completed(&mut self, id: &str, work: Work) {
         match work {
             Work::Connected(Ok(sender)) => {
+                let sender = *sender;
                 if let Err(error) = self.start_capture() {
                     self.stop_all();
                     let cleanup = tokio::spawn(async move {
@@ -1444,7 +1460,7 @@ impl Actor {
             }
             Work::Connected(Err(error)) => self.connection_error(id, error),
             Work::PairingStarted(Ok(pairing)) => {
-                self.pairing = Some((id.into(), pairing));
+                self.pairing = Some((id.into(), *pairing));
                 self.prompt(id, AuthenticationKind::Pin, false);
             }
             Work::PairingStarted(Err(error)) => {

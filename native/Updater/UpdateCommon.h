@@ -198,7 +198,7 @@ namespace airloom::updates
     // Only the parent process handle, cache lock and ready event are inherited.
     // The helper acknowledges validated inputs before the UI is allowed to exit.
     inline bool StartHelper(fs::path const& helper, fs::path const& installer, fs::path const& application,
-        std::string const& digest, HANDLE lock, HANDLE parent)
+        std::string const& digest, HANDLE lock, HANDLE parent, Handle* acceptedProcess = nullptr)
     {
         SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
         Handle ready(CreateEventW(&security, TRUE, FALSE, nullptr));
@@ -226,7 +226,11 @@ namespace airloom::updates
         Handle processHandle(process.hProcess), threadHandle(process.hThread);
         std::array<HANDLE, 2> wait{ready.value, processHandle.value};
         auto result = WaitForMultipleObjects(static_cast<DWORD>(wait.size()), wait.data(), FALSE, 10000);
-        if (result == WAIT_OBJECT_0) return true;
+        if (result == WAIT_OBJECT_0)
+        {
+            if (acceptedProcess) *acceptedProcess = std::move(processHandle);
+            return true;
+        }
         if (WaitForSingleObject(processHandle.value, 0) == WAIT_TIMEOUT)
         {
             TerminateProcess(processHandle.value, 1);
