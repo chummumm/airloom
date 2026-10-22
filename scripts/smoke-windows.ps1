@@ -24,6 +24,7 @@ public static class AirloomUiProbe {
     public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
@@ -757,18 +758,89 @@ function Build-VisualFixture([string] $OutputDirectory) {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Dll)) { throw 'Isolated visual fixture build failed.' }
 }
 
+function Copy-NativeDiagnostics([switch] $RequireFixture) {
+    $Receipt = [ordered]@{
+        require_fixture = [bool]$RequireFixture; sequence_before = $null; sequence_observed = $null
+        sequence_after_read = $null; read_attempts = 0; clipboard_characters = 0
+        parse_state = 'not-read'; schema_version = $null; app_version = $null
+        fixture = $null; has_fixture_state = $false; read_error_type = $null
+    }
+    try {
+        $Button = Wait-NativeId 'CopyDiagnosticsButton'
+        if (-not $Button.Current.IsEnabled) { throw 'The diagnostics copy action is disabled.' }
+        $Receipt.sequence_before = [AirloomUiProbe]::GetClipboardSequenceNumber()
+        Invoke-NativeButton $Button
+        $Deadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $Receipt.sequence_observed = [AirloomUiProbe]::GetClipboardSequenceNumber()
+            $Receipt.read_attempts += 1
+            $ClipboardText = $null
+            # Read even an unchanged sequence: retrieving text can trigger
+            # delayed clipboard rendering and advance the sequence itself.
+            try { $ClipboardText = [AirloomUiProbe]::ReadClipboard() }
+            catch { $Receipt.read_error_type = $_.Exception.GetType().FullName }
+            $Receipt.sequence_after_read = [AirloomUiProbe]::GetClipboardSequenceNumber()
+            $Receipt.clipboard_characters = if ($null -eq $ClipboardText) { 0 } else { $ClipboardText.Length }
+            # Require one stable, fresh sequence. An earlier successful fixture
+            # copy must never stand in for this action's result.
+            if ($Receipt.sequence_after_read -ne $Receipt.sequence_before -and
+                $Receipt.sequence_after_read -eq $Receipt.sequence_observed -and
+                -not [string]::IsNullOrWhiteSpace($ClipboardText)) {
+                try {
+                    $Diagnostics = $ClipboardText | ConvertFrom-Json -ErrorAction Stop
+                    $Receipt.parse_state = 'valid-json'
+                } catch {
+                    $Receipt.parse_state = 'invalid-json'
+                    throw 'Fresh diagnostics clipboard content was not valid JSON.'
+                }
+                $Receipt.schema_version = $Diagnostics.schema_version
+                $Receipt.app_version = $Diagnostics.app_version
+                $Receipt.fixture = $Diagnostics.fixture
+                $Receipt.has_fixture_state = $null -ne $Diagnostics.fixture_state
+                if ($Diagnostics.schema_version -ne 1 -or -not $Diagnostics.app_version -or
+                    $null -eq $Diagnostics.capture -or $null -eq $Diagnostics.receivers) {
+                    throw 'Fresh diagnostics did not contain the expected allowlisted schema.'
+                }
+                if ($RequireFixture -and ($Diagnostics.app_version -ne 'ui-fixture' -or
+                    $Diagnostics.fixture -ne $true -or $null -eq $Diagnostics.fixture_state)) {
+                    throw 'Fresh diagnostics did not identify the isolated synthetic command evidence.'
+                }
+                if (-not $RequireFixture -and $Diagnostics.fixture -eq $true) {
+                    throw 'The shipped-core diagnostics unexpectedly identified a synthetic fixture.'
+                }
+                return $Diagnostics
+            }
+            $Receipt.parse_state = if ([string]::IsNullOrWhiteSpace($ClipboardText)) { 'empty' }
+                elseif ($Receipt.sequence_after_read -eq $Receipt.sequence_before) { 'unchanged-sequence' }
+                else { 'sequence-changed-during-read' }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $Deadline)
+        throw 'The diagnostics copy action did not produce fresh, nonempty clipboard text within five seconds.'
+    } catch {
+        $Receipt.failure = $_.Exception.Message
+        $Receipt.foreground_hwnd = [AirloomUiProbe]::GetForegroundWindow().ToInt64()
+        $Receipt.app_hwnd = $Process.MainWindowHandle.ToInt64()
+        $Receipt.call_stack = @(Get-PSCallStack | ForEach-Object {
+            [ordered]@{ function = $_.FunctionName; script = $_.ScriptName; line = $_.ScriptLineNumber }
+        })
+        Write-Host ('Diagnostics copy failure: ' + ($Receipt | ConvertTo-Json -Depth 6 -Compress))
+        # Capture before the fixture caller's finally block returns home. Keep
+        # metadata only: never write arbitrary clipboard text to test artifacts.
+        try {
+            [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'diagnostics-copy-failure.json'),
+                ($Receipt | ConvertTo-Json -Depth 6), [System.Text.UTF8Encoding]::new($false))
+            Save-NativeScreenshot (Join-Path $EvidencePath 'diagnostics-copy-failure.png')
+        } catch { Write-Host "Could not save diagnostics-copy failure evidence: $($_.Exception.Message)" }
+        throw
+    }
+}
+
 function Read-FixtureDiagnostics {
     Invoke-NativeButton (Wait-NativeId 'SettingsButton')
     $null = Wait-NativeButton '返回声音投放'
     try {
         Assert-NativeTextAbsent '预览版'
-        Invoke-NativeButton (Wait-NativeId 'CopyDiagnosticsButton')
-        Start-Sleep -Milliseconds 200
-        $Diagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
-        if ($Diagnostics.fixture -ne $true -or $null -eq $Diagnostics.fixture_state) {
-            throw 'The isolated process did not identify its synthetic command evidence.'
-        }
-        return $Diagnostics
+        return Copy-NativeDiagnostics -RequireFixture
     } finally {
         Invoke-NativeButton (Wait-NativeId 'SettingsBackButton')
         Start-Sleep -Milliseconds 250
@@ -1456,14 +1528,7 @@ try {
     $null = Wait-NativeButton '检查更新' $false
     Start-Sleep -Milliseconds 400
     Save-NativeScreenshot (Join-Path $EvidencePath 'settings-window.png')
-    $CopyDiagnostics = Wait-NativeId 'CopyDiagnosticsButton'
-    Invoke-NativeButton $CopyDiagnostics
-    Start-Sleep -Milliseconds 250
-    $CopiedDiagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
-    if ($CopiedDiagnostics.schema_version -ne 1 -or -not $CopiedDiagnostics.app_version -or
-        $null -eq $CopiedDiagnostics.capture -or $null -eq $CopiedDiagnostics.receivers) {
-        throw 'Copied diagnostics did not contain the expected allowlisted schema.'
-    }
+    $CopiedDiagnostics = Copy-NativeDiagnostics
     Invoke-NativeButton $BackButton
     $null = Wait-NativeButton '设置'
     $Process.Refresh()
