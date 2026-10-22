@@ -32,6 +32,7 @@ namespace winrt::Airloom::implementation
         void OnForgetCredentials(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnOpenSettings(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCloseSettings(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnManageDevices(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnTestTone(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCheckUpdates(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnInstallUpdate(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -54,12 +55,19 @@ namespace winrt::Airloom::implementation
         void RenderUpdate();
         void FlushVolume();
         void FinishVolumeInteraction();
-        void ShowSettings(bool visible);
+        void ShowSettings(bool visible, bool focusDevices = false);
         bool IsDeviceHidden(hstring const& id) const;
         bool IsDeviceHidden(airloom::native::Device const& device) const;
         void SetDeviceHidden(hstring const& id, hstring const& name, bool hidden);
         void ApplyTheme();
         void AnimateStateChange();
+        void AnimateIn(Microsoft::UI::Xaml::UIElement const& element, float fromX, float fromY, int milliseconds, float fromOpacity = 0.0f);
+        void PopElement(Microsoft::UI::Xaml::UIElement const& element, float size);
+        void UpdatePulse(bool live);
+        void SpinGlyph(Microsoft::UI::Xaml::Controls::FontIcon const& glyph, bool spin, bool& running);
+        void ApplyMotionPreference();
+        void FlashVisibilityCard();
+        void UpdateVolumeGlyph(double value);
         void ShowWindow();
         void ExitNow();
         void ShowLocalError(hstring const& message);
@@ -73,11 +81,13 @@ namespace winrt::Airloom::implementation
         {
             hstring id;
             Microsoft::UI::Xaml::UIElement root{nullptr};
+            Microsoft::UI::Xaml::Controls::Grid rowGrid{nullptr};
             Microsoft::UI::Xaml::Controls::Button button{nullptr};
+            Microsoft::UI::Xaml::Controls::Button more{nullptr};
+            Microsoft::UI::Xaml::Controls::Border check{nullptr};
+            Microsoft::UI::Xaml::Controls::FontIcon checkGlyph{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock name{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock detail{nullptr};
-            Microsoft::UI::Xaml::Controls::FontIcon icon{nullptr};
-            Microsoft::UI::Xaml::Controls::FontIcon marker{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem retry{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem hide{nullptr};
             Microsoft::UI::Xaml::Controls::Border groupSurface{nullptr};
@@ -87,6 +97,8 @@ namespace winrt::Airloom::implementation
             Microsoft::UI::Xaml::Controls::FontIcon memberChevron{nullptr};
             Microsoft::UI::Xaml::Controls::StackPanel memberPanel{nullptr};
             bool membersExpanded{};
+            bool rendered{};
+            bool selected{};
         };
 
         struct SourceRow
@@ -115,6 +127,13 @@ namespace winrt::Airloom::implementation
         std::vector<SourceRow> m_sourceRows;
         std::vector<VisibilityRow> m_visibilityRows;
         std::vector<Microsoft::UI::Xaml::Shapes::Line> m_waveformBars;
+        // Display-only release ballistics for real engine peaks; values are never invented.
+        std::vector<double> m_displayWave = std::vector<double>(64, 0.0);
+        double m_displayLeft{};
+        double m_displayRight{};
+        Microsoft::UI::Xaml::Media::Animation::TransitionCollection m_deviceTransitions{nullptr};
+        Microsoft::UI::Xaml::Media::Animation::TransitionCollection m_visibilityTransitions{nullptr};
+        Microsoft::UI::Xaml::Media::Animation::Storyboard m_highlightStoryboard{nullptr};
         airloom::native::UpdateSnapshot m_lastUpdate;
         Microsoft::UI::Xaml::DispatcherTimer m_pollTimer{nullptr};
         Microsoft::UI::Xaml::DispatcherTimer m_volumeTimer{nullptr};
@@ -138,6 +157,10 @@ namespace winrt::Airloom::implementation
         bool m_volumeAwaitingAck{};
         bool m_volumePointerDown{};
         bool m_updateRendered{};
+        bool m_motionApplied{};
+        bool m_pulseRunning{};
+        bool m_sourceSpinRunning{};
+        bool m_discoverySpinRunning{};
         double m_pendingVolume{0.75};
         std::chrono::steady_clock::time_point m_volumeAckDeadline;
         uint64_t m_tickCount{};

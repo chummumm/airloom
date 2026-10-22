@@ -982,8 +982,8 @@ function Test-NativeStereoFixture([string] $Theme) {
     Set-HomeScroll 0
     $GroupButton = Wait-NativeId "Receiver:$GroupId"
     $GroupIdentity = $GroupButton.GetRuntimeId() -join ','
-    if (-not $GroupButton.Current.Name.Contains('原生立体声，兼容性验证')) {
-        throw 'The native stereo card omitted its compatibility-verification boundary.'
+    if (-not $GroupButton.Current.Name.Contains('原生立体声组合')) {
+        throw 'The native stereo card omitted its native-group accessibility label.'
     }
     Invoke-NativeButton $GroupButton
     Start-Sleep -Milliseconds 250

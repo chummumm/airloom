@@ -842,7 +842,7 @@ impl Actor {
                 Phase::Idle
             };
             let message = match state {
-                Phase::Streaming => "正在向原生立体声组合发送声音；兼容性待实机确认。".into(),
+                Phase::Streaming => "正在向原生立体声组合发送声音。".into(),
                 Phase::AuthRequired => "组合成员需要验证，请完成密码或配对。".into(),
                 Phase::Error => members
                     .iter()
@@ -855,7 +855,7 @@ impl Actor {
                 }
                 _ if !complete => "组合不完整，等待另一台 HomePod 上线。".into(),
                 _ if selected && !all_selected => "组合成员已变化，请重新连接整个组合。".into(),
-                _ => "使用家庭 App 已建立的组合；原生兼容性验证。".into(),
+                _ => "使用家庭 App 已建立的原生立体声组合。".into(),
             };
             targets.push(DeviceView {
                 id: group.id,

@@ -1,5 +1,11 @@
 # Airloom visual system
 
+## Current design: 0.4.2
+
+The user-supplied native WinUI redesign is now the visual authority: Windows 11 Mica, Fluent surfaces and controls, theme-aware signal cards, system accent and native motion. Its current layout, behavior and verification contract are recorded in [the 0.4.2 interface specification](docs/design/ui-0.4.2.md). The earlier silver-workspace tokens and permanently dark instrument described below are retained as historical design and evidence, not instructions to restore the previous appearance.
+
+## Historical design: 0.3.0–0.4.1
+
 Airloom is a native Windows audio-routing app. Its interface puts the sound route, the receiving speakers and direct playback control in one compact workspace. The 0.3.0 redesign replaces the full-height left receiver rail and disconnected white cards from 0.2.1.
 
 The 0.4.0 work refines the native button hierarchy and adds an explicit choice between system sound and a selected application's sound. It keeps the established composition, instrument and responsive rules. Final source, native visual evidence and verification boundaries are recorded below.

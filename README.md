@@ -4,14 +4,14 @@
 
 一个从零实现的 Windows 原生音频投放应用：WinUI 3 界面、Rust 音频核心，以及 Windows 自带的端点和进程音频采集。可投放系统声音，也可只选择一个应用；无需安装虚拟声卡驱动。
 
-> **0.4.1**：应用与扬声器列表通过事件通知自动更新，保留手动刷新；新增已有 HomePod 原生立体声组合的试验性兼容。无周期性补查。后续版本末位递增至 `.10`，再进中间位。
+> **0.4.2**：接入全新 WinUI 原生界面，使用 Windows 11 Mica、Fluent 控件、系统强调色和原生动效；清理立体声旧提示，保留先左后右测试音。应用与设备继续通过事件通知更新；版本末位递增至 `.10`，再进中间位。
 
 [![Build and verify](https://github.com/chummumm/airloom/actions/workflows/ci.yml/badge.svg)](https://github.com/chummumm/airloom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-626a73.svg)](LICENSE)
 
 ## 界面
 
-以下为 0.4.1 构建的实际 Windows 截图，来自 [CI 39600958105](https://github.com/chummumm/airloom/actions/runs/39600958105)／`f29ae68`。设备、应用和信号为界面测试数据。
+以下暂存 0.4.1 的历史界面截图，来自 [CI 39600958105](https://github.com/chummumm/airloom/actions/runs/39600958105)／`f29ae68`。0.4.2 重构界面的实际截图将在完整构建验证后更新。设备、应用和信号为界面测试数据。
 
 ![Airloom 0.4.1 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.1/fixture-native-stereo-home-light.png)
 
@@ -23,8 +23,8 @@
 
 ## 体验
 
-- **原生界面**：WinUI 3 / C++/WinRT，紧凑音源条、深色音频仪表、自适应扬声器列表与固定底部播放栏；支持深浅主题、系统高对比度和减少动画偏好。
-- **原生按钮**：主操作、次操作、紧凑操作和图标按钮采用统一层级；保留系统焦点及悬停／按下／禁用反馈。播放栏和音量数字槽位继续保持稳定。
+- **原生界面**：WinUI 3 / C++/WinRT，Windows 11 Mica 背景、Fluent 卡片、系统强调色、自适应扬声器列表与固定底部播放栏；支持深浅主题、系统高对比度和减少动画偏好。
+- **原生按钮与动效**：使用 WinUI 原生模板的焦点、悬停／按下／禁用反馈，加入遵从系统偏好的状态、选择和页面过渡。播放栏和音量数字槽位继续保持稳定。
 - **实时展示**：由真实 PCM 驱动的 64 段峰值包络、左右声道电平和传输指标；固定 −60 至 0 dB 显示标尺，没有音频时显示平线。
 - **免驱系统声音**：采集系统默认或指定的现有输出设备，通过局域网向 AirPlay 接收端发送。
 - **事件自动更新**：应用会话、进程退出和播放设备变化触发来源更新；设备发现持续接收 DNS-SD 事件。没有应用层定时补查，现有刷新按钮用于主动重扫。
