@@ -14,6 +14,7 @@
 #include <locale>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -26,7 +27,12 @@ namespace
         std::mutex mutex;
         std::array<bool, 3> selected{true, true, false};
         std::array<bool, 3> playing{true, true, false};
+        std::array<unsigned, 3> connectionIds{1, 2, 0};
+        unsigned connectionsCreated{2};
+        unsigned disconnections{};
         double volume{0.56};
+        std::array<std::optional<double>, 3> receiverVolumes{0.56, 0.56, 0.56};
+        unsigned setVolumeCommands{};
         bool running{true};
         bool muteLocal{};
         bool testTone{};
@@ -39,6 +45,7 @@ namespace
         std::string sourceId{"fixture-default"};
         std::string eventDirectory;
         unsigned sourceRefreshes{};
+        unsigned discoveryRefreshes{};
         unsigned sourceSelections{};
         unsigned playbackCommands{};
         unsigned eventIndex{};
@@ -81,10 +88,43 @@ namespace
         return nullptr;
     }
 
+    struct VolumeState { double value; bool known; bool mixed; };
+
+    VolumeState SelectedVolume(Fixture const& fixture)
+    {
+        VolumeState result{fixture.volume, true, false};
+        bool hasSelected{};
+        bool hasReading{};
+        for (size_t index = 0; index < DeviceIds.size(); ++index)
+        {
+            if (!fixture.selected[index]) continue;
+            hasSelected = true;
+            if (!fixture.receiverVolumes[index])
+            {
+                result.known = false;
+                continue;
+            }
+            auto const value = *fixture.receiverVolumes[index];
+            if (!hasReading) result.value = value;
+            else if (std::abs(value - result.value) >= 0.005) result.mixed = true;
+            hasReading = true;
+        }
+        result.known = result.known && hasSelected;
+        result.mixed = result.mixed && result.known;
+        return result;
+    }
+
+    void DisconnectReceiver(Fixture& fixture, size_t index)
+    {
+        if (fixture.playing[index]) ++fixture.disconnections;
+        fixture.playing[index] = false;
+        if (index == 2) fixture.authentication = false;
+    }
+
     void StopPlayback(Fixture& fixture)
     {
         fixture.running = false;
-        fixture.playing.fill(false);
+        for (size_t index = 0; index < DeviceIds.size(); ++index) DisconnectReceiver(fixture, index);
         fixture.authentication = false;
         fixture.testTone = false;
     }
@@ -94,7 +134,11 @@ namespace
         if (!fixture.selected[index] || !SelectedSource(fixture)) return;
         if (fixture.stereoGroup && index == 1 && !fixture.stereoSecondOnline) return;
         if (index == 2) fixture.authentication = true;
-        else fixture.playing[index] = true;
+        else if (!fixture.playing[index])
+        {
+            fixture.connectionIds[index] = ++fixture.connectionsCreated;
+            fixture.playing[index] = true;
+        }
     }
 
     void StartPlayback(Fixture& fixture)
@@ -134,6 +178,12 @@ namespace
             fixture.stereoSecondOnline = false;
             fixture.playing[1] = false;
         }
+        else if (action == "device_volumes_mixed")
+        {
+            fixture.receiverVolumes[0] = 0.30;
+            fixture.receiverVolumes[1] = 0.70;
+        }
+        else if (action == "device_volume_read_failed") fixture.receiverVolumes[1].reset();
         else return;
         fixture.eventIndex = index;
         std::ofstream acknowledgement(fixture.eventDirectory + "/ack-" + std::to_string(index) + ".txt");
@@ -172,13 +222,18 @@ namespace
         auto const mode = fixture.applicationMode ? "application" : "endpoint";
         auto const source = SelectedSource(fixture);
         auto const sourceName = source ? source->name : "";
+        bool const captureActive = streaming && source && fixture.running;
+        auto const captureState = captureActive ? "signal" : streaming ? "waiting" : "idle";
+        auto const volume = SelectedVolume(fixture);
         constexpr unsigned elapsedSeconds = 187;
         constexpr unsigned packetsPerReceiver = elapsedSeconds * 44100 / 352;
         std::ostringstream json;
         json.imbue(std::locale::classic());
         json << std::fixed << std::setprecision(4)
             << "{\"version\":1,\"state\":\"" << sessionState
-            << "\",\"status_message\":\"界面测试数据 · 未连接真实扬声器\",\"volume\":" << fixture.volume
+            << "\",\"status_message\":\"界面测试数据 · 未连接真实扬声器\",\"volume\":" << volume.value
+            << ",\"volume_known\":" << (volume.known ? "true" : "false")
+            << ",\"volume_mixed\":" << (volume.mixed ? "true" : "false")
             << ",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
             << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
             << ",\"source_mode\":\"" << mode << "\",\"sources_refreshing\":" << (fixture.sourcesRefreshing ? "true" : "false") << ",\"source_message\":\""
@@ -242,7 +297,7 @@ namespace
             first = false;
         }
         json << "],\"elapsed_seconds\":" << (streaming ? elapsedSeconds : 0)
-            << ",\"level\":{\"left\":" << (streaming ? 0.36 : 0.0) << ",\"right\":" << (streaming ? 0.28 : 0.0)
+            << ",\"level\":{\"left\":" << (captureActive ? 0.36 : 0.0) << ",\"right\":" << (captureActive ? 0.28 : 0.0)
             << "},\"waveform\":[";
         // Match the real core's 64 nonnegative peak-envelope bins. The native
         // renderer applies its own decibel scale; these are not signed PCM.
@@ -251,17 +306,18 @@ namespace
             if (index != 0) json << ',';
             double const phase = static_cast<double>(index) * 0.28 + fixture.frame * 0.035;
             double const envelope = 0.18 + 0.5 * std::pow(std::sin(static_cast<double>(index) * 0.047), 2);
-            json << (streaming ? std::abs(std::sin(phase)) * envelope : 0.0);
+            json << (captureActive ? std::abs(std::sin(phase)) * envelope : 0.0);
         }
         ++fixture.frame;
         json << "],\"metrics\":{\"sample_rate\":44100,\"packets_sent\":" << packetsPerReceiver * physicalStreaming
-            << "},\"capture\":{\"state\":\"" << (streaming ? "signal" : "idle")
-            << "\",\"message\":\"界面测试信号 · 非真实音频\",\"source_name\":\"" << sourceName << "\"},"
+            << "},\"capture\":{\"state\":\"" << captureState
+            << "\",\"message\":\"" << (captureActive ? "界面测试信号 · 非真实音频" : streaming ? "请选择声音来源；扬声器保持连接。" : "等待声音来源。")
+            << "\",\"source_name\":\"" << sourceName << "\"},"
             << "\"diagnostics\":{\"schema_version\":1,\"app_version\":\"ui-fixture\",\"fixture\":true,"
             << "\"session_state\":\"" << sessionState
             << "\",\"mute_local\":" << (fixture.muteLocal ? "true" : "false")
             << ",\"test_tone_active\":" << (fixture.testTone ? "true" : "false")
-            << ",\"capture\":{\"source_mode\":\"" << mode << "\",\"state\":\"" << (streaming ? "signal" : "idle")
+            << ",\"capture\":{\"source_mode\":\"" << mode << "\",\"state\":\"" << captureState
             << "\"},\"receivers\":[";
         first = true;
         for (size_t index = 0; index < DeviceIds.size(); ++index)
@@ -277,12 +333,28 @@ namespace
         json << "],\"fixture_state\":{\"source_id\":\"" << fixture.sourceId
             << "\",\"source_count\":" << Sources(fixture).size()
             << ",\"refresh_count\":" << fixture.sourceRefreshes
+            << ",\"discovery_refresh_count\":" << fixture.discoveryRefreshes
+            << ",\"connections_created\":" << fixture.connectionsCreated
+            << ",\"disconnections\":" << fixture.disconnections
+            << ",\"connection_ids\":[" << fixture.connectionIds[0] << ',' << fixture.connectionIds[1] << ',' << fixture.connectionIds[2] << ']'
+            << ",\"capture_active\":" << (captureActive ? "true" : "false")
             << ",\"source_selection_commands\":" << fixture.sourceSelections
             << ",\"playback_commands\":" << fixture.playbackCommands
             << ",\"automatic_events\":" << fixture.eventIndex
             << ",\"streaming_receivers\":" << physicalStreaming
             << ",\"streaming_targets\":" << streaming
-            << ",\"volume\":" << fixture.volume
+            << ",\"volume\":" << volume.value
+            << ",\"volume_known\":" << (volume.known ? "true" : "false")
+            << ",\"volume_mixed\":" << (volume.mixed ? "true" : "false")
+            << ",\"set_volume_commands\":" << fixture.setVolumeCommands
+            << ",\"receiver_volumes\":[";
+        for (size_t index = 0; index < DeviceIds.size(); ++index)
+        {
+            if (index != 0) json << ',';
+            if (fixture.receiverVolumes[index]) json << *fixture.receiverVolumes[index];
+            else json << "null";
+        }
+        json << "]"
             << ",\"native_stereo\":" << (fixture.stereoGroup ? "true" : "false")
             << ",\"group_complete\":" << (fixture.stereoSecondOnline ? "true" : "false")
             << ",\"group_state\":\"" << groupState << "\""
@@ -330,6 +402,9 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
             auto volume = std::strtod(value.c_str(), &end);
             if (value.empty() || end != value.c_str() + value.size() || !std::isfinite(volume)) return 1;
             fixture.volume = std::clamp(volume, 0.0, 1.0);
+            ++fixture.setVolumeCommands;
+            for (size_t index = 0; index < DeviceIds.size(); ++index)
+                if (fixture.selected[index]) fixture.receiverVolumes[index] = fixture.volume;
         }
         else if (type == "set_mute_local") fixture.muteLocal = !fixture.applicationMode && Field(json, "enabled") == "true";
         else if (type == "test_tone") fixture.testTone = Field(json, "enabled") != "false"
@@ -340,13 +415,14 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
             if (mode != "endpoint" && mode != "application") return 1;
             bool const applicationMode = mode == "application";
             if (applicationMode == fixture.applicationMode) return 0;
-            StopPlayback(fixture);
+            fixture.testTone = false;
             fixture.applicationMode = applicationMode;
             // Synthetic enumeration completes immediately. Like the real core,
             // endpoints regain their default; applications require explicit choice.
             fixture.sourceId = applicationMode ? "" : EndpointSources[0].id;
             if (applicationMode) fixture.muteLocal = false;
         }
+        else if (type == "refresh") ++fixture.discoveryRefreshes;
         else if (type == "refresh_sources") ++fixture.sourceRefreshes;
         else if (type == "select_source")
         {
@@ -355,11 +431,9 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
             for (auto const& entry : Sources(fixture))
             {
                 if (id != entry.id) continue;
-                bool const resume = fixture.running;
-                StopPlayback(fixture);
+                fixture.testTone = false;
                 fixture.sourceId = id;
                 if (fixture.applicationMode) fixture.muteLocal = false;
-                if (resume) StartPlayback(fixture);
                 break;
             }
         }
@@ -382,8 +456,7 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
                 if (enabled && fixture.running) ConnectReceiver(fixture, index);
                 else if (!enabled)
                 {
-                    fixture.playing[index] = false;
-                    if (index == 2) fixture.authentication = false;
+                    DisconnectReceiver(fixture, index);
                     if (std::none_of(fixture.selected.begin(), fixture.selected.end(), [](bool value) { return value; }))
                         StopPlayback(fixture);
                 }
@@ -394,14 +467,17 @@ extern "C" __declspec(dllexport) int __cdecl airloom_command(void* instance, cha
             ++fixture.playbackCommands;
             if (!Field(json, "request_id").empty())
             {
-                fixture.playing[2] = false;
-                fixture.authentication = false;
+                DisconnectReceiver(fixture, 2);
             }
             else StopPlayback(fixture);
         }
         else if (type == "authenticate" || type == "pair")
         {
-            if (fixture.authentication) fixture.playing[2] = true;
+            if (fixture.authentication)
+            {
+                fixture.connectionIds[2] = ++fixture.connectionsCreated;
+                fixture.playing[2] = true;
+            }
             fixture.authentication = false;
         }
         return 0;

@@ -39,11 +39,15 @@ a browser audio subprocess can resolve to its browser root without ascending
 into Explorer or a launcher. Each choice includes its process ID to distinguish
 separate running instances.
 
-Application IDs contain both PID and process creation time. Selection is explicit:
-switching source scope stops the existing route, retains receiver selection, and
-clears the selected source. Application enumeration never automatically chooses
-the first app. A disappearing app does not select a different app or the system
-mix. Restarted instances need to be selected again.
+Application IDs contain both PID and process creation time. Selection is explicit.
+Since 0.4.3, changing source scope or source replaces only Windows capture and
+preserves established receiver sessions. The engine discards locally queued old
+source audio and supplies silence while the new capture initializes; a short
+audible gap remains possible. Entering application mode clears the source choice.
+Application enumeration never automatically chooses the first app. An absent or
+unselected app leaves the existing receiver sessions connected with zero audio,
+without selecting another app or the system mix. Restarted instances need to be
+selected again.
 
 The worker opens the exact process lifetime and keeps its handle. It activates
 `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK` through `ActivateAudioInterfaceAsync`
@@ -191,8 +195,8 @@ nonzero drops when diagnosing slow processing or a stalled sender.
 Silence between WASAPI packets is not an invented successful recording.
 Windows failures, including an invalidated/disconnected endpoint, terminate
 the worker and are returned to the caller. There is no silent fallback to a
-different output device. The engine can reconnect after asking the user to
-select an available source. Stop is idempotent and joins the worker; its normal
+different output device. The engine can retain receiver sessions silently while
+the user selects an available source, then replace the failed capture. Stop is idempotent and joins the worker; its normal
 event wait is capped at 20 ms, although a Windows API call itself has no hard
 real-time completion guarantee. Initialization and stop should therefore run on
 an engine thread rather than the UI dispatcher.

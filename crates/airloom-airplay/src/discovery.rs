@@ -86,12 +86,14 @@ fn stereo_uuid(value: &str) -> Option<String> {
 
 /// A single persistent DNS-SD subscription. The daemon handles DNS cache TTLs
 /// and protocol queries; Airloom adds no polling or periodic rescan timer.
-/// Dropping this value stops both browses and its daemon. To manually refresh,
-/// replace it with a newly started watcher.
+/// Dropping this value stops both browses and its daemon. Manual refresh keeps
+/// the same DNS cache and catalog while requesting fresh service queries.
 pub struct DiscoveryWatcher {
     daemon: ServiceDaemon,
     airplay: Receiver<ServiceEvent>,
     raop: Receiver<ServiceEvent>,
+    retired_airplay: Option<Receiver<ServiceEvent>>,
+    retired_raop: Option<Receiver<ServiceEvent>>,
     monitor: Receiver<DaemonEvent>,
     catalog: DiscoveryCatalog,
 }
@@ -117,18 +119,45 @@ impl DiscoveryWatcher {
             daemon,
             airplay,
             raop,
+            retired_airplay: None,
+            retired_raop: None,
             monitor,
             catalog: DiscoveryCatalog::default(),
         })
+    }
+
+    /// Re-query both service types without temporarily forgetting receivers or
+    /// their AirPlay-only group metadata. Refreshes still being drained coalesce.
+    pub fn refresh(&mut self) -> Result<()> {
+        if self.retired_airplay.is_some() || self.retired_raop.is_some() {
+            return Ok(());
+        }
+        // Queue both stops before either new browse. mdns-sd preserves its DNS
+        // cache, cancels the old query retries and seals each old event stream
+        // with SearchStopped before replaying cached records to the new stream.
+        self.daemon.stop_browse(AIRPLAY).map_err(discovery_error)?;
+        self.daemon.stop_browse(RAOP).map_err(discovery_error)?;
+        let airplay = self.daemon.browse(AIRPLAY).map_err(discovery_error)?;
+        let raop = self.daemon.browse(RAOP).map_err(discovery_error)?;
+        self.retired_airplay = Some(std::mem::replace(&mut self.airplay, airplay));
+        self.retired_raop = Some(std::mem::replace(&mut self.raop, raop));
+        Ok(())
     }
 
     /// Cancel-safe: return the next changed physical-device snapshot. A removed
     /// RAOP advertisement does not remove its still-advertised AirPlay device.
     pub async fn next(&mut self) -> Result<Vec<Device>> {
         loop {
-            let (service_type, event) = tokio::select! {
-                event = self.airplay.recv_async() => (AIRPLAY, event.map_err(discovery_error)?),
-                event = self.raop.recv_async() => (RAOP, event.map_err(discovery_error)?),
+            let draining = self.retired_airplay.is_some() || self.retired_raop.is_some();
+            // Finish the old streams before replaying the new cache. Otherwise
+            // a queued removal could be lost, or erase a newer resolved record.
+            let (service_type, event, retired) = tokio::select! {
+                event = self.airplay.recv_async(), if !draining =>
+                    (AIRPLAY, event.map_err(discovery_error)?, false),
+                event = self.raop.recv_async(), if !draining =>
+                    (RAOP, event.map_err(discovery_error)?, false),
+                event = retired_event(&self.retired_airplay) => (AIRPLAY, event?, true),
+                event = retired_event(&self.retired_raop) => (RAOP, event?, true),
                 event = self.monitor.recv_async() => {
                     if let DaemonEvent::Error(error) = event.map_err(discovery_error)? {
                         return Err(discovery_error(error));
@@ -137,6 +166,14 @@ impl DiscoveryWatcher {
                 },
             };
             if matches!(event, ServiceEvent::SearchStopped(_)) {
+                if retired {
+                    if service_type == AIRPLAY {
+                        self.retired_airplay = None;
+                    } else {
+                        self.retired_raop = None;
+                    }
+                    continue;
+                }
                 return Err(Error::Discovery(
                     "device discovery subscription stopped".into(),
                 ));
@@ -149,6 +186,13 @@ impl DiscoveryWatcher {
 
     pub fn devices(&self) -> &[Device] {
         &self.catalog.devices
+    }
+}
+
+async fn retired_event(receiver: &Option<Receiver<ServiceEvent>>) -> Result<ServiceEvent> {
+    match receiver {
+        Some(receiver) => receiver.recv_async().await.map_err(discovery_error),
+        None => std::future::pending().await,
     }
 }
 
@@ -345,6 +389,76 @@ mod tests {
         );
         assert_eq!(feature_bits("0x100000000,1"), None);
         assert_eq!(feature_bits("0x12,wrong"), None);
+    }
+
+    #[test]
+    fn manual_refresh_preserves_catalog_when_raop_replays_before_airplay() {
+        let mut watcher = DiscoveryWatcher::start().unwrap();
+        let airplay = service(
+            AIRPLAY,
+            "192.0.2.10",
+            &[
+                ("deviceid", "00:11:22:33:44:55"),
+                ("model", "AudioAccessory5,1"),
+                ("tsid", STEREO),
+            ],
+        );
+        let raop = service(RAOP, "192.0.2.10", &[("am", "AudioAccessory5,1")]);
+        watcher
+            .catalog
+            .apply(AIRPLAY, ServiceEvent::ServiceResolved(airplay.clone()));
+        watcher
+            .catalog
+            .apply(RAOP, ServiceEvent::ServiceResolved(raop.clone()));
+        let before = watcher.devices().to_vec();
+
+        watcher.refresh().unwrap();
+        assert_eq!(watcher.devices(), before);
+        assert!(watcher.retired_airplay.is_some() && watcher.retired_raop.is_some());
+        assert!(watcher
+            .catalog
+            .apply(RAOP, ServiceEvent::ServiceResolved(raop.clone()))
+            .is_none());
+        assert_eq!(
+            watcher.devices()[0].native_stereo().unwrap().id,
+            STEREO.to_ascii_lowercase()
+        );
+        assert_eq!(watcher.devices()[0].port, 7000);
+        assert!(watcher
+            .catalog
+            .apply(AIRPLAY, ServiceEvent::ServiceResolved(airplay.clone()))
+            .is_none());
+
+        // Keeping the catalog for refresh must not pin vanished services.
+        watcher.catalog.apply(
+            AIRPLAY,
+            ServiceEvent::ServiceRemoved(AIRPLAY.into(), airplay.get_fullname().into()),
+        );
+        watcher.catalog.apply(
+            RAOP,
+            ServiceEvent::ServiceRemoved(RAOP.into(), raop.get_fullname().into()),
+        );
+        assert!(watcher.devices().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refreshed_subscriptions_retire_without_stopping_discovery() {
+        let mut watcher = DiscoveryWatcher::start().unwrap();
+        watcher.refresh().unwrap();
+        // Rapid repeated clicks coalesce while the prior streams finish.
+        watcher.refresh().unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while watcher.retired_airplay.is_some() || watcher.retired_raop.is_some() {
+            match tokio::time::timeout_at(deadline, watcher.next()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => panic!("refresh stopped the discovery stream: {error}"),
+                Err(_) => break,
+            }
+        }
+        assert!(watcher.retired_airplay.is_none() && watcher.retired_raop.is_none());
+        // Cancellation while waiting for devices leaves the subscription usable.
+        watcher.refresh().unwrap();
+        assert!(watcher.retired_airplay.is_some() && watcher.retired_raop.is_some());
     }
 
     #[test]

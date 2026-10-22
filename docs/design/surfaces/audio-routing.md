@@ -2,6 +2,8 @@
 
 **Mode: Operate.** This brief covers the native home and settings views.
 
+This file preserves the 0.3.0/0.4.0 design brief and its attributed screenshots. Current visual authority is the [0.4.2 native redesign](../ui-0.4.2.md). The [0.4.3 source and volume contract](../../releases/0.4.3.md) supersedes the historical stop-on-scope-change behavior below: source changes and rediscovery retain active receiver sessions, capture can wait silently for an explicit app choice, and volume is read from devices with writes only after user input. Historical acceptance rows are not evidence of these new behaviors.
+
 ## Job and constraints
 
 Home answers: which speakers receive this computer's sound, and is the outgoing signal real? Its primary action is to connect or stop the selected route; volume and individual receiver selection remain directly available. Settings supports appearance, device visibility, updates and diagnosis without hiding the state of a running session.
@@ -47,7 +49,7 @@ The main route button is 152 × 44 pixels within the reserved 88-pixel transport
 The source contract must be understandable from this strip:
 
 - **系统声音** captures the shared mix on the selected Windows output. **指定应用** captures the chosen process and its children, with no virtual audio driver.
-- Switching scope stops the current route, retains receiver choices and clears the source selection. App mode requires an explicit choice before connecting.
+- In the historical 0.4.0 contract, switching scope stopped the current route, retained receiver choices and cleared the source selection. The current 0.4.3 contract retains active receiver sessions and waits silently for explicit app choice.
 - The empty app list explains that the app may need to play once, followed by **刷新列表**. Paused audio sessions can remain available.
 - Exiting an app cannot select another app or the system mix automatically. Relaunched instances require a new selection.
 - Browser tabs in one instance may share the selected process tree; this is not a per-tab picker.

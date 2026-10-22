@@ -1,8 +1,12 @@
 # Airloom visual system
 
-## Current design: 0.4.2
+## Current design: 0.4.3
 
-The user-supplied native WinUI redesign is now the visual authority: Windows 11 Mica, Fluent surfaces and controls, theme-aware signal cards, system accent and native motion. Its current layout, behavior and verification contract are recorded in [the 0.4.2 interface specification](docs/design/ui-0.4.2.md). The earlier silver-workspace tokens and permanently dark instrument described below are retained as historical design and evidence, not instructions to restore the previous appearance.
+The user-supplied native WinUI redesign remains the visual authority: Windows 11 Mica, Fluent surfaces and controls, theme-aware signal cards, system accent and native motion. Its visual baseline and existing evidence are recorded in [the 0.4.2 interface specification](docs/design/ui-0.4.2.md). The earlier silver-workspace tokens and permanently dark instrument described below are retained as historical design and evidence, not instructions to restore the previous appearance.
+
+The 0.4.3 interaction contract preserves active receiver sessions during discovery refresh and source/scope changes. Windows capture alone is replaced; the established connection can wait with zero audio until an application is explicitly selected. The stop action and independent test tone remain available while connected. A capture transition may have a brief silent interval.
+
+Volume comes from the selected receivers, with no locally saved value and no automatic write at startup or connection. The fixed label slot shows a percentage, `不同` for mixed readings, or `—` when readings are incomplete. Only explicit slider input changes the current targets. The slider is disabled without a selected connected/connecting target; an established target with an unknown reading still permits explicit adjustment. The preview label is removed. See [0.4.3 behavior and verification boundaries](docs/releases/0.4.3.md); historical stop-on-scope-change and preconnection-volume behavior below no longer applies.
 
 ## Historical design: 0.3.0–0.4.1
 
@@ -92,7 +96,7 @@ Native system focus visuals remain enabled. Pointer/press feedback uses the nati
 
 The route begins with **系统声音** or **指定应用**, followed by the corresponding source selector. System mode captures the shared playback mix of the chosen Windows output. Application mode captures an explicitly selected process and its children through Windows' process loopback API. It creates no virtual sound card and does not change the application's original output routing. The [capture contract](docs/windows-audio.md) owns platform details.
 
-Switching scope stops the current route and preserves receiver selections. Application mode starts with no app chosen; the person must select one before connecting. Its empty state tells them to let the app play once and refresh the list. Paused sessions can remain selectable. A process that exits never causes another app or the system mix to be selected automatically; a restarted instance requires a new selection. Changing a valid source within the same scope can restart the existing active route while preserving its receivers.
+In the historical 0.4.0 behavior, switching scope stopped the current route and preserved receiver selections; a valid source change could restart the route. This is superseded by the 0.4.3 connection-preserving contract above. Application mode still starts with no app chosen; its empty state tells the person to let the app play once and refresh the list. Paused sessions can remain selectable. A process that exits never causes another app or the system mix to be selected automatically; a restarted instance requires a new selection.
 
 The scope explanation stays beside the selector: a browser instance's tabs may be captured together, because this is a process-tree choice rather than an individual-tab selector. The **电脑静音** control is disabled in application mode and its explanation states that local playback continues. An endpoint-wide mute would affect other applications. Source loading, unavailable-source and recovery text reuse the stable source strip rather than opening a second settings flow.
 

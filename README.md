@@ -4,14 +4,14 @@
 
 一个从零实现的 Windows 原生音频投放应用：WinUI 3 界面、Rust 音频核心，以及 Windows 自带的端点和进程音频采集。可投放系统声音，也可只选择一个应用；无需安装虚拟声卡驱动。
 
-> **0.4.2**：接入全新 WinUI 原生界面，使用 Windows 11 Mica、Fluent 控件、系统强调色和原生动效；清理立体声旧提示，保留先左后右测试音。应用与设备继续通过事件通知更新；版本末位递增至 `.10`，再进中间位。
+> **0.4.3**：连接时读取扬声器原有音量，只有手动调节才改变设备；重新发现和切换音源保留现有 AirPlay 连接，采集切换期间可能短暂静音。保留原生 WinUI 界面及事件更新；版本末位递增至 `.10`，再进中间位。详见[版本说明](docs/releases/0.4.3.md)。
 
 [![Build and verify](https://github.com/chummumm/airloom/actions/workflows/ci.yml/badge.svg)](https://github.com/chummumm/airloom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-626a73.svg)](LICENSE)
 
 ## 界面
 
-以下为 0.4.2 的实际 WinUI 界面截图，来自 [CI 39701717193](https://github.com/chummumm/airloom/actions/runs/39701717193)／`481d3ee`。设备、应用和信号为界面测试数据。
+以下保留 0.4.2 的实际 WinUI 界面截图，来自 [CI 39701717193](https://github.com/chummumm/airloom/actions/runs/39701717193)／`481d3ee`，不作为 0.4.3 新行为的运行证据。设备、应用和信号为界面测试数据。
 
 ![Airloom 0.4.2 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.2/fixture-native-stereo-home-light.png)
 
@@ -31,6 +31,8 @@
 - **已有原生立体声组**：识别在 Apple“家庭”中已经建立的 HomePod 组合，整组连接、音量及停止；两台准备好后共用起播时间线。兼容性待实机验证，参见下方说明。
 - **指定应用**：通过 Windows 原生进程 loopback 采集所选进程及其子进程。应用退出后不会自动转播其他应用或系统声音；同一浏览器实例的多个标签页可能一起采集。
 - **多设备投放**：一次采集，同一份音频发往多个独立连接。可在播放中选择、取消或重试单台设备；一台等待密码或连接失败，不会停止其他设备。
+- **音量跟随设备**：连接时读取所选扬声器当前音量，不保存另一份本地音量，也不在连接时覆盖设备。读数不同显示“不同”，未读齐显示“—”；只有手动调节才统一所选设备音量。
+- **切换保留连接**：重新发现、切换系统输出或切换指定应用不会主动断开正在播放的扬声器。更换 Windows 采集时可能短暂静音；还没选择应用时保留连接并发送静音。
 - **密码与配对**：区分设备密码、配对码、长期配对凭据；认证失败可以重新输入。记住凭据需要主动勾选，存入 Windows 当前用户的凭据管理器。
 - **独立设置页**：优先显示更新和连接诊断；管理主题、波形、登录启动和设备可见性。隐藏选择会保留，离线设备也可恢复显示。
 - **应用内更新**：检查 GitHub 最新正式版本，下载并校验 SHA-256，退出后安装并重新打开。成功、取消或失败后的包会清理；中断和占用残留在后续启动时重试。
@@ -39,17 +41,17 @@
 
 ## 下载与运行
 
-正式安装包以 [GitHub Latest](https://github.com/chummumm/airloom/releases/latest) 为准。0.4.2 已通过完整构建，以下为本版发布资产。
+正式安装包及对应构建证据以 [GitHub Latest](https://github.com/chummumm/airloom/releases/latest) 为准。只有完整 Windows/Linux 构建和发布检查通过后才发布安装包。
 
-**从 0.1.x / 0.2.0 升级，请先右键系统托盘中的 Airloom →“退出 Airloom”，再运行新安装包。** 关闭旧版窗口只会隐藏到托盘；旧版没有新的安装退出协议，新安装器会提示先退出。0.2.1 及更新版本可使用应用内更新和新的进程退出流程。详见[0.4.2 版本说明](docs/releases/0.4.2.md)。
+**从 0.1.x / 0.2.0 升级，请先右键系统托盘中的 Airloom →“退出 Airloom”，再运行新安装包。** 关闭旧版窗口只会隐藏到托盘；旧版没有新的安装退出协议，新安装器会提示先退出。0.2.1 及更新版本可使用应用内更新和新的进程退出流程。详见[0.4.3 版本说明](docs/releases/0.4.3.md)。
 
 | 文件 | 用途 |
 | --- | --- |
-| [Airloom-0.4.2-setup-x64.exe](https://github.com/chummumm/airloom/releases/download/v0.4.2/Airloom-0.4.2-setup-x64.exe) | 按当前用户安装 |
-| [airloom-windows-x64-portable.zip](https://github.com/chummumm/airloom/releases/download/v0.4.2/airloom-windows-x64-portable.zip) | 完整解压到新目录后运行 |
-| [SHA256SUMS.txt](https://github.com/chummumm/airloom/releases/download/v0.4.2/SHA256SUMS.txt) | 两个下载文件的完整性校验值 |
+| [当前版本安装包](https://github.com/chummumm/airloom/releases/latest) | 在 Assets 中选择 `Airloom-版本号-setup-x64.exe`，按当前用户安装 |
+| [airloom-windows-x64-portable.zip](https://github.com/chummumm/airloom/releases/latest/download/airloom-windows-x64-portable.zip) | 完整解压到新目录后运行 |
+| [SHA256SUMS.txt](https://github.com/chummumm/airloom/releases/latest/download/SHA256SUMS.txt) | 当前发布下载文件的完整性校验值 |
 
-0.4.2 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39701717193)，源码提交为 `481d3ee17a06b54c0cdc4ce483716aea9cbd8fa6`。Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
+历史版本 0.4.2 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39701717193)，源码提交为 `481d3ee17a06b54c0cdc4ce483716aea9cbd8fa6`；该构建的 Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。0.4.3 增加设备音量读取、重新发现和切换音源保留会话的回归检查，结果以对应构建及发布附件为准。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
 
 要求 Windows 11 x64（build 22000 或更高）。电脑与接收端需处于可以互相发现和通信的局域网。解压便携 ZIP 后运行 `Airloom.exe`，或运行安装包。不要只复制 EXE：原生应用和 Windows App SDK 的自包含文件需要放在一起。
 
@@ -69,7 +71,13 @@
 
 应用暂停后可以继续保持选择。这里选择的是进程及其子进程，不是单独浏览器标签页；同一浏览器实例的多个标签页可能一起采集。应用将声音交给其他无关进程、服务或受保护播放路径的情况仍需单独验证。
 
-切换 **系统声音／指定应用** 会停止当前投放并保留扬声器选择；确认新声源后重新开始。应用退出后不会自动选择其他应用或系统声音，重新启动的实例需要重新选择。应用模式下 **电脑静音** 不可用，本机播放继续，应用原本的输出路由不变。
+切换 **系统声音／指定应用**、更换系统输出或更换应用时，已连接的扬声器保持现有 AirPlay 会话，只重新建立 Windows 采集；切换期间可能短暂静音。进入指定应用模式后不会自动选中应用，选择后自动继续投放。还没选择应用、应用退出或来源暂不可用时保持连接并发送静音，不继续转播旧应用或改播系统声音；重新启动的实例需要重新选择。主按钮仍可停止已保留的连接，独立试播仍可使用。应用模式下 **电脑静音** 不可用，本机播放继续，应用原本的输出路由不变。
+
+### 扬声器音量
+
+先选择并连接扬声器，Airloom 会读取设备返回的现有音量。连接、重新发现或切换音源不会自动写入一个本地默认值。所选设备读数一致时显示百分比；读数不同显示 **不同**，滑块参考第一台已选设备；有设备未能提供有效读数时显示 **—**，不会猜一个百分比写回。
+
+手动调节滑块会设置当前所选目标，包括立体声组合成员。没有已连接或正在连接的所选目标时滑块不可用；已连接但未读到音量的设备仍可手动设置。软件不把设备音量另存成本地偏好。
 
 ### 密码、诊断与更新
 
@@ -89,6 +97,8 @@ Airloom 不创建、拆散 Apple“家庭”组合，不修改其左右设置，
 
 ## 已实现的代码与验证边界
 
+下表中的既有通过结果对应上面保留的历史构建与设计记录。0.4.3 新增行为的运行结果以该版本的 CI 和发布附件为准。
+
 | 项目 | 当前范围 |
 | --- | --- |
 | 原生窗口、按钮、设置、选择、认证和托盘 | 最终便携包的启动、三尺寸布局、音量实际拖动、按钮按下、应用选择、主题及密码交互均通过；最终应用模式、设置、窄窗口和按钮截图已复核 |
@@ -105,11 +115,11 @@ Airloom 不创建、拆散 Apple“家庭”组合，不修改其左右设置，
 
 验证分为独立层次：协议和音频算法测试覆盖加密会话、非零 PCM、时钟协商、多设备分发与故障隔离；Linux 另通过 FFmpeg 独立 ALAC 解码；Windows 通过真实进程 loopback API 及来源通知注册、显式刷新和关闭检查；原生 UI fixture 检查选择、自动来源变化、原生组合、按钮、主题和密码；更新 fixture 检查退出、安装与包清理。真实播放应用的会话事件交付和 HomePod 双机播放仍需实机验证。完整结果见上述 CI。
 
-密码弹窗与单设备取消通过 UIA 交互检查。本次 `fixture-auth-dark.png` 捕获的是主页，不用来证明密码框外观。高对比度、空应用列表及应用退出状态没有本轮视觉验证声明。详见[设计与验证记录](docs/design.md)。
+密码弹窗与单设备取消已有 UIA 交互检查。历史 0.4.0 设计记录中的 `fixture-auth-dark.png` 捕获的是主页，不用来证明密码框外观。高对比度、空应用列表及应用退出状态没有新增视觉验证声明。详见[设计与验证记录](docs/design.md)。
 
 进程 API 检查使用一个由测试创建、没有播放声音的进程；收到的样本必须为有限值且严格为零。它没有同时播放两个应用，也没有连接真实 HomePod。应用模式的声音隔离、浏览器子进程行为和实际接收端听音仍须实机检查。原生更新检查也不等于已经在线覆盖安装了一台用户电脑。截图和发送包数均不能代替这些实机结果。
 
-WASAPI 采集不会自动改变应用的本地输出路由。独占模式、受保护内容、声卡特有音效和静音位置可能影响采集。没有声卡驱动签名问题，但公开下载的预览应用/安装包仍可能出现系统的发布者或信誉提示。
+WASAPI 采集不会自动改变应用的本地输出路由。独占模式、受保护内容、声卡特有音效和静音位置可能影响采集。没有声卡驱动签名问题，但公开下载的应用/安装包仍可能出现系统的发布者或信誉提示。
 
 ## 构建
 

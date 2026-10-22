@@ -41,7 +41,8 @@ pub struct ConnectOptions {
     pub password: Option<String>,
     pub credentials: Option<PairingCredentials>,
     pub latency: Duration,
-    pub initial_volume: f32,
+    /// An explicit user-requested override. None preserves the receiver's volume.
+    pub initial_volume: Option<f32>,
     pub timing: TimingMode,
 }
 impl Default for ConnectOptions {
@@ -50,7 +51,7 @@ impl Default for ConnectOptions {
             password: None,
             credentials: None,
             latency: Duration::from_millis(750),
-            initial_volume: 0.25,
+            initial_volume: None,
             timing: TimingMode::Auto,
         }
     }
@@ -130,8 +131,15 @@ pub struct VolumeControl {
     connection: Weak<AsyncMutex<Connection>>,
     failure: Weak<Mutex<Option<RecordedFailure>>>,
     stopped: Arc<AtomicBool>,
+    volume: Arc<Mutex<Option<f32>>>,
 }
 impl VolumeControl {
+    /// Last volume reported by the receiver or acknowledged after a user change.
+    /// None means the receiver did not provide a usable volume, not that it is mute.
+    pub fn volume(&self) -> Option<f32> {
+        self.volume.lock().ok().and_then(|volume| *volume)
+    }
+
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
         if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
             return Err(Error::InvalidArgument(
@@ -159,7 +167,13 @@ impl VolumeControl {
             {
                 return Err(Error::SessionLost(error.message.clone()));
             }
-            set_volume_request(&mut connection, volume).await
+            set_volume_request(&mut connection, volume).await?;
+            // Update while retaining the connection lock so concurrent controls
+            // observe the same order as the receiver's acknowledged requests.
+            if let Ok(mut current) = self.volume.lock() {
+                *current = Some(volume);
+            }
+            Ok(())
         }
         .await;
         guard.completed = true;
@@ -254,6 +268,7 @@ pub struct Sender {
     tasks: Vec<JoinHandle<()>>,
     credentials: Option<PairingCredentials>,
     stopped: Arc<AtomicBool>,
+    volume: Arc<Mutex<Option<f32>>>,
     session_diagnostics: SenderDiagnostics,
     receiver_id: String,
     native_stereo_id: Option<String>,
@@ -283,7 +298,10 @@ impl Sender {
                 "password must contain 1 to 1024 bytes".into(),
             ));
         }
-        if !(0.0..=1.0).contains(&options.initial_volume) || !options.initial_volume.is_finite() {
+        if options
+            .initial_volume
+            .is_some_and(|volume| !(0.0..=1.0).contains(&volume) || !volume.is_finite())
+        {
             return Err(Error::InvalidArgument(
                 "volume must be between 0 and 1".into(),
             ));
@@ -308,9 +326,11 @@ impl Sender {
         let mut connection = Connection::connect(remote, options.password.clone()).await?;
         let info = connection.exchange("GET", "/info", "", &[], &[]).await?;
         let mut realtime_formats = None;
+        let mut receiver_volume = None;
         if info.status == 200 && !info.body.is_empty() {
             let value = decode_plist(&info.body)?;
             realtime_formats = merge_receiver_info(&mut device, &value);
+            receiver_volume = volume_from_info(&value);
         } else if info.status != 404 {
             connection.check(&info, "receiver info")?;
         }
@@ -338,6 +358,7 @@ impl Sender {
                     let value = decode_plist(&info.body)?;
                     realtime_formats =
                         merge_receiver_info(&mut device, &value).or(realtime_formats);
+                    receiver_volume = volume_from_info(&value);
                 }
                 pairing::transient(&mut connection, None).await
             } else {
@@ -463,7 +484,10 @@ impl Sender {
             ]);
             exchange_plist(&mut connection, "SETPEERS", peers, "SETPEERS").await?;
         }
-        set_volume_request(&mut connection, options.initial_volume).await?;
+        if let Some(volume) = options.initial_volume {
+            set_volume_request(&mut connection, volume).await?;
+            receiver_volume = Some(volume);
+        }
         let connection = Arc::new(AsyncMutex::new(connection));
         let counters = Arc::new(Counters::default());
         let failure = Arc::new(Mutex::new(None));
@@ -522,6 +546,7 @@ impl Sender {
             tasks,
             credentials: options.credentials.clone(),
             stopped: Arc::new(AtomicBool::new(false)),
+            volume: Arc::new(Mutex::new(receiver_volume)),
             session_diagnostics,
             receiver_id: device.id.clone(),
             native_stereo_id: device.native_stereo().map(|group| group.id),
@@ -738,11 +763,17 @@ impl Sender {
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
         self.volume_control().set_volume(volume).await
     }
+    /// Last reported or explicitly set receiver volume, normalized to 0..=1.
+    /// This is a connection-time observation, not continuous volume monitoring.
+    pub fn volume(&self) -> Option<f32> {
+        self.volume.lock().ok().and_then(|volume| *volume)
+    }
     pub fn volume_control(&self) -> VolumeControl {
         VolumeControl {
             connection: Arc::downgrade(&self.connection),
             failure: Arc::downgrade(&self.failure),
             stopped: self.stopped.clone(),
+            volume: self.volume.clone(),
         }
     }
     pub async fn stop(&mut self) -> Result<()> {
@@ -1071,6 +1102,23 @@ async fn exchange_plist(
         decode_plist(&response.body)
     }
 }
+fn volume_from_info(info: &Value) -> Option<f32> {
+    // AirPlay's /info initialVolume is in the same dB scale as SET_PARAMETER.
+    // Read the already-required response: an optional GET_PARAMETER probe on
+    // the active encrypted socket could time out and poison the whole session.
+    let value = info.as_dictionary()?.get("initialVolume")?;
+    let db = value
+        .as_real()
+        .or_else(|| value.as_signed_integer().map(|integer| integer as f64))?;
+    if db == -144.0 {
+        Some(0.0)
+    } else if db.is_finite() && (-30.0..=0.0).contains(&db) {
+        Some((1.0 + db / 30.0) as f32)
+    } else {
+        None
+    }
+}
+
 async fn set_volume_request(connection: &mut Connection, volume: f32) -> Result<()> {
     if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
         return Err(Error::InvalidArgument(
@@ -1241,6 +1289,45 @@ fn spawn_retransmit(
 #[cfg(test)]
 mod session_setup_contract_tests {
     use super::*;
+
+    #[test]
+    fn receiver_volume_uses_the_set_parameter_scale_and_rejects_bad_values() {
+        assert!(ConnectOptions::default().initial_volume.is_none());
+        let info = |volume| {
+            let mut fields = Dictionary::new();
+            fields.insert("initialVolume".into(), volume);
+            Value::Dictionary(fields)
+        };
+        for (db, expected) in [
+            (-144.0, 0.0),
+            (-30.0, 0.0),
+            (-22.5, 0.25),
+            (-15.0, 0.5),
+            (-7.5, 0.75),
+            (0.0, 1.0),
+        ] {
+            assert_eq!(volume_from_info(&info(Value::Real(db))), Some(expected));
+        }
+        for db in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -144.1,
+            -31.0,
+            0.1,
+        ] {
+            assert_eq!(volume_from_info(&info(Value::Real(db))), None);
+        }
+        assert_eq!(volume_from_info(&info(Value::String("-15".into()))), None);
+        assert_eq!(
+            volume_from_info(&info(Value::Integer((-15i64).into()))),
+            Some(0.5)
+        );
+        assert_eq!(
+            volume_from_info(&Value::Dictionary(Dictionary::new())),
+            None
+        );
+    }
 
     const ID: u64 = 0xf842_885f_7175_0008;
     const SESSION: &str = "9dff3e7a-ec6d-4fa7-8666-b416d376897d";

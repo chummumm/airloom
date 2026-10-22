@@ -396,7 +396,59 @@ function Assert-CompactReceiversVisible {
     }
 }
 
-function Test-NativeVolumeLayout {
+function Test-NativeIdleLayout {
+    # The shipped core has no connected receivers on CI. Its volume control
+    # must stay disabled instead of creating a pending value for a later device.
+    # Wait past the native acknowledgement deadline to catch startup side effects.
+    Start-Sleep -Milliseconds 3500
+    Assert-NativeTextAbsent '音量调整尚未确认'
+    Assert-NativeTextAbsent '未能确认扬声器音量'
+    $Measurements = @()
+    $CompactTopVerified = $false
+    foreach ($Size in @(@(880, 680), @(1100, 800), @(1600, 1000))) {
+        if (-not [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Size[0], $Size[1], 0x0004)) {
+            throw "Could not resize the idle native window to $($Size[0]) x $($Size[1])."
+        }
+        Start-Sleep -Milliseconds 500
+        Set-HomeScroll 0
+        if ((Wait-NativeId 'VolumeSlider').Current.IsEnabled -or
+            (Wait-NativeId 'VolumeValue').Current.Name -ne '扬声器音量未读取') {
+            throw 'The shipped core must leave volume disabled and unknown without a connected target.'
+        }
+        $WorkspaceWidth = (Wait-NativeId 'HomeView').Current.BoundingRectangle.Width * 96 /
+            [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle)
+        if ($WorkspaceWidth -lt 1050) {
+            Assert-CompactReceiversVisible
+            $CompactTopVerified = $true
+        }
+        $Geometry = Get-NativeLayout
+        $Composition = Assert-AdaptiveComposition $Geometry $WorkspaceWidth
+        $DockBeforeScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
+        Set-HomeScroll 100
+        $DockAfterScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
+        foreach ($Dimension in @('X', 'Y', 'Width', 'Height')) {
+            if ([Math]::Abs($DockAfterScroll.$Dimension - $DockBeforeScroll.$Dimension) -gt 1) {
+                throw "The idle transport dock moved when the workspace scrolled at $($Size[0]) px."
+            }
+        }
+        Set-HomeScroll 0
+        $Measurements += [ordered]@{
+            window_width = $Size[0]; window_height = $Size[1]; bounds = $Geometry
+            workspace_width_dip = $WorkspaceWidth; composition = $Composition
+        }
+        Save-NativeScreenshot (Join-Path $EvidencePath "native-window-$($Size[0]).png")
+    }
+    if (-not ($Measurements.composition -contains 'wide') -or -not ($Measurements.composition -contains 'compact')) {
+        throw 'Both wide and compact idle native compositions must be exercised.'
+    }
+    return [ordered]@{
+        verified = $true; synthetic_data = $false; no_target_volume_disabled_verified = $true
+        no_startup_volume_ack_error_verified = $true
+        compact_receivers_visible_at_top = $CompactTopVerified; measurements = $Measurements
+    }
+}
+
+function Test-NativeVolumeLayout([string] $EvidencePrefix) {
     $Measurements = @()
     $DragVerified = $false
     $CompactTopVerified = $false
@@ -423,14 +475,15 @@ function Test-NativeVolumeLayout {
             }
         }
         $Slider = Wait-NativeId 'VolumeSlider'
-        if (-not $Slider.Current.IsEnabled) { throw 'The idle volume slider must support preparing the next session.' }
+        if (-not $Slider.Current.IsEnabled) { throw 'The connected fixture volume slider must accept explicit user input.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
         $Baseline = $null
         $TrackStart = $null
         $TrackEnd = $null
         foreach ($Volume in @(0, 9, 10, 99, 100)) {
             $Range.SetValue($Volume)
-            # Covers debounce, engine acknowledgement, and several UI polls.
+            # Covers debounce, the synthetic receiver acknowledgement, and
+            # several UI polls in the same native control used in production.
             Start-Sleep -Milliseconds 350
             if ([Math]::Abs($Range.Current.Value - $Volume) -gt 0.01) {
                 throw "Volume snapped back after setting $Volume at $($Size[0]) px."
@@ -503,22 +556,22 @@ function Test-NativeVolumeLayout {
                 throw
             } finally {
                 if ($Pressed) { [AirloomUiProbe]::LeftButton($false) }
-                [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-input-probe.json'),
+                [System.IO.File]::WriteAllText((Join-Path $EvidencePath "$EvidencePrefix-input-probe.json"),
                     ($InputProof | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
             }
             Start-Sleep -Milliseconds 100
             $DraggedValue = $Range.Current.Value
             $InputProof.final_value = $DraggedValue
-            [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-input-probe.json'),
+            [System.IO.File]::WriteAllText((Join-Path $EvidencePath "$EvidencePrefix-input-probe.json"),
                 ($InputProof | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
             Write-Host ("Native pointer result: " + ($InputProof | ConvertTo-Json -Depth 8 -Compress))
-            if ($DraggedValue -lt 60) { throw "Pointer drag did not change the real slider: $DraggedValue. Input trace is in native-input-probe.json." }
+            if ($DraggedValue -lt 60) { throw "Pointer drag did not change the real slider: $DraggedValue. Input trace is in $EvidencePrefix-input-probe.json." }
             Start-Sleep -Milliseconds 400
             if ([Math]::Abs($Range.Current.Value - $DraggedValue) -gt 0.01) { throw 'Volume snapped back after releasing the pointer.' }
             $DragVerified = $true
         }
         Set-HomeScroll 0
-        Save-NativeScreenshot (Join-Path $EvidencePath "native-window-$($Size[0]).png")
+        Save-NativeScreenshot (Join-Path $EvidencePath "$EvidencePrefix-window-$($Size[0]).png")
     }
     if (-not $DragVerified) { throw 'No real pointer volume drag could be verified on the native display.' }
     if (-not ($Measurements.composition -contains 'wide') -or -not ($Measurements.composition -contains 'compact')) {
@@ -526,6 +579,7 @@ function Test-NativeVolumeLayout {
     }
     $Range.SetValue(50)
     return [ordered]@{
+        verified = $true; synthetic_data = $true
         measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof
         compact_receivers_visible_at_top = $CompactTopVerified
     }
@@ -707,6 +761,7 @@ function Read-FixtureDiagnostics {
     Invoke-NativeButton (Wait-NativeId 'SettingsButton')
     $null = Wait-NativeButton '返回声音投放'
     try {
+        Assert-NativeTextAbsent '预览版'
         Invoke-NativeButton (Wait-NativeId 'CopyDiagnosticsButton')
         Start-Sleep -Milliseconds 200
         $Diagnostics = [AirloomUiProbe]::ReadClipboard() | ConvertFrom-Json
@@ -808,6 +863,122 @@ function Assert-NativeIdAbsent([string] $Id) {
     }
 }
 
+function Assert-NativeTextAbsent([string] $Text) {
+    $Condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $Window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+    foreach ($Element in $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $Condition)) {
+        if ($Element.Current.Name.Contains($Text)) { throw "Unexpected native label '$Text' remained visible." }
+    }
+}
+
+function Test-FixtureDeviceVolume {
+    $Slider = Wait-NativeId 'VolumeSlider'
+    $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern(
+        [System.Windows.Automation.RangeValuePattern]::Pattern)
+    $Layout = Get-NativeLayout
+    $Startup = $null
+    $Readings = @()
+    # The DLL supplies synthetic receiver readings; none of these events is a
+    # command available in production. This verifies the real native UI does
+    # not turn incoming volume snapshots into unintended set_volume commands.
+    foreach ($Case in @(
+        @{ event = $null; name = '56%'; value = 56; known = $true; mixed = $false; screenshot = 'known' },
+        @{ event = 'device_volumes_mixed'; name = '不同'; value = 30; known = $true; mixed = $true; screenshot = 'mixed' },
+        @{ event = 'device_volume_read_failed'; name = '扬声器音量未读取'; value = 30; known = $false; mixed = $false; screenshot = 'unknown' }
+    )) {
+        if ($null -ne $Case.event) { Send-FixtureEvent $Case.event }
+        $Diagnostics = Read-FixtureDiagnostics
+        if ($null -eq $Startup) { $Startup = $Diagnostics }
+        $State = $Diagnostics.fixture_state
+        if ($State.set_volume_commands -ne 0 -or $State.volume_known -ne $Case.known -or
+            $State.volume_mixed -ne $Case.mixed -or [Math]::Abs($State.volume * 100 - $Case.value) -gt 0.01) {
+            throw "Receiver volume case '$($Case.screenshot)' changed the device volume or lost its reading state."
+        }
+        if ([Math]::Abs($Range.Current.Value - $Case.value) -gt 0.01 -or
+            (Wait-NativeId 'VolumeValue').Current.Name -ne $Case.name) {
+            throw "Receiver volume case '$($Case.screenshot)' was not rendered by the native slider and accessible label."
+        }
+        Assert-FixtureSessionRetention $Startup $Diagnostics "Receiver volume $($Case.screenshot)"
+        Assert-StableLayout $Layout (Get-NativeLayout) "Receiver volume $($Case.screenshot)"
+        Save-NativeScreenshot (Join-Path $EvidencePath "fixture-device-volume-$($Case.screenshot).png")
+        $Readings += [ordered]@{
+            state = $Case.screenshot; displayed_name = $Case.name; slider_value = $Range.Current.Value
+            volume_known = $State.volume_known; volume_mixed = $State.volume_mixed
+            receiver_volumes = $State.receiver_volumes; set_volume_commands = $State.set_volume_commands
+        }
+    }
+    if ($null -ne $Diagnostics.fixture_state.receiver_volumes[1]) {
+        throw 'The unknown-volume fixture did not exercise a failed reading from one selected receiver.'
+    }
+    # Start directly at the thumb rendered from the partial receiver reading.
+    # No UIA SetValue prepares this drag: the first write must come from checked
+    # physical input, after all three incoming-only states produced zero writes.
+    $OriginalCursor = [AirloomUiProbe]::Cursor()
+    $Pressed = $false
+    try {
+        $null = [AirloomUiProbe]::SetForegroundWindow($Process.MainWindowHandle)
+        $Slider.SetFocus()
+        $Deadline = [DateTime]::UtcNow.AddSeconds(2)
+        while ([AirloomUiProbe]::GetForegroundWindow() -ne $Process.MainWindowHandle -and
+            [DateTime]::UtcNow -lt $Deadline) { Start-Sleep -Milliseconds 50 }
+        if ([AirloomUiProbe]::GetForegroundWindow() -ne $Process.MainWindowHandle) {
+            throw 'The volume fixture could not become foreground for explicit pointer input.'
+        }
+        $Thumb = (Get-NativeSliderThumb $Slider).Current.BoundingRectangle
+        $Bounds = $Slider.Current.BoundingRectangle
+        $Scale = [AirloomUiProbe]::GetDpiForWindow($Process.MainWindowHandle) / 96.0
+        $StartX = [int]($Thumb.X + $Thumb.Width / 2)
+        $Y = [int]($Thumb.Y + $Thumb.Height / 2)
+        $EndX = [int][Math]::Min($Bounds.Right - 12 * $Scale, $StartX + $Bounds.Width * 0.25)
+        if ($EndX -le $StartX + 5) { throw 'The device-volume fixture did not expose usable drag space.' }
+        [AirloomUiProbe]::RequirePointOwner($StartX, $Y, [uint32]$Process.Id)
+        [AirloomUiProbe]::RequirePointOwner($EndX, $Y, [uint32]$Process.Id)
+        $null = [AirloomUiProbe]::MovePointer($StartX, $Y)
+        [AirloomUiProbe]::LeftButton($true)
+        $Pressed = $true
+        Start-Sleep -Milliseconds 100
+        if (-not [AirloomUiProbe]::LeftButtonIsDown()) { throw 'The device-volume pointer press was not observed.' }
+        foreach ($Fraction in @(0.25, 0.5, 0.75, 1.0)) {
+            $null = [AirloomUiProbe]::MovePointer([int]($StartX + ($EndX - $StartX) * $Fraction), $Y)
+            Start-Sleep -Milliseconds 100
+        }
+        [AirloomUiProbe]::LeftButton($false)
+        $Pressed = $false
+        Start-Sleep -Milliseconds 400
+        $DraggedValue = $Range.Current.Value
+        if ($DraggedValue -le 30) { throw 'The explicit device-volume drag did not move the real slider.' }
+    } finally {
+        if ($Pressed) { [AirloomUiProbe]::LeftButton($false) }
+        $null = [AirloomUiProbe]::MovePointer($OriginalCursor.X, $OriginalCursor.Y)
+    }
+    $Adjusted = Read-FixtureDiagnostics
+    $State = $Adjusted.fixture_state
+    if ($State.set_volume_commands -le 0 -or $State.volume_known -ne $true -or $State.volume_mixed -ne $false -or
+        [Math]::Abs($State.volume * 100 - $DraggedValue) -gt 0.01 -or
+        [Math]::Abs($State.receiver_volumes[0] * 100 - $DraggedValue) -gt 0.01 -or
+        [Math]::Abs($State.receiver_volumes[1] * 100 - $DraggedValue) -gt 0.01 -or
+        [Math]::Abs($State.receiver_volumes[2] - 0.56) -gt 0.001 -or
+        (Wait-NativeId 'VolumeValue').Current.Name -ne "$([int][Math]::Round($DraggedValue))%") {
+        throw 'Explicit volume input did not acknowledge and unify just the selected synthetic receivers.'
+    }
+    Assert-FixtureSessionRetention $Startup $Adjusted 'Explicit receiver-volume drag'
+    Assert-StableLayout $Layout (Get-NativeLayout) 'Explicit receiver-volume drag'
+    Save-NativeScreenshot (Join-Path $EvidencePath 'fixture-device-volume-adjusted.png')
+    return [ordered]@{
+        verified = $true; synthetic_data = $true; real_receiver_volume_claim = $false
+        startup_read_only_verified = $true; mixed_volume_read_only_verified = $true
+        unknown_volume_read_only_verified = $true; explicit_drag_sets_targets_verified = $true
+        stable_volume_layout_verified = $true; readings = $Readings
+        explicit_pointer_input = [ordered]@{
+            method = 'SendInput'; start_x = $StartX; end_x = $EndX; y = $Y
+            final_value = $DraggedValue; set_volume_commands = $State.set_volume_commands
+            receiver_volumes = $State.receiver_volumes
+        }
+    }
+}
+
 function Test-SourceEventFixture([string] $Theme, $BeforeEvents) {
     $Picker = Wait-NativeId 'SourcePicker'
     $Expansion = [System.Windows.Automation.ExpandCollapsePattern]$Picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
@@ -854,6 +1025,7 @@ function Test-SourceEventFixture([string] $Theme, $BeforeEvents) {
         }
     } finally { $Expansion.Collapse() }
     $AfterEvents = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $BeforeEvents $AfterEvents 'Automatic source-list events'
     if ($AfterEvents.fixture_state.source_id -ne $BeforeEvents.fixture_state.source_id -or
         $AfterEvents.fixture_state.streaming_receivers -ne 2 -or
         $AfterEvents.fixture_state.automatic_events -ne ($BeforeEvents.fixture_state.automatic_events + 2) -or
@@ -869,6 +1041,21 @@ function Test-SourceEventFixture([string] $Theme, $BeforeEvents) {
     }
 }
 
+function Assert-FixtureSessionRetention($Before, $After, [string] $Context) {
+    # The replacement DLL records its connection identities and lifecycle calls.
+    # These are UI-command-path checks; production transport continuity is covered
+    # separately by the core's sender/routing tests.
+    if (@($Before.fixture_state.connection_ids).Count -ne 3 -or
+        @($After.fixture_state.connection_ids).Count -ne 3 -or
+        ($After.fixture_state.connection_ids -join ',') -ne ($Before.fixture_state.connection_ids -join ',') -or
+        $After.fixture_state.connections_created -ne $Before.fixture_state.connections_created -or
+        $After.fixture_state.disconnections -ne $Before.fixture_state.disconnections -or
+        $After.fixture_state.streaming_receivers -ne $Before.fixture_state.streaming_receivers -or
+        $After.fixture_state.playback_commands -ne $Before.fixture_state.playback_commands) {
+        throw "$Context replaced a synthetic receiver session or issued a playback command."
+    }
+}
+
 function Test-ApplicationSourceFixture([string] $Theme) {
     Set-HomeScroll 0
     $LocalMute = Wait-NativeId 'LocalMuteToggle'
@@ -881,11 +1068,28 @@ function Test-ApplicationSourceFixture([string] $Theme) {
         throw 'The initial two-receiver fixture did not acknowledge endpoint mute before mode switching.'
     }
 
+    Invoke-NativeButton (Wait-NativeId 'RefreshButton')
+    Start-Sleep -Milliseconds 350
+    $Rediscovered = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $BeforeSwitch $Rediscovered 'Manual receiver discovery'
+    if ($Rediscovered.fixture_state.discovery_refresh_count -ne ($BeforeSwitch.fixture_state.discovery_refresh_count + 1) -or
+        $Rediscovered.fixture_state.source_id -ne $BeforeSwitch.fixture_state.source_id) {
+        throw 'Rediscovery did not reach the discovery command independently of the selected source.'
+    }
+
+    Select-NativeOption 'SourcePicker' '耳机 · USB Audio 输出设备'
+    $OtherEndpoint = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $Rediscovered $OtherEndpoint 'Endpoint source switch'
+    if ($OtherEndpoint.fixture_state.source_id -ne 'fixture-headphones' -or $OtherEndpoint.capture.state -ne 'signal') {
+        throw 'The endpoint source did not change while the existing receiver sessions remained active.'
+    }
+
     Select-NativeOption 'SourceModePicker' '指定应用'
     $SelectedNames = @(Get-NativeSelectionNames 'SourcePicker')
-    if ($SelectedNames.Count -ne 0 -or (Wait-NativeId 'ConnectButton').Current.IsEnabled -or
-        (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
-        throw 'Application mode selected a source or enabled playback before explicit application choice.'
+    if ($SelectedNames.Count -ne 0 -or -not (Wait-NativeId 'ConnectButton').Current.IsEnabled -or
+        -not (Wait-NativeId 'ConnectButton').Current.Name.Contains('停止投放') -or
+        -not (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
+        throw 'Waiting for explicit application choice must keep the existing sessions stoppable and the independent test tone available.'
     }
     $LocalMute = Wait-NativeId 'LocalMuteToggle'
     $MutePattern = [System.Windows.Automation.TogglePattern]$LocalMute.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
@@ -893,54 +1097,86 @@ function Test-ApplicationSourceFixture([string] $Theme) {
         throw 'Application mode did not disable and clear local output mute.'
     }
     $AwaitingSelection = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $OtherEndpoint $AwaitingSelection 'Switching to application mode without a source'
     if ($AwaitingSelection.capture.source_mode -ne 'application' -or $AwaitingSelection.fixture_state.source_id -ne '' -or
-        $AwaitingSelection.fixture_state.source_count -ne 3 -or $AwaitingSelection.fixture_state.streaming_receivers -ne 0 -or
-        $AwaitingSelection.session_state -ne 'idle' -or $AwaitingSelection.capture.state -ne 'idle' -or
+        $AwaitingSelection.fixture_state.source_count -ne 3 -or $AwaitingSelection.fixture_state.streaming_receivers -ne 2 -or
+        $AwaitingSelection.session_state -ne 'streaming' -or $AwaitingSelection.fixture_state.capture_active -ne $false -or
+        $AwaitingSelection.capture.state -eq 'signal' -or $AwaitingSelection.test_tone_active -ne $false -or
         $AwaitingSelection.mute_local -ne $false) {
-        throw 'Mode switching did not reach an idle, unselected application fixture through the real native command path.'
+        throw 'Application mode must wait silently for explicit choice while retaining its two receiver sessions.'
     }
     Save-NativeScreenshot (Join-Path $EvidencePath "fixture-application-awaiting-selection-$Theme.png")
 
     $BrowserName = 'Microsoft Edge · 测试应用'
     $BrowserId = 'process:4200:133700000000000000'
     Select-NativeOption 'SourcePicker' $BrowserName
-    if (-not (Wait-NativeId 'ConnectButton').Current.IsEnabled -or (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
-        throw 'Explicit application selection did not become ready without automatically starting playback.'
-    }
-    $ButtonProof = Invoke-FixtureConnectPointer $Theme
-    Assert-ActiveFixtureWaveform
     $PlayingApplication = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $AwaitingSelection $PlayingApplication 'Choosing the application source'
     if ($PlayingApplication.capture.source_mode -ne 'application' -or $PlayingApplication.fixture_state.source_id -ne $BrowserId -or
         $PlayingApplication.fixture_state.streaming_receivers -ne 2 -or $PlayingApplication.capture.state -ne 'signal' -or
         $PlayingApplication.mute_local -ne $false) {
-        throw 'The physical primary-button click did not start the explicitly selected synthetic application.'
+        throw 'Explicit application choice did not resume capture through the existing sessions.'
     }
+
+    Select-NativeOption 'SourcePicker' 'Spotify · 测试应用'
+    $OtherApplication = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $PlayingApplication $OtherApplication 'Application source switch'
+    if ($OtherApplication.fixture_state.source_id -ne 'process:4201:133700000000000001' -or
+        $OtherApplication.capture.state -ne 'signal') {
+        throw 'The application source did not change without reconnecting the receivers.'
+    }
+    Select-NativeOption 'SourcePicker' $BrowserName
+    $PlayingApplication = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $OtherApplication $PlayingApplication 'Switching back to the browser application'
 
     Invoke-NativeButton (Wait-NativeId 'SourceRetryButton')
     Start-Sleep -Milliseconds 350
     $SelectedNames = @(Get-NativeSelectionNames 'SourcePicker')
     $AfterRefresh = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $PlayingApplication $AfterRefresh 'Refreshing application sources'
     if ($SelectedNames.Count -ne 1 -or $SelectedNames[0] -ne $BrowserName -or
-        $AfterRefresh.fixture_state.source_id -ne $BrowserId -or $AfterRefresh.fixture_state.streaming_receivers -ne 2 -or
+        $AfterRefresh.fixture_state.source_id -ne $BrowserId -or
         $AfterRefresh.fixture_state.refresh_count -ne ($PlayingApplication.fixture_state.refresh_count + 1) -or
         (Wait-NativeId 'LocalMuteToggle').Current.IsEnabled) {
         throw 'Refreshing application sources changed the explicit selection/playback, skipped the core command, or enabled local mute.'
     }
     $SourceEventProof = Test-SourceEventFixture $Theme $AfterRefresh
+
+    # Explicit stop/start remains intentional. Keep the existing physical button
+    # check after exercising switches so it cannot conceal a reconnect on switch.
+    Invoke-NativeButton (Wait-NativeId 'ConnectButton')
+    Start-Sleep -Milliseconds 350
+    $StoppedApplication = Read-FixtureDiagnostics
+    if ($StoppedApplication.fixture_state.streaming_receivers -ne 0 -or $StoppedApplication.session_state -ne 'idle') {
+        throw 'Explicit stop did not disconnect the synthetic receiver sessions.'
+    }
+    $ButtonProof = Invoke-FixtureConnectPointer $Theme
+    Assert-ActiveFixtureWaveform
+    $ResumedApplication = Read-FixtureDiagnostics
+    if ($ResumedApplication.fixture_state.streaming_receivers -ne 2 -or $ResumedApplication.capture.state -ne 'signal' -or
+        $ResumedApplication.fixture_state.source_id -ne $BrowserId) {
+        throw 'The physical primary-button click did not restart the explicitly selected application.'
+    }
     $ApplicationThemes = Test-NativeThemes 'fixture-application' $true
     $script:FixtureThemeErrors = @($script:FixtureThemeErrors) + @($ApplicationThemes.errors)
 
     Select-NativeOption 'SourceModePicker' '系统声音'
     $ReturnedToSystem = Read-FixtureDiagnostics
-    if ($ReturnedToSystem.capture.source_mode -ne 'endpoint' -or $ReturnedToSystem.fixture_state.streaming_receivers -ne 0 -or
-        $ReturnedToSystem.session_state -ne 'idle' -or $ReturnedToSystem.capture.state -ne 'idle' -or
+    Assert-FixtureSessionRetention $ResumedApplication $ReturnedToSystem 'Returning to system capture'
+    if ($ReturnedToSystem.capture.source_mode -ne 'endpoint' -or $ReturnedToSystem.fixture_state.streaming_receivers -ne 2 -or
+        $ReturnedToSystem.session_state -ne 'streaming' -or $ReturnedToSystem.capture.state -ne 'signal' -or
         $ReturnedToSystem.test_tone_active -ne $false -or $ReturnedToSystem.mute_local -ne $false -or
-        @($ReturnedToSystem.receivers).Count -ne 2 -or (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
-        throw 'Returning to system capture did not stop application playback while preserving the receiver selection.'
+        @($ReturnedToSystem.receivers).Count -ne 2 -or -not (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
+        throw 'Returning to system capture did not resume the endpoint through the existing receiver sessions.'
     }
+    # Leave the next independent group-selection check in an explicitly stopped state.
+    Invoke-NativeButton (Wait-NativeId 'ConnectButton')
+    Start-Sleep -Milliseconds 350
     return [ordered]@{
         verified = $ApplicationThemes.verified; themes = $ApplicationThemes.themes; errors = $ApplicationThemes.errors
-        explicit_selection_verified = $true; mode_switch_stops_playback_verified = $true
+        explicit_selection_verified = $true; mode_switch_preserves_connections_verified = $true
+        source_switch_preserves_connections_verified = $true; empty_source_silence_verified = $true
+        discovery_refresh_preserves_connections_verified = $true
         source_refresh_retains_selection_verified = $true; local_mute_disabled_verified = $true
         active_waveform_mode_verified = $ApplicationThemes.active_waveform_mode_verified
         button_pointer_interaction_verified = $true; button_input = $ButtonProof
@@ -1014,6 +1250,14 @@ function Test-NativeStereoFixture([string] $Theme) {
         [Math]::Abs($GroupDiagnostics.fixture_state.volume - 0.73) -gt 0.001) {
         throw 'The logical group or its existing global-volume command did not match the synthetic two-member state.'
     }
+    Invoke-NativeButton (Wait-NativeId 'RefreshButton')
+    Start-Sleep -Milliseconds 350
+    $RediscoveredGroup = Read-FixtureDiagnostics
+    Assert-FixtureSessionRetention $GroupDiagnostics $RediscoveredGroup 'Native group rediscovery'
+    if ($RediscoveredGroup.fixture_state.streaming_targets -ne 1 -or
+        $RediscoveredGroup.fixture_state.discovery_refresh_count -ne ($GroupDiagnostics.fixture_state.discovery_refresh_count + 1)) {
+        throw 'Rediscovery did not preserve the complete logical group and its two receiver sessions.'
+    }
     $GroupThemes = Test-NativeThemes 'fixture-native-stereo' $true
     $script:FixtureThemeErrors = @($script:FixtureThemeErrors) + @($GroupThemes.errors)
     Send-FixtureEvent 'stereo_partial'
@@ -1038,6 +1282,7 @@ function Test-NativeStereoFixture([string] $Theme) {
         synthetic_data = $true; real_stereo_sync_claim = $false
         logical_group_card_verified = $true; member_status_verified = $true
         partial_group_not_streaming_verified = $true; group_volume_verified = $true
+        rediscovery_preserves_group_verified = $true
         hidden_member_migration_verified = $true; selected_group_id = $GroupId
     }
 }
@@ -1061,6 +1306,11 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     foreach ($Id in @('Receiver:fixture-living-room', 'Receiver:fixture-study', 'Receiver:fixture-bedroom')) {
         $null = Wait-NativeId $Id
     }
+    Assert-NativeTextAbsent '预览版'
+    $DeviceVolumeProof = Test-FixtureDeviceVolume
+    $VolumeLayoutProof = Test-NativeVolumeLayout 'fixture-volume'
+    $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 800, 0x0004)
+    Start-Sleep -Milliseconds 400
     $ThemeProof = Test-NativeThemes 'fixture-playing' $true
     $script:FixtureThemeErrors = @($ThemeProof.errors)
     $FixtureTheme = if ($ThemeProof.themes -contains 'dark') { 'dark' } else { 'theme-unverified' }
@@ -1103,11 +1353,13 @@ function Test-PopulatedVisualFixture([string] $FixtureDirectory) {
     $ApplicationProof = Test-ApplicationSourceFixture $FixtureTheme
     $StereoProof = Test-NativeStereoFixture $FixtureTheme
     return [ordered]@{
-        verified = ($ThemeProof.verified -and $ApplicationProof.verified -and $StereoProof.verified); data_source = 'CI-only replacement DLL in a separate temporary archive copy'
+        verified = ($ThemeProof.verified -and $DeviceVolumeProof.verified -and $VolumeLayoutProof.verified -and $ApplicationProof.verified -and $StereoProof.verified); data_source = 'CI-only replacement DLL in a separate temporary archive copy'
         synthetic_data = $true; real_audio_or_receiver_claim = $false
         themes = $ThemeProof.themes; errors = @($ThemeProof.errors) + @($ApplicationProof.errors) + @($StereoProof.errors); receivers = 3; initially_streaming = 2
         password_dialog_verified = $true; per_receiver_cancel_verified = $true
         populated_volume_retained = $true; compact_receivers_visible_at_top = $true
+        device_volume_ui = $DeviceVolumeProof; preview_label_absent_verified = $true
+        volume_layout_ui = $VolumeLayoutProof
         active_waveform_mode_verified = $ThemeProof.active_waveform_mode_verified
         application_source_ui_verified = $ApplicationProof.verified
         button_pointer_interaction_verified = $ApplicationProof.button_pointer_interaction_verified
@@ -1179,7 +1431,7 @@ try {
     Start-Sleep -Milliseconds 500
     Start-NativeApplication $AppPath
     $ShippedWindowHandle = $Process.MainWindowHandle.ToInt64()
-    $VolumeProof = Test-NativeVolumeLayout
+    $IdleLayoutProof = Test-NativeIdleLayout
     # Capture a fully visible compact window on the runner's actual desktop.
     $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $null = [AirloomUiProbe]::SetWindowPos($Process.MainWindowHandle, [IntPtr]::Zero, 0, 0,
@@ -1240,6 +1492,7 @@ try {
         throw 'The populated visual fixture changed the real core used for shipped-archive verification.'
     }
     $VisualErrors = @($ThemeProof.errors) + @($FixtureProof.errors)
+    $VolumeProof = $FixtureProof.volume_layout_ui
     $Result = @{
         result = $(if ($VisualErrors.Count -eq 0) { 'window-opened' } else { 'verification-failed' })
         distribution = 'portable-zip'
@@ -1249,9 +1502,12 @@ try {
         update_check_verified = $true
         update_status = $UpdateStatus
         returned_home = $true
-        volume_layout_verified = $true
-        adaptive_layout_verified = $true
-        compact_receivers_visible_at_top = $VolumeProof.compact_receivers_visible_at_top
+        volume_layout_verified = ($VolumeProof.verified -eq $true)
+        volume_evidence_source = 'connected-native-fixture'
+        adaptive_layout_verified = $IdleLayoutProof.verified
+        compact_receivers_visible_at_top = $IdleLayoutProof.compact_receivers_visible_at_top
+        idle_volume_disabled_verified = $IdleLayoutProof.no_target_volume_disabled_verified
+        native_idle_layout = $IdleLayoutProof
         pointer_drag_verified = $VolumeProof.pointer_drag_verified
         pointer_input = $VolumeProof.pointer_input
         volume_measurements = $VolumeProof.measurements
@@ -1263,7 +1519,7 @@ try {
         verification_errors = $VisualErrors
         desktop_width = [AirloomUiProbe]::GetSystemMetrics(0)
         desktop_height = [AirloomUiProbe]::GetSystemMetrics(1)
-        note = 'Checks run the real WinUI executable from the shipped archive. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated states, application-source controls, button input, and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio capture or transport. No physical HomePod was connected to CI.'
+        note = 'Checks run the real WinUI executable from the shipped archive. The shipped core verifies idle layout and disabled/unknown volume without a receiver. Volume pointer/value checks use the same native executable with connected synthetic receivers and are explicitly identified as connected-native-fixture. Verification booleans and verification_errors record which stages passed; any verification error fails CI after independent visual stages finish. Separately named fixture-* screenshots use a CI-only replacement DLL in an isolated copy for populated states, application-source controls, button input, and password-dialog checks. Fixture data is synthetic, was not shipped, and is not evidence of audio capture or transport. No physical HomePod was connected to CI.'
     } | ConvertTo-Json -Depth 12
     [System.IO.File]::WriteAllText((Join-Path $EvidencePath 'native-smoke.json'), $Result,
         [System.Text.UTF8Encoding]::new($false))

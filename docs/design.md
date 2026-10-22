@@ -2,6 +2,8 @@
 
 Airloom's desktop shell is **WinUI 3, C++/WinRT and XAML**. Capture, discovery, authentication, credentials, transport and reconnection belong to the Rust core. The shell hosts no browser or WebView UI. [PRODUCT.md](../PRODUCT.md) describes the product's job; [DESIGN.md](../DESIGN.md) defines the visual system.
 
+The current visual baseline is the [0.4.2 native redesign](design/ui-0.4.2.md). Earlier composition and acceptance evidence below retain their original version attribution. The source/session and volume contracts in this document are updated for [0.4.3](releases/0.4.3.md); its runtime evidence must come from its own build and release artifacts.
+
 ## Home and settings
 
 The 0.4.0 home retains the compact audio workspace introduced in 0.3.0: a source-and-status strip above a dark instrument display, an adjacent receiver panel when space permits, and a persistent transport dock below. The window header carries the Airloom identity and settings action. Source information now distinguishes the shared mix of a Windows output from a selected application's process tree. Selected-target text summarizes real selections; receiver rows show their individual states. The instrument displays real left/right levels, the peak envelope, sample rate, elapsed transfer time and packet count. A short test tone helps isolate capture problems.
@@ -26,7 +28,7 @@ Labels use 14-pixel semibold Segoe and glyphs use 16 pixels with an 8-pixel gap.
 
 The primary dock action is 152 × 44 pixels. Its icon, label and loading indicator use the same reserved content region; the authentication action remains inside the existing 88-pixel action row. Settings, test tone, refresh, hide/restore and diagnostics use the corresponding hierarchy rather than independent padding and heights. The source refresh button is 104 pixels wide so changing from **刷新列表** to **正在刷新…** cannot move its edge. These dimensions were checked in the final 0.4.0 native UI run below.
 
-## Explicit sound-source scope (0.4.0)
+## Explicit sound-source scope (0.4.3)
 
 `SourceModePicker` selects `endpoint` (**系统声音**) or `application` (**指定应用**). It reserves a 134-pixel column before the flexible `SourcePicker`; status keeps a separate 154-pixel column. Both selectors and the 104-pixel refresh action remain in the source strip at the minimum 880 × 680 window. Source scope and refresh start disabled until a valid core snapshot enables them. Their accessible names and tooltips describe the active scope.
 
@@ -34,10 +36,10 @@ Endpoint mode keeps the existing shared-output loopback path. Application mode u
 
 The scope rules are explicit:
 
-- Switching between system and application modes stops the current route, retains receiver selection, clears the source choice and refreshes sources for the new mode. It does not resume a different scope automatically.
-- Application enumeration never chooses an app on the person's behalf. Connecting requires an available source of the selected kind. A late scan for the previous scope cannot replace the current list.
-- Changing to a valid source within the current scope preserves selected receivers and can restart an already active route around the new capture session.
-- An exited or unavailable app never falls back to another app or the system mix. A restarted process has a new identity and must be selected again.
+- Switching between system and application modes preserves active receiver sessions and replaces only Windows capture. Application mode clears the source choice and waits with zero audio until the person chooses an app; endpoint mode resolves its normal default output. Switching capture may cause a brief silent interval.
+- Application enumeration never chooses an app on the person's behalf. Starting a new route requires an available source; a retained route can wait silently without one. A late scan for the previous scope cannot replace the current list.
+- Changing a valid endpoint or application source clears local old-source audio and resumes capture through the same receiver sessions and sender timeline.
+- An exited or unavailable app never falls back to another app or the system mix. Existing receiver sessions wait with zero audio. A restarted process has a new identity and must be selected again. The stop action and independent test tone remain available on connected receivers.
 - Process-tree capture is not tab selection: tabs in one browser instance may be captured together. The source explanation makes that boundary visible.
 - Application mode sets local mute off and disables **电脑静音**. Local playback continues; the app's output routing is unchanged. The core also rejects endpoint mute in this scope.
 
@@ -51,10 +53,12 @@ The replacement has four protections:
 
 1. `PageContent` owns the workspace viewport width, and the transport dock owns its separate full-width row. A changing label cannot recenter the page or change the receiver panel's column width.
 2. The percentage has a fixed 52 effective pixel width and tabular numerals. Status and transport controls also have reserved slots.
-3. A local value remains authoritative while a pointer is held, while a command is pending, or while acknowledgement is outstanding. A matching snapshot releases that protection. A three-second acknowledgement timeout reports a recoverable error.
+3. An explicit input value remains authoritative while a pointer is held, while a command is pending, or while acknowledgement is outstanding. A matching known, nonmixed snapshot releases that protection. A three-second acknowledgement timeout reports a recoverable error after connection/authentication completes; a changed target selection or fully stopped route clears the pending value.
 4. Receiver rows are keyed by ID and updated in place. State changes do not clear and rebuild the list. Frequently updated text and updater controls are assigned only when changed.
 
-Slider changes update the percentage immediately. Commands debounce by 180 ms; pointer release flushes the final position. Native routed pointer events are observed with `handledEventsToo` without replacing the slider's own capture or interaction. With an available core, the slider is usable before selecting a receiver so starting volume can be chosen in advance.
+Receiver readings initialize the control without producing a command. `volume_known` means every selected receiver/member has a valid reading; `volume_mixed` means those readings differ by at least 0.5 percentage points. Known uniform values show a percentage, mixed values show `不同` with the first receiver's reading as the slider reference, and incomplete readings show `—`. Volume is not persisted locally or automatically written on connection.
+
+Explicit slider changes update the percentage immediately. Commands debounce by 180 ms; pointer release flushes the final position. Native routed pointer events are observed with `handledEventsToo` without replacing the slider's own capture or interaction. Without a selected connected/connecting target the slider is disabled; an established target with an unknown reading still permits a deliberate setting. No preconnection value is stored for later receivers.
 
 Native UI Automation bounds require a specific distinction here. In the [WinUI 1.8.1 slider template](https://github.com/microsoft/microsoft-ui-xaml/blob/winui3/release/1.8.1/src/controls/dev/CommonStyles/Slider_themeresources.xaml), the thumb's outer border has a negative two-pixel margin. At an endpoint it therefore extends outside the track. The inherited [automation peer](https://github.com/microsoft/microsoft-ui-xaml/blob/winui3/release/1.8.1/src/dxaml/xcp/dxaml/lib/FrameworkElementAutomationPeer_partial.cpp) obtains global bounds from an element whose [inner bounds include its children's outer bounds](https://github.com/microsoft/microsoft-ui-xaml/blob/winui3/release/1.8.1/src/dxaml/xcp/core/core/elements/uielement.cpp). A two-pixel endpoint change in the slider peer rectangle is not itself evidence of a layout shift.
 
@@ -74,7 +78,7 @@ Windows animation preferences govern decorative fades, the spinner and waveform.
 
 ## Multiple receivers and authentication
 
-The core supports eight selected receivers. Selection and state are separate fields. Adding a target while another streams starts only the new target; removing one stops only that target. Retry can address a failed receiver. Changing a source within the same scope preserves selected receivers and reconnects active routes around the replacement capture session; changing scope follows the explicit stop-and-select rules above.
+The core supports eight selected receivers. Selection and state are separate fields. Adding a target while another streams starts only the new target; removing one stops only that target. Retry can address a failed receiver. Source changes, scope changes and manual rediscovery retain established receiver sessions. Actual transport failure, explicit removal or changed native-group membership can still require recovery.
 
 Each independent target receives the complete stereo stream. This does not implement Apple's native HomePod stereo pairing or a software left/right assignment. Existing Apple stereo pairs are not yet verified with real hardware. The interface must not present an unimplemented grouping switch; [stereo.md](stereo.md) records the support boundary and required hardware evidence.
 
@@ -106,6 +110,8 @@ void  airloom_free_string(char* json_utf8);
 The UI accepts snapshot schema version 1, validates types and finite numbers, limits decoded lists, and rejects incompatible or oversized responses. `selected_device_id` remains a legacy first-selection field; `selected_device_ids` contains all selections. Devices expose selection, state, status, optional error and counters. `capture` is separate; `test_tone_active` reports the tone. Definitions live in [model.rs](../crates/airloom-core/src/model.rs) and [Models.cpp](../native/Airloom/Models.cpp).
 
 The additive 0.4.0 source fields are `source_mode`, `sources_refreshing` and `source_message`; source entries carry their `kind`. The native model defaults absent `source_mode` to `endpoint`. These fields describe scope and readiness without exposing process handles across the ABI.
+
+The additive 0.4.3 volume fields are `volume_known` and `volume_mixed`, both defaulting to false when absent. `volume` remains the numeric slider reference; it is not proof that a receiver reported a value unless `volume_known` is true. Rendering these fields never issues `set_volume`.
 
 | Command | Fields beyond `type` |
 | --- | --- |
@@ -144,17 +150,25 @@ Theme, waveform and visibility preferences live under `HKCU\Software\Airloom`; p
 
 ## Verification
 
+### 0.4.3 source and release gates
+
+The updated [Windows smoke](../scripts/smoke-windows.ps1) separates shipped-core idle evidence from connected UI fixtures. The shipped core checks three window sizes, a disabled/unknown volume control without a target, and no startup volume acknowledgement error. The same WinUI executable in the isolated connected fixture checks 0/9/10/99/100, native pointer input, and layout stability; its screenshots are named `fixture-volume-*`.
+
+The device-volume fixture first supplies equal readings, mixed readings, and a failed member reading. All three must produce zero volume-write commands; only an actual pointer drag may change the selected targets. Source changes, scope changes, manual rediscovery and automatic source-list events must preserve fixture connection identities and creation/disconnection counters. An unselected app source must retain sessions with zero audio. A separate group check covers rediscovery with two members.
+
+These new checks are release requirements, not a statement that the current working tree has passed Windows or HomePod testing. Runtime results and images belong to the corresponding CI run/release. The synthetic command fixture does not establish production sender reads, receiver transport continuity or acoustic output; sender/core protocol regressions cover their own layer separately.
+
 ### 0.4.0 source and release gates
 
 Source `7c5133e006ec0be13017ec21084680518c95082f` passed both jobs and every gate in [CI 39583891772](https://github.com/chummumm/airloom/actions/runs/39583891772). This includes regular tests, the explicitly invoked Windows process-loopback API test, native build and packaging, the complete native UI smoke, and independent updater/process lifecycle checks. The screenshots reviewed and stored for 0.4.0 come from that run's final artifact.
 
 [Windows smoke](../scripts/smoke-windows.ps1) operates the real WinUI executable from the portable archive through .NET UI Automation and checked `SendInput`. It records 15 volume measurements at 0/9/10/99/100 across 880 × 680, 1100 × 800 and 1600 × 1000, acknowledgement retention, actual pointer drag, settings/back navigation, read-only update checking, restricted diagnostic clipboard content and both themes. At 880 × 680 the first two receiver rows and persistent dock are visible before scrolling. The management footer can be partially clipped at the ordinary outer scroll boundary, matching the preceding layout; the dock does not overlap the scroll viewer.
 
-### Native presentation and interaction
+### 0.4.0 native presentation and interaction
 
 Final light/dark application home and settings, native unavailable-output layouts, compact populated home and dark button states were inspected directly. Source names, primary/secondary labels and instrument text fit without a new blocking truncation. The 64 envelope bars stay inside their guides. The primary button retains its 44-pixel height and stable bounds through physical hover, press and release, with visibly distinct dark-theme resting, hover and pressed fills.
 
-The source fixture starts with two streaming receivers in system mode. Switching to app mode stops capture and transmission, clears the source selection and disables playback until an explicit app is chosen. A physical primary-button click starts the selected synthetic app. Refresh preserves that selection and playback; returning to system mode stops the route while preserving receivers. Local mute is cleared and disabled in app mode. These outcomes are checked through the real native command path and fixture diagnostics.
+The historical 0.4.0 source fixture started with two streaming receivers in system mode. Switching to app mode stopped capture and transmission, cleared the source selection and disabled playback until an explicit app was chosen. A physical primary-button click started the selected synthetic app. Refresh preserved that selection and playback; returning to system mode stopped the route while preserving receiver selection. Local mute was cleared and disabled in app mode. These were the checked 0.4.0 outcomes; the 0.4.3 continuity gates above replace the stop-on-switch contract.
 
 `SetFocus` plus `HasKeyboardFocus` verifies **UIA logical focus**. The corresponding screenshot has no visible ring change and does not establish keyboard-focus-ring rendering. Standard native focus templates remain in place; no additional keyboard test is claimed.
 

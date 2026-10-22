@@ -45,6 +45,28 @@ namespace
             state == L"reconnecting" || state == L"auth_required";
     }
 
+    bool HasVolumeTarget(Snapshot const& snapshot)
+    {
+        return std::any_of(snapshot.devices.begin(), snapshot.devices.end(), [&](Device const& device)
+            {
+                return snapshot.IsSelected(device.id) && (IsActive(device.state) ||
+                    std::any_of(device.members.begin(), device.members.end(), [&](auto const& member)
+                        { return IsActive(member.state); }));
+            });
+    }
+
+    bool HasConnectingVolumeTarget(Snapshot const& snapshot)
+    {
+        auto const connecting = [](hstring const& state)
+            { return state == L"connecting" || state == L"reconnecting" || state == L"auth_required"; };
+        return std::any_of(snapshot.devices.begin(), snapshot.devices.end(), [&](Device const& device)
+            {
+                return snapshot.IsSelected(device.id) && (connecting(device.state) ||
+                    std::any_of(device.members.begin(), device.members.end(), [&](auto const& member)
+                        { return connecting(member.state); }));
+            });
+    }
+
     bool HighContrastEnabled()
     {
         HIGHCONTRASTW settings{sizeof(settings)};
@@ -448,11 +470,13 @@ namespace winrt::Airloom::implementation
         if (next.state == L"error") { badge = L"连接未完成"; description = L"查看上方提示后，再试一次。"; action = L"重新连接"; }
         // Keep an actionable failure in one place. Capture-source errors belong
         // beside the source control; session/network errors retain the banner.
-        if (sourceError)
+        if ((sourceError || (streaming && !hasSource)) && !auth)
         {
             badge = applicationSource ? L"等待选择应用" : L"等待音频输出";
-            description = device ? L"完成声音来源设置后，就能连接已选扬声器。" : L"先选择声音来源和扬声器。";
-            action = L"开始投放";
+            description = streaming ? L"扬声器连接已保留；选择声音来源后继续投放。" :
+                active ? L"扬声器正在连接；完成声音来源设置后继续投放。" :
+                device ? L"完成声音来源设置后，就能连接已选扬声器。" : L"先选择声音来源和扬声器。";
+            if (!active) action = L"开始投放";
         }
 
         hstring targets;
@@ -485,30 +509,58 @@ namespace winrt::Airloom::implementation
         ForgetButton().IsEnabled(device != nullptr && !active);
         ForgetLabel().Text(device ? L"忘记“" + device->name + L"”" : L"忘记设备凭据");
         ToolTipService::SetToolTip(ForgetButton(), box_value(device ? L"忘记“" + device->name + L"”的凭据" : hstring(L"先在首页选择一台扬声器")));
-        // Volume is editable before connection. Local input remains authoritative
-        // through the debounce AND acknowledgement, not just until command enqueue.
-        VolumeSlider().IsEnabled(m_engine.Available());
+        // Only a user adjustment sends volume. Device readings update this control
+        // under RenderGuard; local input stays authoritative until acknowledged.
+        bool const canAdjustVolume = m_engine.Available() && HasVolumeTarget(next);
+        if (!canAdjustVolume || m_snapshot.selectedDeviceIds != next.selectedDeviceIds)
+        {
+            // A queued gesture belongs to its original receivers, never a future
+            // selection. Clear it before disabling releases pointer capture.
+            if (m_volumeTimer) m_volumeTimer.Stop();
+            m_volumePending = false;
+            m_volumeAwaitingAck = false;
+            m_volumePointerDown = false;
+        }
+        VolumeSlider().IsEnabled(canAdjustVolume);
+        bool const volumeKnown = canAdjustVolume && next.volumeKnown;
         auto const volumeHeading = device && next.selectedDeviceIds.size() == 1 && device->kind == L"native_stereo"
             ? L"组合音量" : L"扬声器音量";
         SetText(VolumeHeading(), volumeHeading);
         SetAccessibleName(VolumeSlider(), volumeHeading);
         if (m_volumeAwaitingAck && !m_volumePending)
         {
-            if (std::abs(next.volume - m_pendingVolume) < 0.0005)
+            if (next.volumeKnown && !next.volumeMixed && std::abs(next.volume - m_pendingVolume) < 0.0005)
                 m_volumeAwaitingAck = false;
+            else if (HasConnectingVolumeTarget(next) || HasConnectingVolumeTarget(m_snapshot))
+                m_volumeAckDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
             else if (!m_volumePointerDown && std::chrono::steady_clock::now() >= m_volumeAckDeadline)
             {
                 m_volumeAwaitingAck = false;
-                ShowLocalError(L"音量调整尚未确认，已恢复显示当前音量。请重试。");
+                ShowLocalError(next.volumeKnown
+                    ? L"音量调整尚未确认，已恢复显示当前音量。请重试。"
+                    : L"未能确认扬声器音量，请稍后再试。");
             }
         }
         if (!m_volumePending && !m_volumeAwaitingAck && !m_volumePointerDown)
         {
             auto const value = std::round(next.volume * 100.0);
             if (VolumeSlider().Value() != value) VolumeSlider().Value(value);
-            SetText(VolumeLabel(), to_hstring(static_cast<int>(value)) + L"%");
+            SetText(VolumeLabel(), !volumeKnown ? hstring(L"—") : next.volumeMixed ? hstring(L"不同") :
+                to_hstring(static_cast<int>(value)) + L"%");
             UpdateVolumeGlyph(value);
         }
+        hstring const volumeHelp = !canAdjustVolume ? L"连接扬声器后可调节音量。"
+            : m_volumePending || m_volumeAwaitingAck
+            ? L"正在调整所选扬声器的音量。"
+            : !next.volumeKnown ? L"尚未读取到所选扬声器的当前音量；手动调节会设置所选扬声器的音量。"
+            : next.volumeMixed ? L"所选扬声器的音量不同，滑块参考第一台设备；只有手动调节才会统一音量。"
+            : L"当前音量来自所选扬声器；手动调节会设置所选扬声器的音量。";
+        ToolTipService::SetToolTip(VolumeSlider(), box_value(volumeHelp));
+        ToolTipService::SetToolTip(VolumeSliderHost(), box_value(volumeHelp));
+        ToolTipService::SetToolTip(VolumeLabel(), box_value(volumeHelp));
+        Automation::AutomationProperties::SetHelpText(VolumeSlider(), volumeHelp);
+        SetAccessibleName(VolumeLabel(), !volumeKnown && !m_volumePending && !m_volumeAwaitingAck
+            ? hstring(L"扬声器音量未读取") : VolumeLabel().Text());
         LocalMuteToggle().IsEnabled(hasSource && !applicationSource);
         LocalMuteLabel().Foreground(Brush(hasSource && !applicationSource ? L"InkBrush" : L"DisabledTextBrush"));
         ToolTipService::SetToolTip(LocalMuteToggle(), box_value(applicationSource
@@ -516,7 +568,7 @@ namespace winrt::Airloom::implementation
             : L"静音所选 Windows 输出；断开后恢复。若采集无声，请先关闭。"));
         LocalMuteToggle().IsOn(next.muteLocal);
         // Keep the transport slot stable when source enumeration finishes or fails.
-        TestToneButton().IsEnabled(streaming && !sourceError);
+        TestToneButton().IsEnabled(streaming);
         SourceRetryButton().IsEnabled(m_engine.Available() && !next.sourcesRefreshing);
         SetText(SourceRetryLabel(), next.sourcesRefreshing ? L"正在刷新…" : L"刷新列表");
         SpinGlyph(SourceRetryGlyph(), next.sourcesRefreshing, m_sourceSpinRunning);
@@ -1121,10 +1173,11 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::OnVolumeChanged(IInspectable const&, RangeBaseValueChangedEventArgs const& args)
     {
-        if (m_rendering || !m_loaded || !m_volumeTimer) return;
+        if (m_rendering || !m_loaded || !m_volumeTimer || !VolumeSlider().IsEnabled() || !HasVolumeTarget(m_snapshot)) return;
         m_pendingVolume = std::clamp(args.NewValue() / 100.0, 0.0, 1.0);
         m_volumePending = true;
         SetText(VolumeLabel(), to_hstring(static_cast<int>(std::round(args.NewValue()))) + L"%");
+        SetAccessibleName(VolumeLabel(), VolumeLabel().Text());
         UpdateVolumeGlyph(args.NewValue());
         m_volumeTimer.Stop();
         m_volumeTimer.Start();
@@ -1141,6 +1194,12 @@ namespace winrt::Airloom::implementation
     {
         m_volumeTimer.Stop();
         if (!m_volumePending || m_exiting) return;
+        if (!VolumeSlider().IsEnabled() || !HasVolumeTarget(m_snapshot))
+        {
+            m_volumePending = false;
+            m_volumeAwaitingAck = false;
+            return;
+        }
         auto command = MakeCommand(L"set_volume");
         command.Insert(L"volume", JsonValue::CreateNumberValue(m_pendingVolume));
         bool const accepted = Send(command);

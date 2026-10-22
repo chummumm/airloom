@@ -45,7 +45,7 @@ fn options(password: &str) -> ConnectOptions {
         password: Some(password.into()),
         credentials: None,
         latency: Duration::from_millis(750),
-        initial_volume: 0.25,
+        initial_volume: None,
         timing: TimingMode::Ntp,
     }
 }
@@ -504,6 +504,7 @@ async fn password_digest_encrypted_stream_events_ntp_and_retransmission() {
     let mut sender = Sender::connect(receiver.device, options(PASSWORD))
         .await
         .unwrap();
+    assert_eq!(sender.volume(), None);
     let offer = receiver.offer.await.unwrap();
     offer.event_ack.await.unwrap();
     let timing = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -578,6 +579,8 @@ async fn password_digest_encrypted_stream_events_ntp_and_retransmission() {
     assert_eq!(&buffer[..4], &[0x80, 0xd6, 0, 25]);
     assert_eq!(&buffer[4..size], packets[0]);
     sender.volume_control().set_volume(0.6).await.unwrap();
+    assert_eq!(sender.volume(), Some(0.6));
+    assert_eq!(sender.volume_control().volume(), Some(0.6));
     let metrics = sender.metrics();
     assert_eq!(metrics.packets_sent, 3);
     assert_eq!(metrics.retransmissions_sent, 1);
@@ -606,7 +609,66 @@ async fn password_digest_encrypted_stream_events_ntp_and_retransmission() {
     sender.stop().await.unwrap();
     let report = receiver.task.await.unwrap();
     assert!(report.digest_verified && report.event_ack);
-    assert_eq!(report.volumes.len(), 2);
+    assert_eq!(report.volumes, ["volume: -11.999999\r\n"]);
+}
+
+#[tokio::test]
+async fn connect_reads_receiver_volume_without_changing_it() {
+    for (reported, expected) in [
+        (Some(Value::Real(-9.0)), Some(0.7)),
+        (Some(Value::Integer((-15i64).into())), Some(0.5)),
+        (Some(Value::Real(-144.0)), Some(0.0)),
+        (None, None),
+        (Some(Value::String("invalid".into())), None),
+    ] {
+        let mut fields = vec![
+            ("model", Value::String("AirloomTestReceiver".into())),
+            ("features", integer((1u64 << 38) | (1u64 << 48))),
+        ];
+        if let Some(volume) = reported {
+            fields.push(("initialVolume", volume));
+        }
+        let receiver = start_receiver_with_info(
+            "127.0.0.1".parse().unwrap(),
+            PASSWORD,
+            false,
+            1,
+            Some(plist(fields)),
+        )
+        .await;
+        let mut sender = Sender::connect(receiver.device, options(PASSWORD))
+            .await
+            .unwrap();
+        assert_eq!(sender.volume(), expected);
+        receiver.offer.await.unwrap().event_ack.await.unwrap();
+
+        // Missing or malformed optional volume must still allow real media.
+        sender.send_pcm(&[1234; 704]).await.unwrap();
+        let mut packet = [0; 2048];
+        let (size, _) = timeout(Duration::from_secs(1), receiver.data.recv_from(&mut packet))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(size > 12);
+        sender.stop().await.unwrap();
+        let report = receiver.task.await.unwrap();
+        assert!(report.volumes.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn explicit_connect_volume_is_the_only_initial_write() {
+    let receiver = start_receiver(PASSWORD, false, 1).await;
+    let mut connect = options(PASSWORD);
+    connect.initial_volume = Some(0.5);
+    let mut sender = Sender::connect(receiver.device, connect).await.unwrap();
+    assert_eq!(sender.volume(), Some(0.5));
+    receiver.offer.await.unwrap().event_ack.await.unwrap();
+    sender.stop().await.unwrap();
+    assert_eq!(
+        receiver.task.await.unwrap().volumes,
+        ["volume: -15.000000\r\n"]
+    );
 }
 
 fn decode_uncompressed_stereo_frame(payload: &[u8]) -> Vec<i16> {

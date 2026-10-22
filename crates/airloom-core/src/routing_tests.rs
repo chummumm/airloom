@@ -58,7 +58,7 @@ fn ids(values: impl IntoIterator<Item = impl AsRef<str>>) -> BTreeSet<String> {
 fn attach(actor: &mut Actor, id: &str) -> mpsc::Receiver<MediaBlock> {
     actor.selected.push(id.into());
     let (audio, received) = mpsc::channel(4);
-    let (volume, _) = watch::channel(0.5);
+    let (volume, _) = watch::channel(None);
     let (stop, mut stopped) = watch::channel(false);
     let task = tokio::spawn(async move {
         while stopped.changed().await.is_ok() {
@@ -76,7 +76,7 @@ fn attach(actor: &mut Actor, id: &str) -> mpsc::Receiver<MediaBlock> {
         volume,
         stop,
         task,
-        progress: Arc::new(Mutex::new(SenderMetrics::default())),
+        progress: Arc::new(Mutex::new(TargetProgress::default())),
         started: Instant::now(),
     });
     actor.running = true;
@@ -85,6 +85,7 @@ fn attach(actor: &mut Actor, id: &str) -> mpsc::Receiver<MediaBlock> {
 
 async fn shutdown(actor: &mut Actor) {
     actor.stop_all();
+    actor.finish_capture_shutdown().await;
     for route in actor.routes.values_mut() {
         if let Some(task) = route.cleanup.take() {
             task.await.unwrap();

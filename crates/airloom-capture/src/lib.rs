@@ -16,6 +16,8 @@ mod pipeline;
 #[cfg(windows)]
 #[path = "platform/windows.rs"]
 mod platform;
+#[cfg(any(windows, test))]
+mod worker_result;
 
 use std::time::Duration;
 use thiserror::Error;
@@ -241,6 +243,8 @@ impl CaptureStream {
     }
 
     /// Stops capture and restores an owned local mute change. Idempotent.
+    /// Reports cleanup or worker-join failures; source failures are delivered
+    /// separately by `read_timeout` and do not prevent replacing a stopped stream.
     pub fn stop(&mut self) -> Result<()> {
         #[cfg(windows)]
         {

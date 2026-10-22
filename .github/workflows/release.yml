@@ -71,6 +71,9 @@ jobs:
           for IMAGE in fixture-source-events-dropdown-dark fixture-native-stereo-home-light fixture-native-stereo-home-dark fixture-native-stereo-settings-light fixture-native-stereo-settings-dark fixture-native-stereo-partial-dark; do
             test -s "release-assets/artifacts/$IMAGE.png"
           done
+          for IMAGE in fixture-device-volume-known fixture-device-volume-mixed fixture-device-volume-unknown fixture-device-volume-adjusted fixture-volume-window-880 fixture-volume-window-1100 fixture-volume-window-1600; do
+            test -s "release-assets/artifacts/$IMAGE.png"
+          done
           python3 - <<'PY'
           import json
           with open('release-assets/artifacts/native-smoke.json', encoding='utf-8-sig') as source:
@@ -80,6 +83,11 @@ jobs:
           assert proof.get('update_check_verified') is True, 'Live update check is missing.'
           assert proof.get('returned_home') is True, 'Native settings navigation check is missing.'
           assert proof.get('volume_layout_verified') is True, 'Native volume geometry check is missing.'
+          assert proof.get('volume_evidence_source') == 'connected-native-fixture', 'Connected volume evidence provenance is missing.'
+          assert proof.get('idle_volume_disabled_verified') is True, 'No-target volume must remain disabled.'
+          idle = proof.get('native_idle_layout', {})
+          assert idle.get('synthetic_data') is False and idle.get('verified') is True, 'Shipped-core idle layout evidence is missing.'
+          assert idle.get('no_startup_volume_ack_error_verified') is True, 'Idle startup volume side-effect check is missing.'
           assert proof.get('adaptive_layout_verified') is True, 'Wide and compact native composition checks are missing.'
           assert proof.get('compact_receivers_visible_at_top') is True, 'Compact receiver selection is hidden below the initial viewport.'
           assert proof.get('pointer_drag_verified') is True, 'Native volume pointer interaction is missing.'
@@ -90,15 +98,30 @@ jobs:
           assert fixture.get('synthetic_data') is True and fixture.get('real_audio_or_receiver_claim') is False, 'Visual fixture provenance is missing.'
           assert fixture.get('password_dialog_verified') is True and fixture.get('per_receiver_cancel_verified') is True, 'Native authentication presentation/cancel checks are missing.'
           assert fixture.get('populated_volume_retained') is True, 'Populated native volume check is missing.'
+          assert fixture.get('preview_label_absent_verified') is True, 'Preview label removal check is missing.'
+          volume_layout = fixture.get('volume_layout_ui', {})
+          assert volume_layout.get('verified') is True and volume_layout.get('synthetic_data') is True, 'Connected fixture volume layout evidence is missing.'
+          assert volume_layout.get('pointer_drag_verified') is True, 'Connected fixture volume drag check is missing.'
+          volume = fixture.get('device_volume_ui', {})
+          assert volume.get('synthetic_data') is True and volume.get('real_receiver_volume_claim') is False, 'Device-volume fixture provenance is missing.'
+          for key in ('verified', 'startup_read_only_verified', 'mixed_volume_read_only_verified',
+                      'unknown_volume_read_only_verified', 'explicit_drag_sets_targets_verified',
+                      'stable_volume_layout_verified'):
+              assert volume.get(key) is True, f'Device-volume UI gate is missing: {key}'
           assert fixture.get('active_waveform_mode_verified') is True, 'Animation-enabled native waveform evidence is missing.'
           assert fixture.get('application_source_ui_verified') is True, 'Explicit application-source UI checks are missing.'
           assert fixture.get('button_pointer_interaction_verified') is True, 'Native button pointer/focus checks are missing.'
           assert fixture.get('source_event_ui_verified') is True, 'Event-driven source UI checks are missing.'
           assert fixture.get('native_stereo_ui_verified') is True, 'Native stereo group UI checks are missing.'
           application = fixture.get('application_source_ui', {})
-          for key in ('explicit_selection_verified', 'mode_switch_stops_playback_verified', 'source_refresh_retains_selection_verified', 'local_mute_disabled_verified', 'active_waveform_mode_verified'):
+          for key in ('explicit_selection_verified', 'mode_switch_preserves_connections_verified',
+                      'source_switch_preserves_connections_verified', 'empty_source_silence_verified',
+                      'discovery_refresh_preserves_connections_verified', 'source_refresh_retains_selection_verified',
+                      'local_mute_disabled_verified', 'active_waveform_mode_verified'):
               assert application.get(key) is True, f'Application-source UI gate is missing: {key}'
           assert set(application.get('themes', [])) == {'light', 'dark'}, 'Application-mode theme evidence is missing.'
+          stereo = fixture.get('native_stereo_ui', {})
+          assert stereo.get('rediscovery_preserves_group_verified') is True, 'Native group discovery continuity check is missing.'
           with open('release-assets/artifacts/process-capture-api.txt', encoding='utf-8-sig') as source:
               assert 'Real process loopback passed:' in source.read(), 'Real Windows process capture lifecycle check is missing.'
           with open('release-assets/artifacts/source-notifications-api.txt', encoding='utf-8-sig') as source:
@@ -142,4 +165,11 @@ jobs:
             release-assets/artifacts/fixture-native-stereo-home-dark.png \
             release-assets/artifacts/fixture-native-stereo-settings-light.png \
             release-assets/artifacts/fixture-native-stereo-settings-dark.png \
-            release-assets/artifacts/fixture-native-stereo-partial-dark.png
+            release-assets/artifacts/fixture-native-stereo-partial-dark.png \
+            release-assets/artifacts/fixture-device-volume-known.png \
+            release-assets/artifacts/fixture-device-volume-mixed.png \
+            release-assets/artifacts/fixture-device-volume-unknown.png \
+            release-assets/artifacts/fixture-device-volume-adjusted.png \
+            release-assets/artifacts/fixture-volume-window-880.png \
+            release-assets/artifacts/fixture-volume-window-1100.png \
+            release-assets/artifacts/fixture-volume-window-1600.png

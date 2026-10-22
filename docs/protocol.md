@@ -38,6 +38,22 @@ its receiver-specific workers and sockets. The shared PTP listener intentionally
 retains UDP 319/320 for the application lifetime, independently of individual
 receiver sessions; a stopped receiver only removes its own routing entry.
 
+### Receiver volume (0.4.3)
+
+The connection reads the receiver's optional `initialVolume` from `/info` and
+exposes a valid reading to the core. Missing, invalid or unavailable readings
+remain unknown. Connecting does not send a default volume, and reconnecting does
+not replay a locally saved volume. The core aggregates selected receivers and
+native-group members: fully known equal readings show a percentage; differing
+readings show a mixed state; incomplete readings show an unknown state.
+
+Only explicit user volume changes issue volume writes to the current targets.
+The native control updates from incoming snapshots without echoing a write.
+Changing the Windows capture source or refreshing discovery also leaves receiver
+volume untouched. These control semantics are covered separately by sender/core
+protocol tests and the synthetic native UI command fixture; the UI fixture cannot
+establish an actual HomePod volume reading.
+
 ## Discovery and authentication
 
 Discovery merges `_airplay._tcp.local.` and `_raop._tcp.local.` records by device

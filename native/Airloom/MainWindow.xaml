@@ -64,7 +64,6 @@
                             <Rectangle Width="3" Height="11" RadiusX="1.5" RadiusY="1.5" Fill="{ThemeResource AccentFillColorDefaultBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,1,0" />
                         </Grid>
                         <TextBlock Text="Airloom" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <TextBlock x:Name="TitleSubtitle" Text="预览版" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Grid>
                 <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource TitleBarButtonStyle}" Click="OnOpenSettings"
@@ -105,7 +104,7 @@
                                                    MaxLines="2" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="CaptureStatusText" AutomationProperties.LiveSetting="Polite" />
                                     </StackPanel>
                                     <ComboBox x:Name="SourceModePicker" Grid.Column="2" Width="120" IsEnabled="False" SelectedIndex="0" VerticalAlignment="Center" SelectionChanged="OnSourceModeChanged"
-                                              AutomationProperties.Name="声音来源类型" AutomationProperties.AutomationId="SourceModePicker" ToolTipService.ToolTip="选择系统声音或指定应用；切换类型会停止当前投放。">
+                                              AutomationProperties.Name="声音来源类型" AutomationProperties.AutomationId="SourceModePicker" ToolTipService.ToolTip="选择系统声音或指定应用；切换时保持扬声器连接。">
                                         <ComboBoxItem Content="系统声音" Tag="endpoint" />
                                         <ComboBoxItem Content="指定应用" Tag="application" />
                                     </ComboBox>
@@ -279,10 +278,10 @@
                         <FontIcon x:Name="VolumeGlyph" Grid.Column="1" Glyph="&#xE995;" FontSize="16" Width="20" VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw" />
                         <Grid x:Name="VolumeSliderHost" Grid.Column="2" Padding="2,0" Background="Transparent" VerticalAlignment="Center"
                               AutomationProperties.AutomationId="VolumeSliderHost" AutomationProperties.Name="扬声器音量轨道" AutomationProperties.AccessibilityView="Content">
-                            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="75" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged"
+                            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="50" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged"
                                     VerticalAlignment="Center" AutomationProperties.Name="扬声器音量" AutomationProperties.AutomationId="VolumeSlider" IsEnabled="False" />
                         </Grid>
-                        <TextBlock x:Name="VolumeLabel" Grid.Column="3" Text="75%" Style="{StaticResource BodyTextBlockStyle}" Width="52" TextAlignment="Right" VerticalAlignment="Center"
+                        <TextBlock x:Name="VolumeLabel" Grid.Column="3" Text="—" Style="{StaticResource BodyTextBlockStyle}" Width="52" TextAlignment="Right" VerticalAlignment="Center"
                                    TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" AutomationProperties.AutomationId="VolumeValue" />
                     </Grid>
 

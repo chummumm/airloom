@@ -105,11 +105,18 @@ struct Access {
 /// One independently paced receiver. It never reads the WASAPI queue itself.
 struct ActiveTarget {
     audio: mpsc::Sender<MediaBlock>,
-    volume: watch::Sender<f32>,
+    volume: watch::Sender<Option<f32>>,
     stop: watch::Sender<bool>,
     task: Task<()>,
-    progress: Arc<Mutex<SenderMetrics>>,
+    progress: Arc<Mutex<TargetProgress>>,
     started: Instant,
+}
+
+#[derive(Default)]
+struct TargetProgress {
+    metrics: SenderMetrics,
+    /// Receiver-reported volume, or a subsequent acknowledged user change.
+    volume: Option<f32>,
 }
 
 #[derive(Clone)]
@@ -124,13 +131,16 @@ impl ActiveTarget {
         sender: Sender,
         device_id: String,
         generation: u64,
-        initial_volume: f32,
+        requested_volume: Option<f32>,
         events: mpsc::UnboundedSender<TargetFailure>,
     ) -> Self {
         let (audio, input) = mpsc::channel(MEDIA_QUEUE_BLOCKS);
-        let (volume, volume_changes) = watch::channel(initial_volume);
+        let (volume, volume_changes) = watch::channel(requested_volume);
         let (stop, cancellation) = watch::channel(false);
-        let progress = Arc::new(Mutex::new(sender.metrics()));
+        let progress = Arc::new(Mutex::new(TargetProgress {
+            metrics: sender.metrics(),
+            volume: sender.volume(),
+        }));
         let published = progress.clone();
         let task = tokio::spawn(run_target(
             sender,
@@ -191,24 +201,28 @@ impl Drop for AbortTask {
 async fn run_target(
     mut sender: Sender,
     mut audio: mpsc::Receiver<MediaBlock>,
-    mut volume: watch::Receiver<f32>,
+    mut volume: watch::Receiver<Option<f32>>,
     mut stop: watch::Receiver<bool>,
-    progress: Arc<Mutex<SenderMetrics>>,
+    progress: Arc<Mutex<TargetProgress>>,
     identity: TargetIdentity,
     events: mpsc::UnboundedSender<TargetFailure>,
 ) {
     let control = sender.volume_control();
     let volume_identity = identity.clone();
     let volume_events = events.clone();
+    let volume_progress = progress.clone();
     let volume_task = AbortTask(tokio::spawn(async move {
         loop {
             let desired = *volume.borrow_and_update();
-            if let Err(error) = control.set_volume(desired).await {
-                let _ = volume_events.send(TargetFailure {
-                    identity: volume_identity,
-                    message: format!("设备没有确认音量变化：{}", user_error(&error)),
-                });
-                break;
+            if let Some(desired) = desired {
+                if let Err(error) = control.set_volume(desired).await {
+                    let _ = volume_events.send(TargetFailure {
+                        identity: volume_identity,
+                        message: format!("设备没有确认音量变化：{}", user_error(&error)),
+                    });
+                    break;
+                }
+                lock(&volume_progress).volume = control.volume();
             }
             if volume.changed().await.is_err() {
                 break;
@@ -245,7 +259,7 @@ async fn run_target(
         // out), never cancelled by an ordinary volume/selection command.
         let result =
             tokio::time::timeout(Duration::from_secs(2), sender.send_pcm(&block.samples)).await;
-        *lock(&progress) = sender.metrics();
+        lock(&progress).metrics = sender.metrics();
         let message = match result {
             Ok(Ok(())) => continue,
             Ok(Err(error)) => user_error(&error),
@@ -265,6 +279,8 @@ struct Route {
     access: Access,
     access_loaded: bool,
     remember_after_connect: bool,
+    /// An explicit adjustment made while this selected receiver is connecting.
+    requested_volume: Option<f32>,
     wanted: bool,
     generation: u64,
     retries: u8,
@@ -284,6 +300,7 @@ impl Default for Route {
             access: Access::default(),
             access_loaded: false,
             remember_after_connect: false,
+            requested_volume: None,
             wanted: false,
             generation: 0,
             retries: 0,
@@ -300,8 +317,15 @@ impl Route {
     fn metrics(&self) -> SenderMetrics {
         self.session
             .as_ref()
-            .map(|session| lock(&session.progress).clone())
+            .map(|session| lock(&session.progress).metrics.clone())
             .unwrap_or_else(|| self.last_metrics.clone())
+    }
+
+    fn volume(&self) -> Option<f32> {
+        self.session
+            .as_ref()
+            .and_then(|session| lock(&session.progress).volume)
+            .or_else(|| self.prepared.as_ref().and_then(Sender::volume))
     }
 }
 
@@ -309,8 +333,22 @@ struct CaptureSession {
     stream: CaptureStream,
     info: CaptureInfo,
     buffer: CaptureBuffer,
+}
+
+/// Receiver time advances even while a Windows source is being replaced.
+struct PlaybackTimeline {
     started: Instant,
     schedule: MediaSchedule,
+}
+
+struct CaptureWork {
+    generation: u64,
+    task: Task<Result<Option<CaptureSession>, CaptureTransitionError>>,
+}
+
+enum CaptureTransitionError {
+    Stop(airloom_capture::CaptureError),
+    Start(airloom_capture::CaptureError),
 }
 
 /// The timer only wakes the actor. Sample production advances from this
@@ -599,6 +637,10 @@ struct Actor {
     auth: Option<AuthPrompt>,
     auth_generation: u64,
     capture: Option<CaptureSession>,
+    capture_request: Option<CaptureConfig>,
+    capture_generation: u64,
+    capture_work: Option<CaptureWork>,
+    playback: Option<PlaybackTimeline>,
     test_tone: Option<TestTone>,
     global_error: Option<AppError>,
     events: mpsc::UnboundedSender<TargetFailure>,
@@ -646,6 +688,10 @@ impl Actor {
             auth: None,
             auth_generation: 0,
             capture: None,
+            capture_request: None,
+            capture_generation: 0,
+            capture_work: None,
+            playback: None,
             test_tone: None,
             global_error: None,
             events,
@@ -784,6 +830,20 @@ impl Actor {
                 })
             })
             .collect();
+        let volumes: Vec<_> = self
+            .selected
+            .iter()
+            .map(|id| self.routes.get(id).and_then(Route::volume))
+            .collect();
+        let volume_known = !volumes.is_empty() && volumes.iter().all(Option::is_some);
+        let first_volume = volumes.first().copied().flatten();
+        let volume_mixed = volume_known
+            && first_volume.is_some_and(|first| {
+                volumes
+                    .iter()
+                    .flatten()
+                    .any(|volume| (volume - first).abs() >= 0.005)
+            });
         self.update(|s| {
             s.state = phase;
             s.status_message = status;
@@ -795,6 +855,11 @@ impl Actor {
             s.metrics.packets_sent = packets;
             s.test_tone_active = self.test_tone.is_some();
             s.test_tone_remaining_ms = self.test_tone.as_ref().map_or(0, TestTone::remaining_ms);
+            if let Some(volume) = first_volume {
+                s.volume = volume;
+            }
+            s.volume_known = volume_known;
+            s.volume_mixed = volume_mixed;
             s.diagnostics = Some(model::Diagnostics::from_snapshot(s, receiver_diagnostics));
         });
     }
@@ -1045,6 +1110,15 @@ impl Actor {
                     }
                 },
                 result = async {
+                    match &mut self.capture_work {
+                        Some(work) => (work.generation, (&mut work.task).await),
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.capture_work = None;
+                    self.finish_capture_work(result.0, result.1);
+                },
+                result = async {
                     match &mut self.work {
                         Some(work) => {
                             let id = work.device_id.clone();
@@ -1070,6 +1144,7 @@ impl Actor {
             self.synchronize();
         }
         self.stop_all();
+        self.finish_capture_shutdown().await;
         if let Some(task) = self.discovery.take() {
             task.abort();
         }
@@ -1090,8 +1165,11 @@ impl Actor {
 
     fn refresh(&mut self) {
         self.request_source_refresh();
-        if self.discovery.is_none() {
-            self.discovery_watch = None;
+        if let Some(watcher) = &mut self.discovery_watch {
+            if let Err(error) = watcher.refresh() {
+                self.error("discovery", user_error(&error));
+            }
+        } else if self.discovery.is_none() {
             self.discovery = Some(tokio::task::spawn_blocking(DiscoveryWatcher::start));
         }
     }
@@ -1176,6 +1254,7 @@ impl Actor {
             ),
         };
         let active = self.running;
+        let previous_source = lock(&self.state).selected_source_id.clone();
         self.update(|s| {
             s.sources_refreshing = false;
             s.sources.clear();
@@ -1200,7 +1279,10 @@ impl Actor {
                 .any(|source| source.id == s.selected_source_id);
             // A vanished application must never select another application or
             // fall back to the whole-system endpoint, even while stopped.
-            if !active && !found && mode == SourceMode::Endpoint {
+            if (!active || s.selected_source_id.is_empty())
+                && !found
+                && mode == SourceMode::Endpoint
+            {
                 s.selected_source_id = s
                     .sources
                     .first()
@@ -1230,6 +1312,9 @@ impl Actor {
             .is_some_and(|error| error.code == "capture_sources")
         {
             self.global_error = None;
+        }
+        if lock(&self.state).selected_source_id != previous_source && self.active_count() > 0 {
+            self.switch_capture();
         }
     }
 
@@ -1386,6 +1471,7 @@ impl Actor {
             route.retry_at = None;
             route.retries = 0;
             route.remember_after_connect = false;
+            route.requested_volume = None;
             route.phase = Phase::Idle;
             route.message = "已停止".into();
             route.error = None;
@@ -1404,28 +1490,127 @@ impl Actor {
     }
 
     fn stop_capture(&mut self) {
-        let error = self
-            .capture
-            .take()
-            .and_then(|mut capture| capture.stream.stop().err());
+        self.replace_capture(None);
+        if self.active_count() == 0 {
+            self.playback = None;
+            self.update(|s| s.elapsed_seconds = 0);
+        }
+    }
+
+    fn replace_capture(&mut self, request: Option<CaptureConfig>) {
+        self.capture_generation = self.capture_generation.wrapping_add(1);
+        self.capture_request = request;
+        let previous = self.capture.take();
         self.test_tone = None;
         self.update(|s| {
             s.level = Levels::default();
             s.waveform.fill(0.0);
             s.metrics = Metrics::default();
-            s.elapsed_seconds = 0;
             s.capture = CaptureView::default();
+            if self.active_count() > 0 {
+                s.capture.state = "waiting";
+                s.capture.message = if self.capture_request.is_some() {
+                    "正在切换声音来源，扬声器连接保持不变。".into()
+                } else {
+                    "扬声器连接已保留，请选择可用的声音来源。".into()
+                };
+            }
         });
-        if error.is_some() {
-            self.error(
-                "capture_stop",
-                "音频采集已停止；请检查本机输出设备的静音状态。",
-            );
+        self.spawn_capture_work(previous);
+    }
+
+    fn spawn_capture_work(&mut self, previous: Option<CaptureSession>) {
+        if self.capture_work.is_some() {
+            // A transition owns the only stream until its completion is accepted.
+            debug_assert!(previous.is_none());
+            return;
+        }
+        let config = self.capture_request.clone();
+        if previous.is_none() && config.is_none() {
+            return;
+        }
+        self.capture_work = Some(CaptureWork {
+            generation: self.capture_generation,
+            task: tokio::task::spawn_blocking(move || {
+                if let Some(mut previous) = previous {
+                    previous
+                        .stream
+                        .stop()
+                        .map_err(CaptureTransitionError::Stop)?;
+                }
+                let Some(config) = config else {
+                    return Ok(None);
+                };
+                let stream = CaptureStream::start(config).map_err(CaptureTransitionError::Start)?;
+                let info = stream.info().map_err(CaptureTransitionError::Start)?;
+                Ok(Some(CaptureSession {
+                    stream,
+                    info,
+                    buffer: CaptureBuffer::new(Instant::now()),
+                }))
+            }),
+        });
+    }
+
+    fn finish_capture_work(
+        &mut self,
+        generation: u64,
+        result: Result<
+            Result<Option<CaptureSession>, CaptureTransitionError>,
+            tokio::task::JoinError,
+        >,
+    ) {
+        let current = generation == self.capture_generation;
+        match result {
+            Ok(Ok(capture)) if current => self.capture = capture,
+            Ok(Ok(capture)) => self.spawn_capture_work(capture),
+            Ok(Err(CaptureTransitionError::Start(_))) if !current => self.spawn_capture_work(None),
+            Ok(Err(error)) => {
+                let (code, message) = match error {
+                    CaptureTransitionError::Stop(error) => (
+                        "capture_stop",
+                        format!(
+                            "采集已停止，请检查本机静音状态：{}",
+                            capture_error_message(&error)
+                        ),
+                    ),
+                    CaptureTransitionError::Start(error) => (
+                        "capture_start",
+                        format!(
+                            "无法采集所选声音来源：{}。扬声器连接已保留。",
+                            capture_error_message(&error)
+                        ),
+                    ),
+                };
+                self.error(code, message.clone());
+                self.update(|s| {
+                    s.capture.state = "error";
+                    s.capture.message = message;
+                });
+            }
+            Err(_) if !current => self.spawn_capture_work(None),
+            Err(_) => {
+                self.error("capture_worker", "声音来源切换中断，请重新选择声音来源。");
+                self.update(|s| {
+                    s.capture.state = "error";
+                    s.capture.message = "声音来源切换中断，扬声器连接已保留。请重试。".into();
+                });
+            }
+        }
+    }
+
+    async fn finish_capture_shutdown(&mut self) {
+        // spawn_blocking cannot be cancelled once running. Drain it, then stop
+        // any stale returned stream off the media actor before engine exit.
+        if let Some(work) = self.capture_work.take() {
+            if let Ok(Ok(Some(mut capture))) = work.task.await {
+                let _ = tokio::task::spawn_blocking(move || capture.stream.stop()).await;
+            }
         }
     }
 
     fn stop_all(&mut self) {
-        // Restore owned endpoint mute before any receiver's network teardown.
+        // Restore owned endpoint mute on the capture worker while receivers close.
         self.stop_capture();
         self.running = false;
         self.queue.clear();
@@ -1519,7 +1704,6 @@ impl Actor {
                 if lock(&self.state).source_mode == mode {
                     return;
                 }
-                self.stop_all();
                 self.clear_error_after_stop();
                 self.update(|s| {
                     s.source_mode = mode;
@@ -1531,6 +1715,7 @@ impl Actor {
                         s.mute_local = false;
                     }
                 });
+                self.switch_capture();
                 if let Some(watcher) = &self.source_watch {
                     self.source_snapshot(watcher.snapshot());
                 } else {
@@ -1562,8 +1747,11 @@ impl Actor {
                 {
                     return;
                 }
-                let resume = self.running;
-                self.stop_all();
+                if lock(&self.state).selected_source_id == source_id
+                    && (self.capture.is_some() || self.capture_work.is_some())
+                {
+                    return;
+                }
                 self.update(|s| {
                     s.selected_source_id = source_id;
                     if s.source_mode == SourceMode::Application {
@@ -1573,13 +1761,7 @@ impl Actor {
                     }
                 });
                 self.clear_error_after_stop();
-                if resume {
-                    self.running = true;
-                    let targets = self.selected_targets();
-                    for id in targets {
-                        self.connect_target(&id);
-                    }
-                }
+                self.switch_capture();
             }
             Command::Connect { device_id } => {
                 let valid_source = {
@@ -1602,6 +1784,13 @@ impl Actor {
                 }
                 self.global_error = None;
                 self.running = true;
+                // Explicit Retry may recover capture without replacing a healthy
+                // receiver. Source-list events alone never spin up retries.
+                if self.active_count() > 0 && self.capture.is_none() {
+                    if let Err(error) = self.start_capture() {
+                        self.error("capture_start", capture_error_message(&error));
+                    }
+                }
                 if let Some(id) = device_id {
                     self.select(&id, true);
                 } else {
@@ -1659,10 +1848,14 @@ impl Actor {
                 }
             }
             Command::SetVolume { volume } => {
-                self.update(|s| s.volume = volume);
-                for route in self.routes.values() {
+                for id in &self.selected {
+                    let Some(route) = self.routes.get_mut(id) else {
+                        continue;
+                    };
                     if let Some(session) = &route.session {
-                        let _ = session.volume.send(volume);
+                        let _ = session.volume.send(Some(volume));
+                    } else if route.wanted {
+                        route.requested_volume = Some(volume);
                     }
                 }
             }
@@ -1671,14 +1864,11 @@ impl Actor {
                     self.update(|s| s.mute_local = false);
                     return;
                 }
-                let result = self
-                    .capture
-                    .as_ref()
-                    .map(|capture| capture.stream.set_local_mute(enabled));
-                if matches!(result, Some(Err(_))) {
-                    self.error("local_mute", "无法修改本机静音，请检查输出设备。");
-                } else {
+                if lock(&self.state).mute_local != enabled {
                     self.update(|s| s.mute_local = enabled);
+                    // Muting also crosses a blocking COM worker boundary.
+                    // Replace only capture; restore old ownership before starting.
+                    self.switch_capture();
                 }
             }
             Command::TestTone { enabled } => {
@@ -1810,7 +2000,6 @@ impl Actor {
                 return;
             }
         }
-        let volume = lock(&self.state).volume;
         let route = self.routes.get_mut(id).unwrap();
         if !route.access_loaded {
             route.access = load_access(id).unwrap_or_default();
@@ -1856,7 +2045,7 @@ impl Actor {
                     .as_ref()
                     .map(|value| value.to_string()),
                 credentials: route.access.credentials.clone(),
-                initial_volume: volume,
+                initial_volume: None,
                 ..Default::default()
             };
             tokio::spawn(async move {
@@ -1910,36 +2099,51 @@ impl Actor {
         }
     }
 
+    fn capture_config(&self) -> airloom_capture::Result<CaptureConfig> {
+        let state = lock(&self.state);
+        if !state.sources.iter().any(|source| {
+            source.id == state.selected_source_id && source.kind == state.source_mode.kind()
+        }) {
+            return Err(airloom_capture::CaptureError::InvalidConfig(
+                "choose an available source before capture",
+            ));
+        }
+        if state.source_mode == SourceMode::Application
+            && !airloom_capture::is_application_source(&state.selected_source_id)
+        {
+            return Err(airloom_capture::CaptureError::InvalidConfig(
+                "choose an application before capture",
+            ));
+        }
+        Ok(CaptureConfig {
+            source_id: state.selected_source_id.clone(),
+            target_sample_rate: airloom_airplay::SAMPLE_RATE,
+            queue_capacity: 8,
+            mute_local: state.mute_local,
+        })
+    }
+
+    fn switch_capture(&mut self) {
+        let request = (self.active_count() > 0)
+            .then(|| self.capture_config().ok())
+            .flatten();
+        self.replace_capture(request);
+    }
+
     fn start_capture(&mut self) -> airloom_capture::Result<()> {
-        if self.capture.is_some() {
+        let request = self.capture_config()?;
+        if self.capture.is_some()
+            || (self.capture_work.is_some()
+                && self.capture_request.as_ref().is_some_and(|pending| {
+                    pending.source_id == request.source_id
+                        && pending.mute_local == request.mute_local
+                }))
+        {
             return Ok(());
         }
-        let config = {
-            let state = lock(&self.state);
-            if state.source_mode == SourceMode::Application
-                && !airloom_capture::is_application_source(&state.selected_source_id)
-            {
-                return Err(airloom_capture::CaptureError::InvalidConfig(
-                    "choose an application before capture",
-                ));
-            }
-            CaptureConfig {
-                source_id: state.selected_source_id.clone(),
-                target_sample_rate: airloom_airplay::SAMPLE_RATE,
-                queue_capacity: 8,
-                mute_local: state.mute_local,
-            }
-        };
-        let stream = CaptureStream::start(config)?;
-        let info = stream.info()?;
-        let now = Instant::now();
-        self.capture = Some(CaptureSession {
-            stream,
-            info,
-            buffer: CaptureBuffer::new(now),
-            started: now,
-            schedule: MediaSchedule::new(now + Duration::from_millis(30)),
-        });
+        // A previous Stop may still own the worker. Register the new request
+        // now; its completion will serialize cleanup before this stream starts.
+        self.replace_capture(Some(request));
         Ok(())
     }
 
@@ -2025,15 +2229,6 @@ impl Actor {
                 return;
             }
         }
-        if let Err(error) = self.start_capture() {
-            self.close_prepared(senders);
-            self.stop_all();
-            let message = format!("无法采集所选声音来源：{}", capture_error_message(&error));
-            self.device_error(id, "capture_start", message.clone());
-            self.error("capture_start", message);
-            return;
-        }
-        let volume = lock(&self.state).volume;
         // Both group members become active in the same actor turn. fan_out
         // gives them the same first block, sequence and complete stereo PCM.
         for (member, sender) in senders {
@@ -2042,12 +2237,24 @@ impl Actor {
                 sender,
                 member,
                 route.generation,
-                volume,
+                route.requested_volume.take(),
                 self.events.clone(),
             ));
             route.phase = Phase::Streaming;
             route.message = "正在发送声音".into();
             route.error = None;
+        }
+        if self.playback.is_none() {
+            let now = Instant::now();
+            self.playback = Some(PlaybackTimeline {
+                started: now,
+                schedule: MediaSchedule::new(now),
+            });
+        }
+        if self.source_available() {
+            if let Err(error) = self.start_capture() {
+                self.error("capture_start", capture_error_message(&error));
+            }
         }
         for member in &members {
             self.persist_access(member);
@@ -2267,50 +2474,65 @@ impl Actor {
     }
 
     fn audio(&mut self) {
-        let Some(capture) = &mut self.capture else {
+        if self.active_count() == 0 {
             return;
-        };
+        }
         let now = Instant::now();
+        let playback = self.playback.get_or_insert_with(|| PlaybackTimeline {
+            started: now,
+            schedule: MediaSchedule::new(now),
+        });
+        let elapsed = playback.started.elapsed().as_secs();
+        let plan = playback.schedule.due(now);
         let mut capture_error = None;
-        for _ in 0..8 {
-            match capture.stream.read_timeout(Duration::ZERO) {
-                Ok(Some(chunk)) => capture.buffer.ingest(chunk, now),
-                Ok(None) => break,
-                Err(error) => {
-                    capture_error = Some(error);
-                    break;
+        if let Some(capture) = &mut self.capture {
+            for _ in 0..8 {
+                match capture.stream.read_timeout(Duration::ZERO) {
+                    Ok(Some(chunk)) => capture.buffer.ingest(chunk, now),
+                    Ok(None) => break,
+                    Err(error) => {
+                        capture_error = Some(error);
+                        break;
+                    }
                 }
+            }
+            if plan.discard_backlog {
+                capture.buffer.retain_latest(BLOCK_FRAMES);
             }
         }
         if let Some(error) = capture_error {
-            let muted = lock(&self.state).mute_local;
-            let mut diagnostic = capture.buffer.view(&capture.info, muted, now);
-            self.stop_all();
-            let message = format!("音频采集已中断：{}", capture_error_message(&error));
+            self.stop_capture();
+            let message = format!(
+                "音频采集已中断：{}。扬声器连接已保留。",
+                capture_error_message(&error)
+            );
             self.error("capture", message.clone());
-            diagnostic.state = "error";
-            diagnostic.message = message;
             self.update(|s| {
-                s.capture = diagnostic;
+                s.capture.state = "error";
+                s.capture.message = message;
             });
-            return;
-        }
-        let plan = capture.schedule.due(now);
-        if plan.discard_backlog {
-            capture.buffer.retain_latest(BLOCK_FRAMES);
         }
         for _ in 0..plan.blocks {
-            // fan_out can stop the last receiver and release shared capture.
-            let Some(capture) = &mut self.capture else {
+            // Continuous silence keeps the existing RTP timeline alive while
+            // Windows capture starts/stops or awaits an explicit app selection.
+            if self.active_count() == 0 {
                 break;
-            };
-            let mut samples = capture.buffer.next_block();
+            }
+            let mut samples = vec![0.0; BLOCK_FRAMES * 2];
             let muted = lock(&self.state).mute_local;
-            let diagnostic = capture.buffer.view(&capture.info, muted, now);
-            let elapsed = capture.started.elapsed().as_secs();
-            let dropped = capture.buffer.capture_dropped + capture.buffer.queue_dropped;
-            let underrun = capture.buffer.underrun_frames;
-            let buffered_ms = capture.buffer.pending.len() as f32 / 2.0 / 44.1;
+            if let Some(capture) = &mut self.capture {
+                samples = capture.buffer.next_block();
+                let diagnostic = capture.buffer.view(&capture.info, muted, now);
+                let dropped = capture.buffer.capture_dropped + capture.buffer.queue_dropped;
+                let underrun = capture.buffer.underrun_frames;
+                let buffered_ms = capture.buffer.pending.len() as f32 / 2.0 / 44.1;
+                self.update(|s| {
+                    s.capture = diagnostic;
+                    s.metrics.buffer_ms = Some(buffered_ms);
+                    s.metrics.dropped_frames = dropped;
+                    s.metrics.underrun_frames = underrun;
+                });
+            }
             if let Some(tone) = &mut self.test_tone {
                 tone.apply(&mut samples);
                 if tone.finished() {
@@ -2336,11 +2558,7 @@ impl Actor {
                 s.level = level;
                 s.waveform = waveform;
                 s.elapsed_seconds = elapsed;
-                s.capture = diagnostic;
                 s.metrics.sample_rate = airloom_airplay::SAMPLE_RATE;
-                s.metrics.buffer_ms = Some(buffered_ms);
-                s.metrics.dropped_frames = dropped;
-                s.metrics.underrun_frames = underrun;
             });
             self.fan_out(block);
         }
@@ -2350,6 +2568,14 @@ impl Actor {
 #[cfg(test)]
 #[path = "routing_tests.rs"]
 mod routing_tests;
+
+#[cfg(test)]
+#[path = "continuity_tests.rs"]
+mod continuity_tests;
+
+#[cfg(test)]
+#[path = "volume_tests.rs"]
+mod volume_tests;
 
 fn load_access(device_id: &str) -> Option<Access> {
     let data = Zeroizing::new(credentials::load(CREDENTIAL_SERVICE, device_id).ok()??);
@@ -2425,7 +2651,7 @@ mod tests {
     /// queue; no protocol/network/hardware is replaced by fabricated success.
     fn attach_target(actor: &mut Actor, id: &str, capacity: usize) -> mpsc::Receiver<MediaBlock> {
         let (audio, receiver) = mpsc::channel(capacity);
-        let (volume, _) = watch::channel(0.5);
+        let (volume, _) = watch::channel(None);
         let (stop, mut stopped) = watch::channel(false);
         let task = tokio::spawn(async move {
             while stopped.changed().await.is_ok() {
@@ -2443,7 +2669,7 @@ mod tests {
             volume,
             stop,
             task,
-            progress: Arc::new(Mutex::new(SenderMetrics::default())),
+            progress: Arc::new(Mutex::new(TargetProgress::default())),
             started: Instant::now(),
         });
         actor.running = true;
@@ -2455,6 +2681,7 @@ mod tests {
             task.abort();
         }
         actor.stop_all();
+        actor.finish_capture_shutdown().await;
         for route in actor.routes.values_mut() {
             if let Some(task) = route.cleanup.take() {
                 task.await.unwrap();
@@ -2672,7 +2899,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn source_change_restarts_the_selected_set_without_losing_device_access() {
+    async fn source_change_keeps_the_selected_set_and_device_access() {
         let mut actor = actor();
         let _one = attach_target(&mut actor, "one", 2);
         let _two = attach_target(&mut actor, "two", 2);
@@ -2694,15 +2921,8 @@ mod tests {
         assert_eq!(actor.selected, ["one", "two"]);
         assert!(actor.running);
         assert_eq!(actor.global_error.as_ref().unwrap().code, "capture_stop");
-        assert_eq!(actor.active_count(), 0);
-        assert_eq!(
-            actor
-                .queue
-                .iter()
-                .map(|request| request.device_id.as_str())
-                .collect::<Vec<_>>(),
-            ["one", "two"]
-        );
+        assert_eq!(actor.active_count(), 2);
+        assert!(actor.queue.is_empty());
         assert_eq!(
             actor.routes["two"]
                 .access
@@ -2724,15 +2944,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn application_scope_stops_system_audio_and_requires_an_explicit_selection() {
+    async fn application_scope_keeps_receivers_and_requires_an_explicit_source() {
         let mut actor = actor();
         let _receiver = attach_target(&mut actor, "one", 2);
         actor.update(|s| s.mute_local = true);
         actor.command(Command::SelectSourceMode {
             mode: SourceMode::Application,
         });
-        assert_eq!(actor.active_count(), 0);
-        assert!(!actor.running);
+        assert_eq!(actor.active_count(), 1);
+        assert!(actor.running);
+        assert!(actor.capture.is_none());
+        assert!(actor.capture_request.is_none());
         assert_eq!(actor.selected, ["one", "two"]);
         assert!(actor.queue.is_empty());
         actor.source_scan.take().unwrap().abort();
@@ -2746,7 +2968,8 @@ mod tests {
         assert!(!state.mute_local);
         assert_eq!(state.sources[0].kind, "application");
         actor.command(Command::Connect { device_id: None });
-        assert!(!actor.running);
+        assert!(actor.running);
+        assert_eq!(actor.active_count(), 1);
         assert!(actor.queue.is_empty());
         actor.command(Command::SelectSource {
             source_id: "default".into(),

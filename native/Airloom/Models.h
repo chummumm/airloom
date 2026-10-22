@@ -53,6 +53,8 @@ namespace airloom::native
         bool sourcesRefreshing{};
         winrt::hstring sourceMessage;
         double volume{0.75};
+        bool volumeKnown{};
+        bool volumeMixed{};
         bool muteLocal{};
         double leftLevel{};
         double rightLevel{};

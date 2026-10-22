@@ -75,7 +75,11 @@ namespace airloom::native
         result.sourceMode = Text(json, L"source_mode", L"endpoint");
         result.sourcesRefreshing = Boolean(json, L"sources_refreshing");
         result.sourceMessage = Text(json, L"source_message");
-        result.volume = std::clamp(Number(json, L"volume", 0.75), 0.0, 1.0);
+        auto const volume = Number(json, L"volume", -1.0);
+        bool const validVolume = volume >= 0.0 && volume <= 1.0;
+        result.volume = validVolume ? volume : 0.75;
+        result.volumeKnown = validVolume && Boolean(json, L"volume_known");
+        result.volumeMixed = Boolean(json, L"volume_mixed");
         result.muteLocal = Boolean(json, L"mute_local");
         result.elapsedSeconds = Counter(json, L"elapsed_seconds");
 

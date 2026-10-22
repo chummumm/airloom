@@ -10,6 +10,7 @@ pub(crate) use source_watch::SourceWatch;
 
 use crate::mute_policy::MuteOwnership;
 use crate::pipeline::{levels, Encoding, NativeFormat, StereoResampler};
+use crate::worker_result::{cleanup_result, join_worker, WorkerExit};
 use crate::{
     is_application_source, AudioChunk, CaptureConfig, CaptureError, CaptureInfo, CaptureSource,
     Result, DEFAULT_SOURCE_ID,
@@ -147,7 +148,7 @@ pub(crate) struct Stream {
     commands: Sender<Command>,
     cancelled: Arc<AtomicBool>,
     terminal_error: Arc<Mutex<Option<CaptureError>>>,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<JoinHandle<Result<()>>>,
 }
 
 impl Stream {
@@ -171,13 +172,9 @@ impl Stream {
                     &worker_cancelled,
                     ready_sender,
                 );
-                // Store before dropping the last sender so readers see the
-                // actual failure when the channel becomes disconnected.
-                if let Err(error) = result {
-                    if let Ok(mut slot) = worker_error.lock() {
-                        *slot = Some(error);
-                    }
-                }
+                // Publish only the source failure before dropping the last
+                // sender. The join result separately preserves cleanup failure.
+                result.complete(&worker_error)
             })
             .map_err(CaptureError::WorkerStart)?;
         let mut stream = Self {
@@ -245,14 +242,9 @@ impl Stream {
 
     pub(crate) fn stop(&mut self) -> Result<()> {
         self.cancelled.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            worker.join().map_err(|_| CaptureError::WorkerPanicked)?;
-        }
+        let cleanup = self.worker.take().map(join_worker).unwrap_or(Ok(()));
         while self.audio.try_recv().is_ok() {}
-        match self.take_error() {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        cleanup
     }
 
     fn take_error(&self) -> Option<CaptureError> {
@@ -270,24 +262,33 @@ fn run_worker(
     commands: Receiver<Command>,
     cancelled: &AtomicBool,
     ready: Sender<Result<CaptureInfo>>,
-) -> Result<()> {
+) -> WorkerExit {
     // Declared before Session so every COM interface is released before COM.
     let _apartment = match ComApartment::initialize() {
         Ok(apartment) => apartment,
         Err(error) => {
             let _ = ready.send(Err(error));
-            return Ok(());
+            return WorkerExit {
+                capture: Ok(()),
+                cleanup: Ok(()),
+            };
         }
     };
     let mut session = match Session::start(&config, cancelled) {
         Ok(session) => session,
         Err(error) => {
             let _ = ready.send(Err(error));
-            return Ok(());
+            return WorkerExit {
+                capture: Ok(()),
+                cleanup: Ok(()),
+            };
         }
     };
     if ready.send(Ok(session.info.clone())).is_err() {
-        return session.stop();
+        return WorkerExit {
+            capture: Ok(()),
+            cleanup: session.stop(),
+        };
     }
     let mut sequence = 0u64;
     let mut dropped_frames = 0u64;
@@ -338,8 +339,10 @@ fn run_worker(
         }
         Ok(())
     })();
-    let cleanup = session.stop();
-    result.and(cleanup)
+    WorkerExit {
+        capture: result,
+        cleanup: session.stop(),
+    }
 }
 
 fn enqueue_latest(
@@ -590,7 +593,7 @@ impl Session {
             Ok(())
         };
         let mute_result = self.set_mute(false);
-        stop_result.and(mute_result)
+        cleanup_result(stop_result, mute_result)
     }
 }
 
