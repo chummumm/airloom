@@ -11,15 +11,15 @@
 
 ## 界面
 
-以下保留 0.4.2 的实际 WinUI 界面截图，来自 [CI 39701717193](https://github.com/chummumm/airloom/actions/runs/39701717193)／`481d3ee`，不作为 0.4.3 新行为的运行证据。设备、应用和信号为界面测试数据。
+以下为 0.4.3 的实际 WinUI 界面截图，来自 [CI 39708935823](https://github.com/chummumm/airloom/actions/runs/39708935823)／`8b7bab9`。设备、应用和信号为界面测试数据。
 
-![Airloom 0.4.2 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.2/fixture-native-stereo-home-light.png)
+![Airloom 0.4.3 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-home-light.png)
 
-![Airloom 0.4.2 原生深色设置页与组合可见性，设备为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.2/fixture-native-stereo-settings-dark.png)
+![Airloom 0.4.3 原生深色设置页与组合可见性，设备为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-settings-dark.png)
 
 截图来自实际 WinUI 3 程序。`fixture-*` 使用独立临时目录中的 CI 专用替代 DLL，提供模拟扬声器、信号、应用选择与密码挑战，用于检查原生界面的完整状态；这些数据和替代 DLL 不进入安装包，也不作为实机音频证明。
 
-发布程序本体另有[浅色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.2/native-home-light.png)、[深色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.2/native-home-dark.png)及[设置页](https://github.com/chummumm/airloom/releases/download/v0.4.2/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动程序，验证 880／1100／1600 像素窗口、固定播放栏、音量实际拖动、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。隔离 fixture 验证应用选择、范围切换、事件更新与手动刷新保留选择、下拉框稳定性、组合卡及成员状态、隐藏恢复，以及真实鼠标操作主按钮。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。仓库 `docs/evidence` 中原有应用模式截图保留为 0.4.0 历史证据。
+发布程序本体另有[浅色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-home-light.png)、[深色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-home-dark.png)及[设置页](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动发货核心，验证 880／1100／1600 像素窗口、固定播放栏、无目标时音量禁用且无启动确认错误、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。隔离 fixture 使用同一 WinUI 可执行程序，验证已连接状态下的音量读数与实际拖动、三尺寸布局、应用选择、切换音源与重新发现保留连接标识、空应用来源静音等待、事件更新、下拉框稳定性、组合成员及隐藏恢复，以及真实鼠标操作主按钮。结果见 [native-smoke.json](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-smoke.json)。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。仓库 `docs/evidence` 中原有应用模式截图保留为 0.4.0 历史证据。
 
 ## 体验
 
@@ -51,7 +51,7 @@
 | [airloom-windows-x64-portable.zip](https://github.com/chummumm/airloom/releases/latest/download/airloom-windows-x64-portable.zip) | 完整解压到新目录后运行 |
 | [SHA256SUMS.txt](https://github.com/chummumm/airloom/releases/latest/download/SHA256SUMS.txt) | 当前发布下载文件的完整性校验值 |
 
-历史版本 0.4.2 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39701717193)，源码提交为 `481d3ee17a06b54c0cdc4ce483716aea9cbd8fa6`；该构建的 Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。0.4.3 增加设备音量读取、重新发现和切换音源保留会话的回归检查，结果以对应构建及发布附件为准。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
+0.4.3 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39708935823)，发布二进制对应源码提交 `8b7bab9c1bceb8b7696aa3c20b6bdffa433038d5`。Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。设备音量读取与会话保留由生产发送器／核心的协议回归覆盖；界面的只读音量展示、显式拖动与来源切换命令另由隔离 fixture 覆盖。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
 
 要求 Windows 11 x64（build 22000 或更高）。电脑与接收端需处于可以互相发现和通信的局域网。解压便携 ZIP 后运行 `Airloom.exe`，或运行安装包。不要只复制 EXE：原生应用和 Windows App SDK 的自包含文件需要放在一起。
 
@@ -79,6 +79,8 @@
 
 手动调节滑块会设置当前所选目标，包括立体声组合成员。没有已连接或正在连接的所选目标时滑块不可用；已连接但未读到音量的设备仍可手动设置。软件不把设备音量另存成本地偏好。
 
+音量读数在建立连接时获取；之后从手机或音响按键调节的变化暂不会实时同步回 Airloom 界面。
+
 ### 密码、诊断与更新
 
 程序不需要 Apple Account 密码。Windows 声音输出列表不会新增“Airloom 声卡”；投放设备在本应用中选择。
@@ -97,11 +99,11 @@ Airloom 不创建、拆散 Apple“家庭”组合，不修改其左右设置，
 
 ## 已实现的代码与验证边界
 
-下表中的既有通过结果对应上面保留的历史构建与设计记录。0.4.3 新增行为的运行结果以该版本的 CI 和发布附件为准。
+下表中的自动检查结果对应上述 0.4.3 构建及其[发布证据](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-smoke.json)；另有版本注明的实机反馈与历史设计记录仍保留原有归属。
 
 | 项目 | 当前范围 |
 | --- | --- |
-| 原生窗口、按钮、设置、选择、认证和托盘 | 最终便携包的启动、三尺寸布局、音量实际拖动、按钮按下、应用选择、主题及密码交互均通过；最终应用模式、设置、窄窗口和按钮截图已复核 |
+| 原生窗口、按钮、设置、选择、认证和托盘 | 发货核心的启动、三尺寸空状态、主题及设置检查通过；同一原生程序的隔离 fixture 通过音量实际拖动、按钮、应用选择、密码交互、音源切换与重新发现保留连接的检查 |
 | 系统声音 | 已有端点的 WASAPI 共享模式 loopback；格式转换、双声道重采样、有界缓冲 |
 | 单独应用采集 | Windows 11 的进程树 loopback；必须明确选择，目标退出不自动切换。真实 Windows API 激活、身份、收到的静音样本、拒绝本机静音、取消和退出检查已通过；未完成两应用同时发声的实机隔离验证 |
 | AirPlay | 设备发现、独立认证/会话/音频发送实现，详见协议文档 |

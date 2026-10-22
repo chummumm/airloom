@@ -2,7 +2,7 @@
 
 Airloom's desktop shell is **WinUI 3, C++/WinRT and XAML**. Capture, discovery, authentication, credentials, transport and reconnection belong to the Rust core. The shell hosts no browser or WebView UI. [PRODUCT.md](../PRODUCT.md) describes the product's job; [DESIGN.md](../DESIGN.md) defines the visual system.
 
-The current visual baseline is the [0.4.2 native redesign](design/ui-0.4.2.md). Earlier composition and acceptance evidence below retain their original version attribution. The source/session and volume contracts in this document are updated for [0.4.3](releases/0.4.3.md); its runtime evidence must come from its own build and release artifacts.
+The current visual baseline is the [0.4.2 native redesign](design/ui-0.4.2.md). Earlier composition and acceptance evidence below retain their original version attribution. The source/session and volume contracts in this document are updated for [0.4.3](releases/0.4.3.md); its own build and release evidence is linked in the 0.4.3 verification section below.
 
 ## Home and settings
 
@@ -57,6 +57,8 @@ The replacement has four protections:
 4. Receiver rows are keyed by ID and updated in place. State changes do not clear and rebuild the list. Frequently updated text and updater controls are assigned only when changed.
 
 Receiver readings initialize the control without producing a command. `volume_known` means every selected receiver/member has a valid reading; `volume_mixed` means those readings differ by at least 0.5 percentage points. Known uniform values show a percentage, mixed values show `不同` with the first receiver's reading as the slider reference, and incomplete readings show `—`. Volume is not persisted locally or automatically written on connection.
+
+Receiver volume is read when the connection is established; later changes from a phone or the speaker's controls are not synchronized live back to the UI.
 
 Explicit slider changes update the percentage immediately. Commands debounce by 180 ms; pointer release flushes the final position. Native routed pointer events are observed with `handledEventsToo` without replacing the slider's own capture or interaction. Without a selected connected/connecting target the slider is disabled; an established target with an unknown reading still permits a deliberate setting. No preconnection value is stored for later receivers.
 
@@ -152,11 +154,17 @@ Theme, waveform and visibility preferences live under `HKCU\Software\Airloom`; p
 
 ### 0.4.3 source and release gates
 
+Source `8b7bab9c1bceb8b7696aa3c20b6bdffa433038d5` passed both jobs and every gate in [CI 39708935823](https://github.com/chummumm/airloom/actions/runs/39708935823). The published binaries and the [native-smoke.json report](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-smoke.json) come from that build. The checks cover regular Linux/Windows tests, the explicitly invoked Windows process-capture and source-notification API lifecycles, native build and packaging, native UI smoke, and independent updater/process lifecycle checks.
+
+[Publish verified release 39710138720](https://github.com/chummumm/airloom/actions/runs/39710138720) published [v0.4.3 as Latest](https://github.com/chummumm/airloom/releases/tag/v0.4.3), targeting that same source. All 39 uploaded assets were matched by SHA-256 against the successful build and its generated checksum manifest. The [release-page screenshot](evidence/github-release-0.4.3.jpg) records the published version and Latest badge.
+
 The updated [Windows smoke](../scripts/smoke-windows.ps1) separates shipped-core idle evidence from connected UI fixtures. The shipped core checks three window sizes, a disabled/unknown volume control without a target, and no startup volume acknowledgement error. The same WinUI executable in the isolated connected fixture checks 0/9/10/99/100, native pointer input, and layout stability; its screenshots are named `fixture-volume-*`.
 
 The device-volume fixture first supplies equal readings, mixed readings, and a failed member reading. All three must produce zero volume-write commands; only an actual pointer drag may change the selected targets. Source changes, scope changes, manual rediscovery and automatic source-list events must preserve fixture connection identities and creation/disconnection counters. An unselected app source must retain sessions with zero audio. A separate group check covers rediscovery with two members.
 
-These new checks are release requirements, not a statement that the current working tree has passed Windows or HomePod testing. Runtime results and images belong to the corresponding CI run/release. The synthetic command fixture does not establish production sender reads, receiver transport continuity or acoustic output; sender/core protocol regressions cover their own layer separately.
+The connected volume screenshots record [equal readings](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-device-volume-known.png), [mixed readings](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-device-volume-mixed.png), [a missing reading](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-device-volume-unknown.png), and [an explicit pointer adjustment](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-device-volume-adjusted.png). Connected fixture layouts are available at [880](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-volume-window-880.png), [1100](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-volume-window-1100.png) and [1600](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-volume-window-1600.png) pixels. The [light native-group view](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-home-light.png) and [dark visibility settings](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-settings-dark.png) use the same isolated fixture.
+
+These results establish the stated automated checks, not physical HomePod playback. The synthetic command fixture does not establish production sender reads, receiver transport continuity or acoustic output; the passing sender/core protocol regressions cover their own layer separately. Historical screenshots and exceptions below retain their original versions.
 
 ### 0.4.0 source and release gates
 
@@ -180,7 +188,7 @@ Source automation IDs exercised by this flow include `SourceModePicker`, `Source
 
 ### Real Windows API and hardware boundaries
 
-`process_loopback_activation_and_lifetime` creates its own silent process and checks activation, stale identity rejection, finite exact-zero received samples, refusal of endpoint mute, bounded cancellation, restarting the client and reporting target exit. The process path uses float32 capture and retains the strict sample assertion. The final run's [process-capture-api.txt](evidence/process-capture-api.txt) records successful completion. [windows-audio.md](windows-audio.md) owns the capture contract.
+`process_loopback_activation_and_lifetime` creates its own silent process and checks activation, stale identity rejection, finite exact-zero received samples, refusal of endpoint mute, bounded cancellation, restarting the client and reporting target exit. The process path uses float32 capture and retains the strict sample assertion. The 0.4.3 run's [process-capture-api.txt](https://github.com/chummumm/airloom/releases/download/v0.4.3/process-capture-api.txt) records successful completion; [source-notifications-api.txt](https://github.com/chummumm/airloom/releases/download/v0.4.3/source-notifications-api.txt) separately records registration, explicit refresh and shutdown of the real Windows source-notification API. [windows-audio.md](windows-audio.md) owns the capture contract.
 
 That test does not play two applications simultaneously or connect a physical HomePod. Audible app isolation, browser child-process behavior, other application models, native HomePod stereo and multiroom synchronization require hardware validation. High-contrast rendering, the complete receiver error/reconnect matrix and new offline hide/restore interactions are outside this screenshot claim. The [resource contrast calculation](design/contrast-check.json) is a calculation for application-owned surfaces, not a rendered native accessibility audit. No web inspector has certified this XAML interface.
 
