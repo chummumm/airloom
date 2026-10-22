@@ -496,6 +496,7 @@ namespace winrt::Airloom::implementation
             busy || auth ? L"WarningBrush" : L"FaintBrush"));
         UpdatePulse(streaming);
         SetText(ConnectLabel(), action);
+        SetAccessibleName(ConnectButton(), action);
         if (labelChanged && m_devicesRendered) AnimateIn(ConnectContent(), 0.0f, 4.0f, 200, 0.2f);
         bool const selectedOnline = std::any_of(next.devices.begin(), next.devices.end(), [&next](Device const& entry)
             { return next.IsSelected(entry.id) && entry.online; });

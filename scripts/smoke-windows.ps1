@@ -1086,10 +1086,16 @@ function Test-ApplicationSourceFixture([string] $Theme) {
 
     Select-NativeOption 'SourceModePicker' '指定应用'
     $SelectedNames = @(Get-NativeSelectionNames 'SourcePicker')
-    if ($SelectedNames.Count -ne 0 -or -not (Wait-NativeId 'ConnectButton').Current.IsEnabled -or
-        -not (Wait-NativeId 'ConnectButton').Current.Name.Contains('停止投放') -or
-        -not (Wait-NativeId 'TestToneButton').Current.IsEnabled) {
-        throw 'Waiting for explicit application choice must keep the existing sessions stoppable and the independent test tone available.'
+    $ConnectState = (Wait-NativeId 'ConnectButton').Current
+    $TestToneState = (Wait-NativeId 'TestToneButton').Current
+    if ($SelectedNames.Count -ne 0 -or -not $ConnectState.IsEnabled -or
+        -not $ConnectState.Name.Contains('停止投放') -or -not $TestToneState.IsEnabled) {
+        $Observed = [ordered]@{
+            selected_count = $SelectedNames.Count; selected_names = $SelectedNames
+            connect_name = $ConnectState.Name; connect_enabled = $ConnectState.IsEnabled
+            test_tone_enabled = $TestToneState.IsEnabled
+        } | ConvertTo-Json -Compress
+        throw "Waiting for explicit application choice must keep the existing sessions stoppable and the independent test tone available. Observed: $Observed"
     }
     $LocalMute = Wait-NativeId 'LocalMuteToggle'
     $MutePattern = [System.Windows.Automation.TogglePattern]$LocalMute.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
