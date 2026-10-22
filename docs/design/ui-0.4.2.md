@@ -26,3 +26,11 @@ The existing Windows CI exercises the shipped native executable at 880, 1100 and
 Actual release screenshots and run provenance are linked from the README after verification. Populated fixture screenshots are synthetic UI evidence; the source notification API lifecycle, protocol tests and physical HomePod listening results remain separate evidence. A successful header-only C++ check does not substitute for XAML compilation, packaged app startup or rendered UI review.
 
 The Impeccable launcher and referenced playbooks are absent from the available installation in this session. PRODUCT.md, the supplied files and the available Impeccable principles/Taste app-screen guidance provide the review context. Browser CSS inspectors are not evidence for a native WinUI executable; native CI and its screenshots are used instead.
+
+## Verified release evidence
+
+[CI 39701717193](https://github.com/chummumm/airloom/actions/runs/39701717193) passed on source commit `481d3ee17a06b54c0cdc4ce483716aea9cbd8fa6`. Both Linux and Windows jobs succeeded, including actual WinUI/XAML compilation, packaged-app launch, native UI automation and updater lifecycle/cleanup. The downloaded Windows artifact matched its API SHA-256 digest, `afc3bf5cdcfffd31bb7f22c9ed30e55d59e1b43b3f24b841e8d422ce1355cc23`.
+
+Rendered light/dark home and settings views, the source dropdown, main button states, native group views and compact layouts were reviewed. The UIA password-dialog and cancellation checks passed, but `fixture-auth-dark.png` captures the home screen and is not visual evidence of the password dialog. UIA focus is likewise a logical focus check, not proof of the visible keyboard focus ring. No physical HomePod was connected to CI.
+
+[Release v0.4.2](https://github.com/chummumm/airloom/releases/tag/v0.4.2) was published as Latest by [publish run 39703079372](https://github.com/chummumm/airloom/actions/runs/39703079372). The installer and portable ZIP release asset digests match the verified CI files. [Published release screenshot](../evidence/github-release-0.4.2.jpg).
