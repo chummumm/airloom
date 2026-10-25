@@ -4,27 +4,27 @@
 
 一个从零实现的 Windows 原生音频投放应用：WinUI 3 界面、Rust 音频核心，以及 Windows 自带的端点和进程音频采集。可投放系统声音，也可只选择一个应用；无需安装虚拟声卡驱动。
 
-> **0.4.3**：连接时读取扬声器原有音量，只有手动调节才改变设备；重新发现和切换音源保留现有 AirPlay 连接，采集切换期间可能短暂静音。保留原生 WinUI 界面及事件更新；版本末位递增至 `.10`，再进中间位。详见[版本说明](docs/releases/0.4.3.md)。
+> **0.4.4**：同步新的路线舞台、扬声器列表与固定控制栏，加入由真实状态驱动的连线、粒子和页面动效。保留设备音量读取、重新发现和切换音源保留连接；窗口隐藏后停止主页连续动画。详见[版本说明](docs/releases/0.4.4.md)。
 
 [![Build and verify](https://github.com/chummumm/airloom/actions/workflows/ci.yml/badge.svg)](https://github.com/chummumm/airloom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-626a73.svg)](LICENSE)
 
 ## 界面
 
-以下为 0.4.3 的实际 WinUI 界面截图，来自 [CI 39708935823](https://github.com/chummumm/airloom/actions/runs/39708935823)／`8b7bab9`。设备、应用和信号为界面测试数据。
+以下为 0.4.4 的实际 WinUI 界面截图，来自 [CI 40153849825](https://github.com/chummumm/airloom/actions/runs/40153849825)／`268e0c4`。设备、应用和信号为界面测试数据。
 
-![Airloom 0.4.3 原生立体声组合界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-home-light.png)
+![Airloom 0.4.4 原生路线界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.4/fixture-playing-home-light.png)
 
-![Airloom 0.4.3 原生深色设置页与组合可见性，设备为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.3/fixture-native-stereo-settings-dark.png)
+![Airloom 0.4.4 原生深色路线界面，设备和信号为界面测试数据](https://github.com/chummumm/airloom/releases/download/v0.4.4/fixture-playing-home-dark.png)
 
 截图来自实际 WinUI 3 程序。`fixture-*` 使用独立临时目录中的 CI 专用替代 DLL，提供模拟扬声器、信号、应用选择与密码挑战，用于检查原生界面的完整状态；这些数据和替代 DLL 不进入安装包，也不作为实机音频证明。
 
-发布程序本体另有[浅色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-home-light.png)、[深色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-home-dark.png)及[设置页](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动发货核心，验证 880／1100／1600 像素窗口、固定播放栏、无目标时音量禁用且无启动确认错误、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。隔离 fixture 使用同一 WinUI 可执行程序，验证已连接状态下的音量读数与实际拖动、三尺寸布局、应用选择、切换音源与重新发现保留连接标识、空应用来源静音等待、事件更新、下拉框稳定性、组合成员及隐藏恢复，以及真实鼠标操作主按钮。结果见 [native-smoke.json](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-smoke.json)。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。仓库 `docs/evidence` 中原有应用模式截图保留为 0.4.0 历史证据。
+发布程序本体另有[浅色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-home-light.png)、[深色空状态](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-home-dark.png)及[设置页](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-settings-light.png)截图。Windows CI 从便携 ZIP 启动发货核心，验证 880／1100／1600 像素窗口、固定播放栏、无目标时音量禁用且无启动确认错误、深浅主题、设置导航、诊断复制与真实 GitHub 更新检查。隔离 fixture 使用同一 WinUI 可执行程序，验证已连接状态下的音量读数与实际拖动、三尺寸布局、应用选择、切换音源与重新发现保留连接标识、空应用来源静音等待、事件更新、下拉框稳定性、组合成员及隐藏恢复，以及真实鼠标操作主按钮。新版同时检查三尺寸底栏和音源控件完整可见、无重叠；滚动检查后回到顶部测量整页几何。结果见 [native-smoke.json](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-smoke.json)。UIA 焦点检查仅证明逻辑焦点，不声称已验证可见键盘焦点框。仓库 `docs/evidence` 中原有应用模式截图保留为 0.4.0 历史证据。
 
 ## 体验
 
-- **原生界面**：WinUI 3 / C++/WinRT，Windows 11 Mica 背景、Fluent 卡片、系统强调色、自适应扬声器列表与固定底部播放栏；支持深浅主题、系统高对比度和减少动画偏好。
-- **原生按钮与动效**：使用 WinUI 原生模板的焦点、悬停／按下／禁用反馈，加入遵从系统偏好的状态、选择和页面过渡。播放栏和音量数字槽位继续保持稳定。
+- **原生路线界面**：WinUI 3 / C++/WinRT，Windows 11 Mica 背景、音源与扬声器路线舞台、自适应扬声器列表及固定底部播放栏；支持深浅主题、系统高对比度和减少动画偏好。
+- **原生按钮与动效**：保留 WinUI 原生焦点、悬停／按下／禁用反馈；路线绘制、节点回弹、真实信号粒子、发现雷达与设置过渡遵从系统偏好。隐藏或最小化窗口、进入设置时停止主页连续动效；播放栏和音量数字槽位保持稳定。
 - **实时展示**：由真实 PCM 驱动的 64 段峰值包络、左右声道电平和传输指标；固定 −60 至 0 dB 显示标尺，没有音频时显示平线。
 - **免驱系统声音**：采集系统默认或指定的现有输出设备，通过局域网向 AirPlay 接收端发送。
 - **事件自动更新**：应用会话、进程退出和播放设备变化触发来源更新；设备发现持续接收 DNS-SD 事件。没有应用层定时补查，现有刷新按钮用于主动重扫。
@@ -43,7 +43,7 @@
 
 正式安装包及对应构建证据以 [GitHub Latest](https://github.com/chummumm/airloom/releases/latest) 为准。只有完整 Windows/Linux 构建和发布检查通过后才发布安装包。
 
-**从 0.1.x / 0.2.0 升级，请先右键系统托盘中的 Airloom →“退出 Airloom”，再运行新安装包。** 关闭旧版窗口只会隐藏到托盘；旧版没有新的安装退出协议，新安装器会提示先退出。0.2.1 及更新版本可使用应用内更新和新的进程退出流程。详见[0.4.3 版本说明](docs/releases/0.4.3.md)。
+**从 0.1.x / 0.2.0 升级，请先右键系统托盘中的 Airloom →“退出 Airloom”，再运行新安装包。** 关闭旧版窗口只会隐藏到托盘；旧版没有新的安装退出协议，新安装器会提示先退出。0.2.1 及更新版本可使用应用内更新和新的进程退出流程。详见[0.4.4 版本说明](docs/releases/0.4.4.md)。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -51,7 +51,7 @@
 | [airloom-windows-x64-portable.zip](https://github.com/chummumm/airloom/releases/latest/download/airloom-windows-x64-portable.zip) | 完整解压到新目录后运行 |
 | [SHA256SUMS.txt](https://github.com/chummumm/airloom/releases/latest/download/SHA256SUMS.txt) | 当前发布下载文件的完整性校验值 |
 
-0.4.3 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/39708935823)，发布二进制对应源码提交 `8b7bab9c1bceb8b7696aa3c20b6bdffa433038d5`。Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。设备音量读取与会话保留由生产发送器／核心的协议回归覆盖；界面的只读音量展示、显式拖动与来源切换命令另由隔离 fixture 覆盖。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
+0.4.4 来自[全部检查通过的构建](https://github.com/chummumm/airloom/actions/runs/40153849825)，发布二进制对应源码提交 `268e0c4c8832369eda08e25c57b395a6424d015d`。Linux 和 Windows 测试、真实进程采集与来源通知 API 生命周期、原生应用与打包、界面检查和独立更新生命周期均通过。设备音量读取与会话保留由生产发送器／核心的协议回归覆盖；界面的只读音量展示、显式拖动与来源切换命令另由隔离 fixture 覆盖。开发构建可在 [Actions](https://github.com/chummumm/airloom/actions/workflows/ci.yml) 的 `airloom-windows-x64` Artifact 中获取。
 
 要求 Windows 11 x64（build 22000 或更高）。电脑与接收端需处于可以互相发现和通信的局域网。解压便携 ZIP 后运行 `Airloom.exe`，或运行安装包。不要只复制 EXE：原生应用和 Windows App SDK 的自包含文件需要放在一起。
 
@@ -99,7 +99,7 @@ Airloom 不创建、拆散 Apple“家庭”组合，不修改其左右设置，
 
 ## 已实现的代码与验证边界
 
-下表中的自动检查结果对应上述 0.4.3 构建及其[发布证据](https://github.com/chummumm/airloom/releases/download/v0.4.3/native-smoke.json)；另有版本注明的实机反馈与历史设计记录仍保留原有归属。
+下表中的自动检查结果对应上述 0.4.4 构建及其[发布证据](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-smoke.json)；另有版本注明的实机反馈与历史设计记录仍保留原有归属。
 
 | 项目 | 当前范围 |
 | --- | --- |

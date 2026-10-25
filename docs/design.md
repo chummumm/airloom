@@ -2,7 +2,21 @@
 
 Airloom's desktop shell is **WinUI 3, C++/WinRT and XAML**. Capture, discovery, authentication, credentials, transport and reconnection belong to the Rust core. The shell hosts no browser or WebView UI. [PRODUCT.md](../PRODUCT.md) describes the product's job; [DESIGN.md](../DESIGN.md) defines the visual system.
 
-The current visual baseline is the [0.4.2 native redesign](design/ui-0.4.2.md). Earlier composition and acceptance evidence below retain their original version attribution. The source/session and volume contracts in this document are updated for [0.4.3](releases/0.4.3.md); its own build and release evidence is linked in the 0.4.3 verification section below.
+The current visual baseline is the [0.4.4 route workspace](releases/0.4.4.md), defined in [DESIGN.md](../DESIGN.md). Earlier composition and acceptance evidence below retain their original version attribution, including the [0.4.2 redesign](design/ui-0.4.2.md). The source/session and volume contracts from [0.4.3](releases/0.4.3.md) remain in force.
+
+## Route workspace (0.4.4)
+
+The supplied redesign is integrated into the existing WinUI shell: a source-and-status row inside the signal stage, a source-to-receiver route canvas, a separate receiver rail and a fixed transport dock. Route geometry and decoration follow core state; meters and waveform samples still come from the audio engine. Compact windows retain receiver-first composition and native scrolling. Existing AutomationIds and audio commands are preserved.
+
+Path drawing, connection dashes, signal particles, discovery radar, receiver equalizers and page transitions follow Windows animation and high-contrast preferences. Hidden or minimized windows and the settings page stop the home view's continuous decoration; silent particles fade out before their animations stop. Theme changes refresh route brushes without restarting the connection animation. When one receiver streams while another requests authentication, the main stop action remains a stop; authentication stays on the matching receiver.
+
+Windows UI acceptance checks the actual fixed-dock and source-control bounds at 880, 1100 and 1600 pixels, including connected fixtures. It retains read-only initial device volume, explicit pointer volume changes, source/discovery session continuity, settings, themes, authentication, native stereo and updater checks. Fixture audio and receivers are UI evidence only.
+
+## 0.4.4 verification
+
+[Windows/Linux build 40153849825](https://github.com/chummumm/airloom/actions/runs/40153849825) passed at `268e0c4c8832369eda08e25c57b395a6424d015d`: native compilation and packaging, all existing protocol/audio regressions, real Windows capture/source notification API checks, UI Automation and updater lifecycle/cleanup. The real WinUI UI was inspected in light/dark, populated, compact and settings captures.
+
+The [native evidence](https://github.com/chummumm/airloom/releases/download/v0.4.4/native-smoke.json) records successful source/dock geometry checks at 880/1100/1600 for the shipped-core idle UI and connected fixtures, plus volume pointer behavior, authentication, source/discovery continuity and native-stereo presentation. The compact volume test explicitly restores scroll top after proving that the fixed dock does not move at scroll bottom, so offscreen receiver bounds are not mistaken for visible layout. Fixture receivers and signal remain synthetic and do not establish a new hardware-audio result.
 
 ## Home and settings
 
