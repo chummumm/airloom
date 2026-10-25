@@ -548,6 +548,11 @@ function Test-NativeVolumeLayout([string] $EvidencePrefix) {
                 throw "The transport dock moved when the home workspace scrolled at $($Size[0]) px."
             }
         }
+        # The taller route stage can completely scroll the receiver rail out of
+        # the clipped UIA viewport. The dock invariant above is measured at the
+        # bottom; measure whole-workspace stability at the same visible top
+        # position used by the idle check, without accepting empty geometry.
+        Set-HomeScroll 0
         $Slider = Wait-NativeId 'VolumeSlider'
         if (-not $Slider.Current.IsEnabled) { throw 'The connected fixture volume slider must accept explicit user input.' }
         $Range = [System.Windows.Automation.RangeValuePattern]$Slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
@@ -1416,7 +1421,7 @@ function Test-NativeStereoFixture([string] $Theme) {
     Send-FixtureEvent 'stereo_partial'
     $GroupButton = Wait-NativeId "Receiver:$GroupId"
     if (($GroupButton.GetRuntimeId() -join ',') -ne $GroupIdentity -or
-        -not $GroupButton.Current.Name.Contains('成员暂缺') -or $GroupButton.Current.Name.Contains('正在传输') -or
+        -not $GroupButton.Current.Name.Contains('成员暂缺') -or $GroupButton.Current.Name.Contains('正在投放') -or
         (Wait-NativeId 'TestToneButton').Current.IsEnabled -or
         -not (Wait-NativeId 'ReceiverMember:fixture-study').Current.Name.Contains('离线') -or
         (Wait-NativeId 'ReceiverMember:fixture-study').Current.IsOffscreen) {
