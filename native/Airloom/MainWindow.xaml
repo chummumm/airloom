@@ -8,33 +8,41 @@
     <Window.SystemBackdrop>
         <MicaBackdrop />
     </Window.SystemBackdrop>
-    <UserControl x:Name="WindowRoot" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+    <!-- The interface is Chinese: tag it so Han characters resolve to the Simplified Chinese
+         font on every Windows display language, instead of mixing Japanese and Chinese faces
+         (and their weights) within one heading. -->
+    <UserControl x:Name="WindowRoot" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Language="zh-CN">
         <Grid x:Name="LayoutRoot" Background="{ThemeResource AppCanvasBrush}"
               Loaded="OnLoaded" SizeChanged="OnLayoutRootSizeChanged" ActualThemeChanged="OnActualThemeChanged"
               AutomationProperties.AutomationId="LayoutRoot">
             <Grid.RowDefinitions><RowDefinition Height="48" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-            <!-- Visual states belong to this UserControl. The speaker card reflows
-                 beside or above the casting card; the dock never scrolls. -->
+            <!-- Visual states belong to this UserControl. Wide: the stage and the speaker
+                 rail sit side by side and fill the window; compact: speakers first, the stage
+                 below, the page scrolls. The dock never scrolls in either. -->
             <VisualStateManager.VisualStateGroups>
                 <VisualStateGroup x:Name="WorkspaceWidth">
                     <VisualState x:Name="WideWorkspace">
                         <VisualState.StateTriggers><StateTrigger x:Name="WideWorkspaceTrigger" IsActive="False" /></VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="ReceiverColumn.Width" Value="328" />
+                            <Setter Target="ReceiverColumn.Width" Value="340" />
+                            <Setter Target="WorkspaceTopRow.Height" Value="*" />
+                            <Setter Target="WorkspaceBottomRow.Height" Value="Auto" />
                             <Setter Target="WorkspaceGrid.ColumnSpacing" Value="16" />
                             <Setter Target="WorkspaceGrid.RowSpacing" Value="0" />
                             <Setter Target="SignalPanel.(Grid.Row)" Value="0" />
                             <Setter Target="SignalPanel.(Grid.ColumnSpan)" Value="1" />
-                            <Setter Target="SignalPanel.MinHeight" Value="400" />
-                            <Setter Target="SignalPanel.MaxHeight" Value="640" />
                             <Setter Target="DeviceRail.(Grid.Row)" Value="0" />
                             <Setter Target="DeviceRail.(Grid.Column)" Value="1" />
                             <Setter Target="DeviceRail.(Grid.ColumnSpan)" Value="1" />
-                            <Setter Target="DeviceRail.MinHeight" Value="400" />
-                            <Setter Target="DeviceRail.MaxHeight" Value="640" />
-                            <Setter Target="InstrumentContent.Padding" Value="28,24,28,24" />
+                            <Setter Target="DeviceRail.MinHeight" Value="520" />
+                            <Setter Target="DeviceRail.MaxHeight" Value="4000" />
+                            <Setter Target="InstrumentContent.Padding" Value="28,22,28,22" />
                             <Setter Target="TargetName.FontSize" Value="28" />
-                            <Setter Target="SourcePicker.Width" Value="320" />
+                            <Setter Target="SourcePicker.Width" Value="260" />
+                            <Setter Target="MetersPanel.Width" Value="190" />
+                            <Setter Target="VolumeSliderHost.Width" Value="160" />
+                            <Setter Target="LocalMuteLabel.Visibility" Value="Visible" />
+                            <Setter Target="LocalMuteGlyph.Visibility" Value="Collapsed" />
                         </VisualState.Setters>
                     </VisualState>
                     <VisualState x:Name="CompactWorkspace">
@@ -43,7 +51,7 @@
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
 
-            <!-- Title bar: back (settings only), mark, name, settings, caption-button reserve. -->
+            <!-- Title bar: back (settings only), mark, name, page, settings, caption-button reserve. -->
             <Grid x:Name="TitleBarGrid">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -56,17 +64,19 @@
                     <FontIcon Glyph="&#xE72B;" FontSize="16" />
                 </Button>
                 <Grid x:Name="TitleDragRegion" Grid.Column="1" Background="Transparent" Padding="16,0,0,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
                         <!-- The Airloom mark (three signal threads) in the system accent. -->
-                        <Grid Width="16" Height="16" Margin="0,0,16,0" AutomationProperties.AccessibilityView="Raw">
+                        <Grid Width="16" Height="16" AutomationProperties.AccessibilityView="Raw">
                             <Rectangle Width="3" Height="7" RadiusX="1.5" RadiusY="1.5" Fill="{ThemeResource AccentFillColorDefaultBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0" />
                             <Rectangle Width="3" Height="16" RadiusX="1.5" RadiusY="1.5" Fill="{ThemeResource AccentFillColorDefaultBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             <Rectangle Width="3" Height="11" RadiusX="1.5" RadiusY="1.5" Fill="{ThemeResource AccentFillColorDefaultBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,1,0" />
                         </Grid>
-                        <TextBlock Text="Airloom" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="Airloom" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TitleSection" Text="设置" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   VerticalAlignment="Center" Visibility="Collapsed" />
                     </StackPanel>
                 </Grid>
-                <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource TitleBarButtonStyle}" Click="OnOpenSettings"
+                <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource TitleBarButtonStyle}" Margin="0,0,6,0" Click="OnOpenSettings"
                         AutomationProperties.Name="设置" AutomationProperties.AutomationId="SettingsButton" ToolTipService.ToolTip="设置与更新">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE713;" Style="{StaticResource ButtonGlyphStyle}" />
@@ -78,133 +88,181 @@
             <!-- ========== Home ========== -->
             <Grid x:Name="HomeView" Grid.Row="1" AutomationProperties.AutomationId="HomeView" AutomationProperties.Name="声音投放工作区" AutomationProperties.AccessibilityView="Content">
                 <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                <Border x:Name="HomeSheet" Style="{StaticResource SheetStyle}" Margin="8,0,8,0">
+                <!-- Cards sit directly on Mica; only the dock gets a layer. -->
+                <Grid x:Name="HomeSheet">
                     <ScrollViewer x:Name="HomeScrollViewer" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto"
                                   HorizontalContentAlignment="Stretch" ZoomMode="Disabled" AutomationProperties.AutomationId="HomeScrollViewer">
                         <!-- Viewport-bound width keeps changing labels out of page measurement. -->
                         <Grid x:Name="PageContent" Width="{Binding ViewportWidth, ElementName=HomeScrollViewer}" MinHeight="{Binding ViewportHeight, ElementName=HomeScrollViewer}"
-                              Padding="24,20,24,24" AutomationProperties.AutomationId="PageContent" AutomationProperties.Name="声音与扬声器" AutomationProperties.AccessibilityView="Content">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                              Padding="24,4,24,20" AutomationProperties.AutomationId="PageContent" AutomationProperties.Name="声音与扬声器" AutomationProperties.AccessibilityView="Content">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
 
-                            <!-- Source: a Settings-style card. Scope and output on the right,
-                                 the capture state as its description. -->
-                            <Border x:Name="SourcePanel" Style="{StaticResource CardStyle}" Padding="16,12" Margin="0,0,0,16" AutomationProperties.AutomationId="SourcePanel">
-                                <Grid ColumnSpacing="8" RowSpacing="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" MinWidth="120" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon x:Name="SourceGlyph" Glyph="&#xE7F4;" Style="{StaticResource SettingsGlyphStyle}" Margin="4,0,8,0" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock x:Name="SourceTitle" Text="声音来源" Style="{StaticResource CardTitleStyle}" />
-                                        <TextBlock x:Name="CaptureStatusText" Text="选择电脑正在播放声音的输出设备。" Style="{StaticResource CardDescriptionStyle}"
-                                                   MaxLines="2" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="CaptureStatusText" AutomationProperties.LiveSetting="Polite" />
-                                    </StackPanel>
-                                    <ComboBox x:Name="SourceModePicker" Grid.Column="2" Width="120" IsEnabled="False" SelectedIndex="0" VerticalAlignment="Center" SelectionChanged="OnSourceModeChanged"
-                                              AutomationProperties.Name="声音来源类型" AutomationProperties.AutomationId="SourceModePicker" ToolTipService.ToolTip="选择系统声音或指定应用；切换时保持扬声器连接。">
-                                        <ComboBoxItem Content="系统声音" Tag="endpoint" />
-                                        <ComboBoxItem Content="指定应用" Tag="application" />
-                                    </ComboBox>
-                                    <ComboBox x:Name="SourcePicker" Grid.Column="3" Width="240" PlaceholderText="选择 Windows 播放设备" VerticalAlignment="Center" SelectionChanged="OnSourceChanged"
-                                              AutomationProperties.Name="声音来源，Windows 播放设备" AutomationProperties.AutomationId="SourcePicker" ToolTipService.ToolTip="选择正在播放声音的 Windows 输出设备。" />
-                                    <Button x:Name="SourceRetryButton" Grid.Column="4" Width="104" IsEnabled="False" Style="{StaticResource CompactButtonStyle}" VerticalAlignment="Center" Click="OnRefreshSources"
-                                            AutomationProperties.Name="刷新声音来源列表" AutomationProperties.AutomationId="SourceRetryButton">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon x:Name="SourceRetryGlyph" Glyph="&#xE72C;" FontSize="14" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="SourceRetryLabel" Text="刷新列表" Style="{StaticResource ButtonLabelStyle}" />
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                            </Border>
-
-                            <InfoBar x:Name="ErrorBanner" Grid.Row="1" IsOpen="False" Visibility="Collapsed" IsClosable="False" Severity="Error" Title="连接需要处理" Margin="0,0,0,16">
+                            <InfoBar x:Name="ErrorBanner" IsOpen="False" Visibility="Collapsed" IsClosable="False" Severity="Error" Title="连接需要处理" Margin="0,0,0,16">
                                 <InfoBar.ActionButton><Button x:Name="RetryButton" Content="重试" Click="OnRetry" /></InfoBar.ActionButton>
                             </InfoBar>
 
-                            <Grid x:Name="WorkspaceGrid" Grid.Row="2" RowSpacing="16" VerticalAlignment="Stretch">
+                            <Grid x:Name="WorkspaceGrid" Grid.Row="1" RowSpacing="16" VerticalAlignment="Stretch">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="ReceiverColumn" Width="0" /></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition x:Name="WorkspaceTopRow" Height="Auto" /><RowDefinition x:Name="WorkspaceBottomRow" Height="*" /></Grid.RowDefinitions>
 
-                                <!-- Casting card: where the sound goes, and the real outgoing signal. -->
-                                <Border x:Name="SignalPanel" Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="0" MinHeight="340" MaxHeight="380"
-                                        AutomationProperties.AutomationId="SignalPanel" AutomationProperties.Name="实时音频信号" AutomationProperties.AccessibilityView="Content">
-                                    <Grid x:Name="InstrumentContent" Padding="20,18,20,18">
+                                <!-- Stage: where the sound comes from, where it goes, and the real outgoing signal. -->
+                                <Border x:Name="SignalPanel" Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="0" MinHeight="520"
+                                        AutomationProperties.AutomationId="SignalPanel" AutomationProperties.Name="声音路线与实时信号" AutomationProperties.AccessibilityView="Content">
+                                    <Grid x:Name="InstrumentContent" Padding="24,20,24,20">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" MinHeight="88" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" MinHeight="232" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <Grid x:Name="SessionHeader" ColumnSpacing="16">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <StackPanel Spacing="4">
-                                                <TextBlock x:Name="TargetName" Text="尚未选择扬声器" Style="{StaticResource TitleTextBlockStyle}" FontSize="24" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                                                           AutomationProperties.AutomationId="TargetName" AutomationProperties.HeadingLevel="Level1" />
-                                                <TextBlock x:Name="StatusDescription" Text="选择扬声器，开始投放系统声音。" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                            <!-- Live-state pill. Its dot pulses only while audio is really going out. -->
-                                            <Border x:Name="StatusPill" Grid.Column="1" VerticalAlignment="Top" Margin="0,6,0,0" Padding="10,5,12,6" CornerRadius="13"
-                                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <Grid Width="10" Height="10" VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw">
-                                                        <Ellipse x:Name="StatusPulse" Width="10" Height="10" Fill="{ThemeResource SignalFillBrush}" Visibility="Collapsed" />
-                                                        <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+
+                                        <!-- Source scope and output, and the live-state pill. -->
+                                        <Grid x:Name="SessionHeader" ColumnSpacing="8" AutomationProperties.AutomationId="SourcePanel"
+                                              AutomationProperties.Name="声音来源" AutomationProperties.AccessibilityView="Content">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="SourceModePicker" Width="116" IsEnabled="False" SelectedIndex="0" VerticalAlignment="Center" SelectionChanged="OnSourceModeChanged"
+                                                      AutomationProperties.Name="声音来源类型" AutomationProperties.AutomationId="SourceModePicker" ToolTipService.ToolTip="选择系统声音或指定应用；切换时保持扬声器连接。">
+                                                <ComboBoxItem Content="系统声音" Tag="endpoint" />
+                                                <ComboBoxItem Content="指定应用" Tag="application" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="SourcePicker" Grid.Column="1" Width="240" PlaceholderText="选择 Windows 播放设备" VerticalAlignment="Center" SelectionChanged="OnSourceChanged"
+                                                      AutomationProperties.Name="声音来源，Windows 播放设备" AutomationProperties.AutomationId="SourcePicker" ToolTipService.ToolTip="选择正在播放声音的 Windows 输出设备。" />
+                                            <Button x:Name="SourceRetryButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" IsEnabled="False" VerticalAlignment="Center" Click="OnRefreshSources"
+                                                    AutomationProperties.Name="刷新声音来源列表" AutomationProperties.AutomationId="SourceRetryButton" ToolTipService.ToolTip="刷新声音来源列表">
+                                                <FontIcon x:Name="SourceRetryGlyph" Glyph="&#xE72C;" FontSize="16" />
+                                            </Button>
+                                            <!-- Live-state pill. Its dot breathes only while audio really goes out. -->
+                                            <Border x:Name="StatusPill" Grid.Column="4" Height="28" CornerRadius="14" Padding="10,0,12,0" VerticalAlignment="Center"
+                                                    Background="{ThemeResource PillRestBrush}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                    <Grid Width="8" Height="8" VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw">
+                                                        <Ellipse x:Name="StatusPulse" Width="8" Height="8" Fill="{ThemeResource SignalFillBrush}" Visibility="Collapsed" />
+                                                        <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{ThemeResource FaintBrush}" />
                                                     </Grid>
-                                                    <TextBlock x:Name="StatusBadge" Text="等待连接" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" TextWrapping="NoWrap"
-                                                               AutomationProperties.AutomationId="StatusBadge" AutomationProperties.LiveSetting="Polite" />
+                                                    <TextBlock x:Name="StatusBadge" Text="未连接" FontSize="12" LineHeight="16" VerticalAlignment="Center" TextWrapping="NoWrap"
+                                                               Foreground="{ThemeResource MutedBrush}" AutomationProperties.AutomationId="StatusBadge" AutomationProperties.LiveSetting="Polite" />
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
 
-                                        <!-- 64-bin peak envelope from the engine, drawn in the system accent. -->
-                                        <Grid Grid.Row="1" Margin="0,16,0,12">
-                                            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <Canvas x:Name="WaveformCanvas" SizeChanged="OnWaveformSizeChanged" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" AutomationProperties.AccessibilityView="Raw">
-                                                <Line x:Name="WaveformBaseline" Stroke="{ThemeResource DividerStrokeColorDefaultBrush}" StrokeThickness="1" />
+                                        <!-- Headline: the chosen speakers; subline: what is happening. -->
+                                        <StackPanel Grid.Row="1" Margin="0,18,0,0" Spacing="4">
+                                            <TextBlock x:Name="TargetName" Text="选择要接收声音的扬声器" Style="{StaticResource TitleTextBlockStyle}" FontSize="24" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.AutomationId="TargetName" AutomationProperties.HeadingLevel="Level1" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="StatusDescription" Text="选择一台或多台扬声器，然后开始投放。" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <HyperlinkButton x:Name="CancelAuthButton" Grid.Column="1" Content="取消此设备" Click="OnCancelAuth" Visibility="Collapsed" Padding="6,2" FontSize="12" VerticalAlignment="Center"
+                                                                 AutomationProperties.AutomationId="CancelAuthButton" />
+                                            </Grid>
+                                        </StackPanel>
+
+                                        <!-- What the capture actually hears, in its own colour. -->
+                                        <Grid x:Name="CaptureStatusBar" Grid.Row="2" Margin="0,10,0,0" ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="CaptureDot" Width="6" Height="6" Fill="{ThemeResource FaintBrush}" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,5,0,0"
+                                                     AutomationProperties.AccessibilityView="Raw" />
+                                            <FontIcon x:Name="CaptureGlyph" Glyph="&#xE783;" FontSize="14" VerticalAlignment="Top" Margin="0,1,0,0" Visibility="Collapsed"
+                                                      Foreground="{ThemeResource DangerBrush}" AutomationProperties.AccessibilityView="Raw" />
+                                            <TextBlock x:Name="CaptureStatusText" Grid.Column="1" Text="选择电脑正在播放声音的输出设备。" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource MutedBrush}"
+                                                       TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.AutomationId="CaptureStatusText" AutomationProperties.LiveSetting="Polite" />
+                                        </Grid>
+
+                                        <!-- Route: this computer on the left, one curve per chosen speaker. Drawn in code. -->
+                                        <Grid x:Name="RouteHost" Grid.Row="3" Margin="0,8,0,4">
+                                            <Canvas x:Name="RouteCanvas" SizeChanged="OnRouteSizeChanged" IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw">
+                                                <Canvas x:Name="RouteLinkLayer" />
+                                                <Canvas x:Name="RouteParticleLayer" />
+                                                <Grid x:Name="RouteSource" Width="120" RowSpacing="10">
+                                                    <Grid.RowDefinitions><RowDefinition Height="80" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                                    <Border x:Name="RouteSourceHalo" Width="80" Height="80" CornerRadius="18" BorderThickness="2" BorderBrush="{ThemeResource SignalFillBrush}" Visibility="Collapsed" />
+                                                    <Border x:Name="RouteSourceTile" Width="80" Height="80" CornerRadius="18" BorderThickness="1"
+                                                            Background="{ThemeResource AppSurfaceBrush}" BorderBrush="{ThemeResource NodeStrokeBrush}">
+                                                        <FontIcon x:Name="RouteSourceGlyph" Glyph="&#xE7F4;" FontSize="34" Foreground="{ThemeResource InkBrush}" />
+                                                    </Border>
+                                                    <StackPanel Grid.Row="1" HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="RouteSourceTitle" Text="这台电脑" FontSize="12" LineHeight="16" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center"
+                                                                   MaxWidth="120" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock x:Name="RouteSourceSubtitle" Text="" FontSize="12" LineHeight="16" Foreground="{ThemeResource MutedBrush}" HorizontalAlignment="Center" TextAlignment="Center"
+                                                                   MaxWidth="120" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <Canvas x:Name="RouteNodeLayer" />
                                             </Canvas>
-                                            <StackPanel x:Name="WaveformHintPanel" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" Margin="0,40,0,0">
-                                                <TextBlock x:Name="WaveformHint" Text="连接后，声音将在这里流动" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                           TextAlignment="Center" HorizontalAlignment="Center" />
+                                        </Grid>
+
+                                        <!-- Real signal: the engine's 64-bin peak envelope and the channel levels. -->
+                                        <Grid Grid.Row="4" Margin="0,8,0,0" ColumnSpacing="20">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <Grid x:Name="WaveformArea" Height="64">
+                                                <Canvas x:Name="WaveformCanvas" SizeChanged="OnWaveformSizeChanged" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" AutomationProperties.AccessibilityView="Raw">
+                                                    <!-- One quiet dot per bin; code aligns the dash period to the 64 bars,
+                                                         so silent bins read as resting bars rather than an empty card. -->
+                                                    <Line x:Name="WaveformBaseline" Stroke="{ThemeResource TextFillColorDisabledBrush}" Opacity="0.7" StrokeThickness="3"
+                                                          StrokeDashArray="0,3" StrokeDashCap="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                                </Canvas>
+                                                <Border x:Name="WaveformHintPanel" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,4,0,0" Padding="10,2" CornerRadius="10"
+                                                        Background="{ThemeResource AppSurfaceBrush}">
+                                                    <TextBlock x:Name="WaveformHint" Text="连接后，声音将在这里流动" FontSize="12" LineHeight="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                               TextAlignment="Center" TextWrapping="NoWrap" />
+                                                </Border>
+                                            </Grid>
+                                            <Grid x:Name="MetersPanel" Grid.Column="1" Width="150" ColumnSpacing="10" RowSpacing="8" VerticalAlignment="Bottom" Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                                <TextBlock Text="L" Style="{StaticResource FigureLabelStyle}" VerticalAlignment="Center" />
+                                                <ProgressBar x:Name="LeftMeter" Grid.Column="1" Minimum="0" Maximum="1" Value="0" VerticalAlignment="Center" AutomationProperties.Name="左声道电平" />
+                                                <TextBlock x:Name="LeftDb" Grid.Column="2" Text="−∞ dB" Style="{StaticResource FigureLabelStyle}" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
+                                                <TextBlock Grid.Row="1" Text="R" Style="{StaticResource FigureLabelStyle}" VerticalAlignment="Center" />
+                                                <ProgressBar x:Name="RightMeter" Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="1" Value="0" VerticalAlignment="Center" AutomationProperties.Name="右声道电平" />
+                                                <TextBlock x:Name="RightDb" Grid.Row="1" Grid.Column="2" Text="−∞ dB" Style="{StaticResource FigureLabelStyle}" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
+                                            </Grid>
+                                        </Grid>
+
+                                        <!-- Transfer figures, appearing with a session. -->
+                                        <Grid x:Name="StatsPanel" Grid.Row="5" Margin="0,10,0,0" Padding="0,10,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" ColumnSpacing="16">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel x:Name="StatsFigures" Orientation="Horizontal" Spacing="18" Visibility="Collapsed">
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <TextBlock Text="格式" Style="{StaticResource StatTermStyle}" />
+                                                    <TextBlock x:Name="SampleRateText" Text="—" Style="{StaticResource StatValueStyle}" Typography.NumeralAlignment="Tabular" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <TextBlock Text="已传输" Style="{StaticResource StatTermStyle}" />
+                                                    <TextBlock x:Name="ElapsedText" Text="—" Style="{StaticResource StatValueStyle}" Typography.NumeralAlignment="Tabular" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <TextBlock Text="已发送" Style="{StaticResource StatTermStyle}" />
+                                                    <TextBlock x:Name="PacketsText" Text="0" Style="{StaticResource StatValueStyle}" Typography.NumeralAlignment="Tabular" />
+                                                    <TextBlock Text="个数据包" Style="{StaticResource StatValueStyle}" />
+                                                </StackPanel>
                                             </StackPanel>
-                                            <TextBlock x:Name="WaveformScaleLabel" Grid.Row="1" Text="峰值包络 · −60 至 0 dB" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                       HorizontalAlignment="Right" Margin="0,6,0,0" />
-                                        </Grid>
-
-                                        <!-- Left/right levels. Collapses to the waveform hint when nothing is sent. -->
-                                        <Grid x:Name="MetersPanel" Grid.Row="2" ColumnSpacing="12" RowSpacing="10" Margin="0,0,0,16">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /><ColumnDefinition Width="56" /></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <TextBlock Text="L" Style="{StaticResource FigureLabelStyle}" VerticalAlignment="Center" />
-                                            <ProgressBar x:Name="LeftMeter" Grid.Column="1" Minimum="0" Maximum="1" Value="0" VerticalAlignment="Center" AutomationProperties.Name="左声道电平" />
-                                            <TextBlock x:Name="LeftDb" Grid.Column="2" Text="−∞ dB" Style="{StaticResource FigureLabelStyle}" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
-                                            <TextBlock Grid.Row="1" Text="R" Style="{StaticResource FigureLabelStyle}" VerticalAlignment="Center" />
-                                            <ProgressBar x:Name="RightMeter" Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="1" Value="0" VerticalAlignment="Center" AutomationProperties.Name="右声道电平" />
-                                            <TextBlock x:Name="RightDb" Grid.Row="1" Grid.Column="2" Text="−∞ dB" Style="{StaticResource FigureLabelStyle}" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
-                                        </Grid>
-
-                                        <Grid x:Name="StatsPanel" Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0" ColumnSpacing="16">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <StackPanel Spacing="2"><TextBlock Text="音频格式" Style="{StaticResource FigureLabelStyle}" /><TextBlock x:Name="SampleRateText" Text="—" Style="{StaticResource FigureValueStyle}" Typography.NumeralAlignment="Tabular" /></StackPanel>
-                                            <StackPanel Grid.Column="1" Spacing="2"><TextBlock Text="传输时间" Style="{StaticResource FigureLabelStyle}" /><TextBlock x:Name="ElapsedText" Text="—" Style="{StaticResource FigureValueStyle}" Typography.NumeralAlignment="Tabular" /></StackPanel>
-                                            <StackPanel Grid.Column="2" Spacing="2"><TextBlock Text="已发送数据包" Style="{StaticResource FigureLabelStyle}" /><TextBlock x:Name="PacketsText" Text="0" Style="{StaticResource FigureValueStyle}" Typography.NumeralAlignment="Tabular" /></StackPanel>
+                                            <TextBlock x:Name="StatsPlaceholder" Text="开始投放后显示格式与传输数据" Style="{StaticResource StatValueStyle}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock x:Name="WaveformScaleLabel" Grid.Column="1" Text="峰值包络 · −60 至 0 dB" Style="{StaticResource StatTermStyle}" Visibility="Collapsed" />
                                         </Grid>
                                     </Grid>
                                 </Border>
 
                                 <!-- Speakers: one checkable row per discovered receiver. -->
-                                <Border x:Name="DeviceRail" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="8,14,8,8" MinHeight="300" MaxHeight="340"
+                                <Border x:Name="DeviceRail" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}" Padding="8,14,8,8" MinHeight="288" MaxHeight="320"
                                         AutomationProperties.AutomationId="DeviceRail" AutomationProperties.Name="扬声器列表" AutomationProperties.AccessibilityView="Content">
-                                    <Grid RowSpacing="8">
+                                    <Grid RowSpacing="10">
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                         <Grid ColumnSpacing="8" Padding="12,0,4,0">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <StackPanel Spacing="2" VerticalAlignment="Center">
-                                                <TextBlock Text="扬声器" Style="{StaticResource BodyStrongTextBlockStyle}" FontSize="16" AutomationProperties.HeadingLevel="Level2" />
-                                                <TextBlock x:Name="DeviceCount" Text="正在同一网络中寻找" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="扬声器" Style="{StaticResource BodyStrongTextBlockStyle}" FontSize="16" LineHeight="22" AutomationProperties.HeadingLevel="Level2" />
+                                                <TextBlock x:Name="DeviceCount" Text="正在同一网络中寻找…" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                             </StackPanel>
                                             <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh" VerticalAlignment="Center"
                                                     AutomationProperties.Name="重新发现扬声器" AutomationProperties.AutomationId="RefreshButton" ToolTipService.ToolTip="重新发现扬声器">
@@ -214,7 +272,7 @@
                                         <Grid Grid.Row="1" MinHeight="96">
                                             <ScrollViewer HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
                                                 <StackPanel x:Name="DeviceCards" Spacing="2">
-                                                    <!-- Rows that arrive or leave move their neighbours; the
+                                                    <!-- Rows that arrive rise 12 px into place; neighbours make room. The
                                                          Windows animation setting turns this off in code. -->
                                                     <StackPanel.ChildrenTransitions>
                                                         <TransitionCollection>
@@ -224,14 +282,21 @@
                                                     </StackPanel.ChildrenTransitions>
                                                 </StackPanel>
                                             </ScrollViewer>
-                                            <StackPanel x:Name="DevicesEmptyState" VerticalAlignment="Center" HorizontalAlignment="Stretch" Spacing="8" Margin="12,8,12,8">
-                                                <FontIcon Glyph="&#xE7F5;" FontSize="24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
-                                                <TextBlock x:Name="EmptyDeviceTitle" Text="还没有发现扬声器" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                                <TextBlock x:Name="EmptyDeviceDescription" Text="将 HomePod 与电脑连接同一网络，然后重新发现。" Style="{StaticResource CardDescriptionStyle}" />
-                                                <ProgressRing x:Name="DiscoveryRing" Width="16" Height="16" IsActive="False" Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,4,0,0" />
+                                            <!-- Empty list: a quiet radar while discovery is really running. -->
+                                            <StackPanel x:Name="DevicesEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="248" Spacing="6" Margin="12,8,12,8">
+                                                <Grid Width="120" Height="120" HorizontalAlignment="Center" AutomationProperties.AccessibilityView="Raw">
+                                                    <Ellipse x:Name="RadarRing1" Width="44" Height="44" Stroke="{ThemeResource SignalFillBrush}" StrokeThickness="1.5" Visibility="Collapsed" />
+                                                    <Ellipse x:Name="RadarRing2" Width="44" Height="44" Stroke="{ThemeResource SignalFillBrush}" StrokeThickness="1.5" Visibility="Collapsed" />
+                                                    <Ellipse x:Name="RadarRing3" Width="44" Height="44" Stroke="{ThemeResource SignalFillBrush}" StrokeThickness="1.5" Visibility="Collapsed" />
+                                                    <Border Width="48" Height="48" CornerRadius="24" BorderThickness="1" Background="{ThemeResource AppSurfaceBrush}" BorderBrush="{ThemeResource NodeStrokeBrush}">
+                                                        <FontIcon Glyph="&#xE7F5;" FontSize="22" Foreground="{ThemeResource MutedBrush}" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock x:Name="EmptyDeviceTitle" Text="还没有发现扬声器" Style="{StaticResource BodyStrongTextBlockStyle}" HorizontalAlignment="Center" TextAlignment="Center" />
+                                                <TextBlock x:Name="EmptyDeviceDescription" Text="将 HomePod 与电脑连接同一网络，然后重新发现。" Style="{StaticResource CardDescriptionStyle}" HorizontalAlignment="Center" TextAlignment="Center" />
                                             </StackPanel>
                                         </Grid>
-                                        <Grid Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="12,8,0,0">
+                                        <Grid Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="12,6,0,0">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <TextBlock Text="可同时选择多台" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                                             <Button x:Name="ManageDevicesButton" Grid.Column="1" Content="管理设备" Click="OnManageDevices" Style="{StaticResource QuietButtonStyle}"
@@ -242,79 +307,88 @@
                             </Grid>
                         </Grid>
                     </ScrollViewer>
-                </Border>
+                </Grid>
 
-                <!-- Transport dock on Mica: start/stop, shared volume, local mute, test tone. -->
-                <Grid x:Name="TransportPanel" Grid.Row="1" Padding="24,12,24,12" RowSpacing="4"
+                <!-- Dock on a layer: what is sent and where, the one primary action, shared volume and local mute. -->
+                <Grid x:Name="TransportPanel" Grid.Row="1" Height="84" Padding="24,0,24,0" ColumnSpacing="12"
+                      Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
                       AutomationProperties.AutomationId="TransportPanel" AutomationProperties.Name="音量与连接控制" AutomationProperties.AccessibilityView="Content">
-                    <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="20" /></Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="152" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="ConnectButton" Style="{StaticResource PrimaryButtonStyle}" Width="152" Height="44" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
-                        <Grid>
-                            <StackPanel x:Name="ConnectContent" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                                <Grid Width="16" Height="16" VerticalAlignment="Center">
-                                    <ProgressRing x:Name="ConnectSpinner" Width="16" Height="16" IsActive="False" Visibility="Collapsed" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+
+                    <Grid x:Name="DockSummary" ColumnSpacing="12" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Border Width="40" Height="40" CornerRadius="8" Background="{ThemeResource SignalWashBrush}" AutomationProperties.AccessibilityView="Raw">
+                            <FontIcon x:Name="DockGlyph" Glyph="&#xE7F4;" FontSize="20" Foreground="{ThemeResource SignalBrush}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock x:Name="DockTitle" Text="系统声音" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="FooterMessage" Text="尚未选择扬声器" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <Button x:Name="TestToneButton" Click="OnTestTone" Style="{StaticResource DockButtonStyle}" IsEnabled="False" VerticalAlignment="Center"
+                                AutomationProperties.Name="播放三秒测试音" AutomationProperties.AutomationId="TestToneButton">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon x:Name="TestToneGlyph" Glyph="&#xE8D6;" Style="{StaticResource ButtonGlyphStyle}" />
+                                <TextBlock x:Name="TestToneLabel" Text="试播 3 秒" Style="{StaticResource ButtonLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="ConnectButton" Style="{StaticResource CastButtonStyle}" IsEnabled="False" Click="OnConnect" AutomationProperties.AutomationId="ConnectButton">
+                            <StackPanel x:Name="ConnectContent" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                                <Grid x:Name="ConnectIcon" Width="16" Height="16" VerticalAlignment="Center">
+                                    <ProgressRing x:Name="ConnectSpinner" Width="16" Height="16" MinWidth="16" MinHeight="16" IsActive="False" Visibility="Collapsed" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                                     <FontIcon x:Name="ConnectGlyph" Glyph="&#xE768;" Style="{StaticResource ButtonGlyphStyle}" />
                                 </Grid>
                                 <TextBlock x:Name="ConnectLabel" Text="开始投放" Style="{StaticResource ButtonLabelStyle}" FontWeight="SemiBold" />
                             </StackPanel>
-                        </Grid>
-                    </Button>
+                        </Button>
+                        <TextBlock x:Name="DockElapsed" Width="44" Text="" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center" TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" />
+                    </StackPanel>
 
-                    <Grid x:Name="VolumeSection" Grid.Column="1" ColumnSpacing="12" Margin="24,0,0,0" VerticalAlignment="Center">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="20" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="52" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="VolumeHeading" Text="扬声器音量" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
-                                   TextWrapping="NoWrap" AutomationProperties.AutomationId="VolumeHeading" />
-                        <FontIcon x:Name="VolumeGlyph" Grid.Column="1" Glyph="&#xE995;" FontSize="16" Width="20" VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw" />
-                        <Grid x:Name="VolumeSliderHost" Grid.Column="2" Padding="2,0" Background="Transparent" VerticalAlignment="Center"
-                              AutomationProperties.AutomationId="VolumeSliderHost" AutomationProperties.Name="扬声器音量轨道" AutomationProperties.AccessibilityView="Content">
-                            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="50" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged"
-                                    VerticalAlignment="Center" AutomationProperties.Name="扬声器音量" AutomationProperties.AutomationId="VolumeSlider" IsEnabled="False" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Grid x:Name="VolumeSection" ColumnSpacing="8" VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <!-- Heading and value share one fixed line, so the value never moves the slider. -->
+                            <Grid Grid.Column="1" ColumnSpacing="8" Padding="2,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="52" /></Grid.ColumnDefinitions>
+                                <TextBlock x:Name="VolumeHeading" Text="扬声器音量" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
+                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="VolumeHeading" />
+                                <TextBlock x:Name="VolumeLabel" Grid.Column="1" Text="—" Style="{StaticResource CaptionTextBlockStyle}" Width="52" TextAlignment="Right" VerticalAlignment="Center"
+                                           TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" AutomationProperties.AutomationId="VolumeValue" />
+                            </Grid>
+                            <FontIcon x:Name="VolumeGlyph" Grid.Row="1" Glyph="&#xE995;" FontSize="16" Width="20" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                      AutomationProperties.AccessibilityView="Raw" />
+                            <Grid x:Name="VolumeSliderHost" Grid.Row="1" Grid.Column="1" Width="96" Padding="2,0" Background="Transparent" VerticalAlignment="Center"
+                                  AutomationProperties.AutomationId="VolumeSliderHost" AutomationProperties.Name="扬声器音量轨道" AutomationProperties.AccessibilityView="Content">
+                                <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="50" StepFrequency="1" SmallChange="1" LargeChange="10" ValueChanged="OnVolumeChanged"
+                                        VerticalAlignment="Center" AutomationProperties.Name="扬声器音量" AutomationProperties.AutomationId="VolumeSlider" IsEnabled="False" />
+                            </Grid>
                         </Grid>
-                        <TextBlock x:Name="VolumeLabel" Grid.Column="3" Text="—" Style="{StaticResource BodyTextBlockStyle}" Width="52" TextAlignment="Right" VerticalAlignment="Center"
-                                   TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" AutomationProperties.AutomationId="VolumeValue" />
-                    </Grid>
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="24,0,0,0" VerticalAlignment="Center">
-                        <TextBlock x:Name="LocalMuteLabel" Text="电脑静音" Style="{StaticResource BodyTextBlockStyle}" VerticalAlignment="Center" TextWrapping="NoWrap" Margin="0,0,8,0" />
+                        <Rectangle Width="1" Height="28" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
+                        <!-- Compact windows show the mute glyph instead of its label. -->
+                        <FontIcon x:Name="LocalMuteGlyph" Glyph="&#xE74F;" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  ToolTipService.ToolTip="电脑静音" AutomationProperties.AccessibilityView="Raw" />
+                        <TextBlock x:Name="LocalMuteLabel" Text="电脑静音" Style="{StaticResource BodyTextBlockStyle}" VerticalAlignment="Center" TextWrapping="NoWrap" Visibility="Collapsed" />
                         <ToggleSwitch x:Name="LocalMuteToggle" OnContent="" OffContent="" MinWidth="0" Width="52" Margin="0,0,-12,0" IsEnabled="False" Toggled="OnMuteLocalChanged" VerticalAlignment="Center"
                                       AutomationProperties.Name="静音电脑输出" AutomationProperties.AutomationId="LocalMuteToggle" ToolTipService.ToolTip="静音所选 Windows 输出；断开后恢复。若采集无声，请先关闭。" />
                     </StackPanel>
-
-                    <Button x:Name="TestToneButton" Grid.Column="3" Click="OnTestTone" Style="{StaticResource SecondaryButtonStyle}" IsEnabled="False" Margin="16,0,0,0" VerticalAlignment="Center"
-                            AutomationProperties.Name="播放三秒测试音" AutomationProperties.AutomationId="TestToneButton">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon x:Name="TestToneGlyph" Glyph="&#xE8D6;" Style="{StaticResource ButtonGlyphStyle}" />
-                            <TextBlock x:Name="TestToneLabel" Text="试播 3 秒" Style="{StaticResource ButtonLabelStyle}" />
-                        </StackPanel>
-                    </Button>
-
-                    <Grid Grid.Row="1" Grid.ColumnSpan="4" ColumnSpacing="12">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <TextBlock x:Name="FooterMessage" Text="关闭窗口后，声音投放会在托盘中继续。" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxLines="1" />
-                        <HyperlinkButton x:Name="CancelAuthButton" Grid.Column="1" Content="取消此设备" Click="OnCancelAuth" Visibility="Collapsed" Padding="4,0" FontSize="12" VerticalAlignment="Center"
-                                         AutomationProperties.AutomationId="CancelAuthButton" />
-                    </Grid>
                 </Grid>
             </Grid>
 
             <!-- ========== Settings ========== -->
             <Grid x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed" AutomationProperties.AutomationId="SettingsView">
-                <Border x:Name="SettingsSheet" Style="{StaticResource SheetStyle}" Margin="8,0,8,8">
+                <Border x:Name="SettingsSheet" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
                     <ScrollViewer x:Name="SettingsScrollViewer" AutomationProperties.AutomationId="SettingsScrollViewer" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled"
                                   VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" ZoomMode="Disabled">
-                        <Grid Width="{Binding ViewportWidth, ElementName=SettingsScrollViewer}" Padding="32,24,32,32">
+                        <Grid Width="{Binding ViewportWidth, ElementName=SettingsScrollViewer}" Padding="40,28,40,40">
                             <StackPanel x:Name="SettingsContent" MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="4">
                                 <Grid Margin="0,0,0,4">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -342,8 +416,8 @@
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <Button x:Name="InstallUpdateButton" Content="下载并安装" Click="OnInstallUpdate" Style="{StaticResource PrimaryButtonStyle}" Visibility="Collapsed" />
                                                 <Button x:Name="CancelUpdateButton" Content="取消" Click="OnCancelUpdate" Visibility="Collapsed" Style="{StaticResource SecondaryButtonStyle}" />
+                                                <!-- The cleanup promise is already part of the update description above. -->
                                                 <HyperlinkButton Content="版本说明" NavigateUri="https://github.com/chummumm/airloom/releases/latest" />
-                                                <TextBlock Text="安装后会自动清理更新包" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" Margin="4,0,0,0" />
                                             </StackPanel>
                                         </StackPanel>
                                     </Grid>

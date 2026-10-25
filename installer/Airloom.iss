@@ -1,5 +1,5 @@
 #define AppName "Airloom"
-#define AppVersion "0.4.3"
+#define AppVersion "0.4.4"
 #define AppPublisher "Airloom contributors"
 #define AppURL "https://github.com/chummumm/airloom"
 

@@ -178,6 +178,107 @@ namespace
     {
         return compositor.CreateCubicBezierEasingFunction(float2{0.1f, 0.9f}, float2{0.2f, 1.0f});
     }
+
+    // Segoe Fluent Icons used by elements built in code.
+    constexpr wchar_t GlyphSpeaker[] = L"\xE7F5";
+    constexpr wchar_t GlyphDesktop[] = L"\xE7F4";
+    constexpr wchar_t GlyphApp[] = L"\xECAA";
+    constexpr wchar_t GlyphWarning[] = L"\xE7BA";
+    constexpr wchar_t GlyphLock[] = L"\xE72E";
+    constexpr wchar_t GlyphAdd[] = L"\xE710";
+    constexpr wchar_t GlyphPlay[] = L"\xE768";
+    constexpr wchar_t GlyphStop[] = L"\xE71A";
+    constexpr wchar_t GlyphChevronDown[] = L"\xE70D";
+    constexpr wchar_t GlyphChevronUp[] = L"\xE70E";
+
+    struct RoutePoint
+    {
+        double x{};
+        double y{};
+    };
+
+    // A route leaves the source level, bends once and arrives level at its speaker.
+    RoutePoint RoutePointAt(double startX, double startY, double endX, double endY, double t)
+    {
+        double const span = endX - startX;
+        double const x1 = startX + span * 0.5;
+        double const x2 = endX - span * 0.42;
+        double const u = 1.0 - t;
+        double const a = u * u * u;
+        double const b = 3.0 * u * u * t;
+        double const c = 3.0 * u * t * t;
+        double const d = t * t * t;
+        return RoutePoint{a * startX + b * x1 + c * x2 + d * endX, a * startY + b * startY + c * endY + d * endY};
+    }
+
+    double RouteLength(double startX, double startY, double endX, double endY)
+    {
+        double length{};
+        auto previous = RoutePointAt(startX, startY, endX, endY, 0.0);
+        for (int step = 1; step <= 32; ++step)
+        {
+            auto const point = RoutePointAt(startX, startY, endX, endY, step / 32.0);
+            length += std::hypot(point.x - previous.x, point.y - previous.y);
+            previous = point;
+        }
+        return length;
+    }
+
+    // Shape dash lengths are multiples of the stroke thickness.
+    DoubleCollection Dashes(double dash, double gap)
+    {
+        DoubleCollection pattern;
+        pattern.Append(dash);
+        pattern.Append(gap);
+        return pattern;
+    }
+
+    // A connected route is drawn from the computer to the speaker once (500 ms,
+    // decelerating), then stays solid.
+    Media::Animation::Storyboard DrawPath(Shapes::Path const& path, double length)
+    {
+        double const units = std::max(1.0, length / 2.0) + 2.0;
+        path.StrokeDashArray(Dashes(units, units));
+        path.StrokeDashCap(PenLineCap::Flat);
+        path.StrokeDashOffset(units);
+        Media::Animation::DoubleAnimation draw;
+        draw.From(Windows::Foundation::IReference<double>(units));
+        draw.To(Windows::Foundation::IReference<double>(0.0));
+        draw.Duration(DurationHelper::FromTimeSpan(std::chrono::milliseconds(500)));
+        draw.EnableDependentAnimation(true);
+        Media::Animation::ExponentialEase ease;
+        ease.Exponent(6.0);
+        ease.EasingMode(Media::Animation::EasingMode::EaseOut);
+        draw.EasingFunction(ease);
+        Media::Animation::Storyboard::SetTarget(draw, path);
+        Media::Animation::Storyboard::SetTargetProperty(draw, L"StrokeDashOffset");
+        Media::Animation::Storyboard storyboard;
+        storyboard.Children().Append(draw);
+        storyboard.Completed([path](auto const&, auto const&)
+            {
+                path.ClearValue(Shapes::Shape::StrokeDashArrayProperty());
+                path.ClearValue(Shapes::Shape::StrokeDashOffsetProperty());
+            });
+        storyboard.Begin();
+        return storyboard;
+    }
+
+    // A connecting route marches its dashes toward the speaker.
+    Media::Animation::Storyboard MarchPath(Shapes::Path const& path)
+    {
+        Media::Animation::DoubleAnimation march;
+        march.From(Windows::Foundation::IReference<double>(0.0));
+        march.To(Windows::Foundation::IReference<double>(-7.0));
+        march.Duration(DurationHelper::FromTimeSpan(std::chrono::milliseconds(700)));
+        march.RepeatBehavior(Media::Animation::RepeatBehaviorHelper::Forever());
+        march.EnableDependentAnimation(true);
+        Media::Animation::Storyboard::SetTarget(march, path);
+        Media::Animation::Storyboard::SetTargetProperty(march, L"StrokeDashOffset");
+        Media::Animation::Storyboard storyboard;
+        storyboard.Children().Append(march);
+        storyboard.Begin();
+        return storyboard;
+    }
 }
 
 namespace winrt::Airloom::implementation
@@ -322,9 +423,13 @@ namespace winrt::Airloom::implementation
             SourcePicker().IsEnabled(false);
             SourcePicker().PlaceholderText(L"音频引擎未就绪");
             StatusBadge().Text(L"需要安装音频引擎");
+            StatusBadge().Foreground(Brush(L"DangerBrush"));
+            StatusPill().Background(Brush(L"CriticalWashBrush"));
+            StatusDot().Fill(Brush(L"DangerBrush"));
             StatusDescription().Text(L"重新安装后，设备与声音来源会自动显示在这里。");
         }
         RenderUpdate();
+        RenderRoute(m_snapshot);
         m_pollTimer.Start();
         airloom::native::TraceStartup("Window: polling ready");
         if (!m_desktop.HasTrayIcon())
@@ -356,6 +461,15 @@ namespace winrt::Airloom::implementation
     void MainWindow::PollEngine()
     {
         if (m_exiting || !m_loaded) return;
+        // A hidden, minimized or covered home view has no continuous visuals.
+        // Reconcile rows even when the underlying receivers have not changed.
+        bool const homeVisible = !m_settingsOpen && IsWindowVisible(m_hwnd) && !IsIconic(m_hwnd);
+        if (homeVisible != m_homeMotionVisible)
+        {
+            m_homeMotionVisible = homeVisible;
+            m_forceDeviceRender = true;
+            m_routeSignature.clear();
+        }
         RenderUpdate();
         if (m_exiting || !m_engine.Available()) return;
         ++m_tickCount;
@@ -408,8 +522,11 @@ namespace winrt::Airloom::implementation
         bool const active = IsActive(next.state);
         auto const streamingCount = next.StreamingCount();
         bool const streaming = streamingCount > 0;
-        bool const busy = next.state == L"connecting" || next.state == L"reconnecting";
+        // While some speakers already play, a speaker that joins shows its own
+        // progress on its row and route; the session itself stays "streaming".
+        bool const busy = !streaming && (next.state == L"connecting" || next.state == L"reconnecting");
         bool const auth = next.authRequestId != 0;
+        bool const pin = next.authKind == L"pin";
         bool const discovering = next.state == L"discovering";
         bool const sourceError = next.errorCode == L"capture_sources";
         bool const applicationSource = next.sourceMode == L"application";
@@ -419,7 +536,9 @@ namespace winrt::Airloom::implementation
         auto const selectedSource = std::find_if(next.sources.begin(), next.sources.end(), [&next](auto const& source)
             { return source.id == next.selectedSourceId; });
         bool const hasSource = selectedSource != next.sources.end();
-        bool const devicesChanged = !m_devicesRendered || m_forceDeviceRender || !SameDevices(m_snapshot, next);
+        bool const devicesChanged = !m_devicesRendered || m_forceDeviceRender || !SameDevices(m_snapshot, next) ||
+            m_snapshot.authRequestId != next.authRequestId || m_snapshot.authDeviceId != next.authDeviceId ||
+            m_snapshot.authKind != next.authKind;
         if (devicesChanged)
         {
             RenderDevices(next);
@@ -434,78 +553,164 @@ namespace winrt::Airloom::implementation
             ? (next.sources.empty() ? L"让应用播放声音后会自动出现" : L"选择要推流的应用")
             : (next.sources.empty() ? L"未找到可用的播放设备" : L"选择 Windows 播放设备"));
         SourceModePicker().IsEnabled(m_engine.Available());
-        SourceGlyph().Glyph(applicationSource ? L"" : L"");
+
+        std::vector<Device const*> chosen;
+        size_t failedCount{};
+        Device const* authDevice{};
+        for (auto const& entry : next.devices)
+        {
+            if (!next.IsSelected(entry.id) || IsDeviceHidden(entry)) continue;
+            chosen.push_back(&entry);
+            if (entry.state == L"error") ++failedCount;
+            if (entry.state == L"auth_required" && (!authDevice || entry.id == next.authDeviceId)) authDevice = &entry;
+        }
         auto const visibleCount = static_cast<size_t>(std::count_if(next.devices.begin(), next.devices.end(), [this](Device const& entry)
             { return !IsDeviceHidden(entry); }));
         bool const hasStereoGroup = std::any_of(next.devices.begin(), next.devices.end(), [this](Device const& entry)
             { return entry.kind == L"native_stereo" && !IsDeviceHidden(entry); });
-        SetText(DeviceCount(), visibleCount == 0 ? hstring(L"正在同一网络中寻找") :
-            to_hstring(visibleCount) + (hasStereoGroup ? L" 个接收目标 · 已选 " : L" 台设备 · 已选 ") +
-            to_hstring(next.selectedDeviceIds.size()) + (hasStereoGroup ? L" 个" : L" 台"));
+        auto const hiddenCount = next.devices.size() - visibleCount;
         bool const hiddenOnly = visibleCount == 0 && !m_hiddenDevices.empty();
+        hstring const unit = hasStereoGroup ? L" 个" : L" 台";
+        if (visibleCount == 0)
+            SetText(DeviceCount(), discovering || !hiddenOnly ? L"正在同一网络中寻找…" : L"没有可显示的扬声器");
+        else
+            SetText(DeviceCount(), to_hstring(visibleCount) + (hasStereoGroup ? L" 个接收目标 · 已选 " : L" 台设备 · 已选 ") +
+                to_hstring(chosen.size()) + unit + (hiddenCount > 0 ? L" · " + to_hstring(hiddenCount) + L" 个已隐藏" : hstring{}));
         SetText(EmptyDeviceTitle(), discovering ? L"正在寻找附近的扬声器" : hiddenOnly ? L"扬声器都已隐藏" : L"还没有发现扬声器");
         SetText(EmptyDeviceDescription(), hiddenOnly ? L"可在“管理设备”中恢复显示，或重新发现附近的扬声器。" :
-            L"将 HomePod 与电脑连接同一网络，然后重新发现。");
-        DiscoveryRing().IsActive(discovering && visibleCount == 0);
-        DiscoveryRing().Visibility(discovering && visibleCount == 0 ? Visibility::Visible : Visibility::Collapsed);
+            discovering ? L"确认 HomePod 和这台电脑连在同一网络，找到后会自动出现在这里。" : L"将 HomePod 与电脑连接同一网络，然后重新发现。");
+        UpdateRadar(discovering && visibleCount == 0);
         SpinGlyph(RefreshGlyph(), discovering, m_discoverySpinRunning);
 
         hstring const sourceName = hasSource ? selectedSource->name : next.captureSourceName;
-        hstring const targetsNoun = hasStereoGroup ? L" 个接收目标" : L" 台扬声器";
-        hstring badge = L"等待连接";
-        hstring description = device ? L"已选好扬声器，点“开始投放”发送这台电脑的声音。" : L"选择一台或多台扬声器，然后开始投放。";
-        hstring action = L"开始投放";
-        if (discovering) { badge = L"正在发现"; description = L"正在寻找同一网络中的 AirPlay 扬声器。"; }
-        if (!next.statusMessage.empty() && next.errorMessage.empty()) description = next.statusMessage;
-        if (streaming)
+        hstring const sourceLabel = applicationSource
+            ? (hasSource ? L" " + sourceName + L" 的声音" : hstring(L"应用声音"))
+            : hstring(L"系统声音");
+        hstring names;
+        for (auto const entry : chosen)
         {
-            badge = L"正在传输";
-            description = L"正在向 " + to_hstring(streamingCount) + targetsNoun + L"发送" +
-                (sourceName.empty() ? hstring{} : L" · 来自 " + sourceName);
-            action = L"停止投放";
-        }
-        if (next.state == L"connecting") { badge = L"正在连接"; description = L"正在与扬声器建立连接…"; action = L"取消连接"; }
-        if (next.state == L"reconnecting") { badge = L"正在重连"; description = L"连接暂时中断，正在尝试恢复…"; action = L"停止重连"; }
-        if (auth) { badge = streaming ? L"传输中 · 待输入密码" : L"需要密码"; description = L"所选设备需要访问密码或配对码。"; action = next.authKind == L"pin" ? L"输入配对码" : L"输入访问密码"; }
-        if (next.state == L"error") { badge = L"连接未完成"; description = L"查看上方提示后，再试一次。"; action = L"重新连接"; }
-        // Keep an actionable failure in one place. Capture-source errors belong
-        // beside the source control; session/network errors retain the banner.
-        if ((sourceError || (streaming && !hasSource)) && !auth)
-        {
-            badge = applicationSource ? L"等待选择应用" : L"等待音频输出";
-            description = streaming ? L"扬声器连接已保留；选择声音来源后继续投放。" :
-                active ? L"扬声器正在连接；完成声音来源设置后继续投放。" :
-                device ? L"完成声音来源设置后，就能连接已选扬声器。" : L"先选择声音来源和扬声器。";
-            if (!active) action = L"开始投放";
+            if (!names.empty()) names = names + L"、";
+            names = names + entry->name;
         }
 
-        hstring targets;
-        for (auto const& entry : next.devices)
+        // One sentence each for: who receives (headline), what is happening
+        // (subline), and a short state in the pill. Tone: 0 rest, 1 live,
+        // 2 busy, 3 attention, 4 problem.
+        hstring headline = names;
+        hstring description;
+        hstring badge = L"未连接";
+        hstring action = L"开始投放";
+        hstring actionName;
+        int tone = 0;
+        if (visibleCount == 0)
         {
-            if (!next.IsSelected(entry.id) || IsDeviceHidden(entry)) continue;
-            if (!targets.empty()) targets = targets + L" · ";
-            targets = targets + entry.name;
+            headline = hiddenOnly && !discovering ? L"扬声器都已隐藏" : L"还没有发现扬声器";
+            description = discovering ? L"正在同一网络中寻找 HomePod 和其他 AirPlay 2 扬声器…" :
+                hiddenOnly ? L"可在“管理设备”中恢复显示，或重新发现附近的扬声器。" : L"将 HomePod 与电脑连接同一网络，然后重新发现。";
+            if (discovering) { badge = L"正在发现"; tone = 2; }
         }
+        else if (chosen.empty())
+        {
+            headline = L"选择要接收声音的扬声器";
+            description = m_wideLayout ? L"在右侧勾选一台或多台，同一份声音会同时送达。" : L"在上方勾选一台或多台，同一份声音会同时送达。";
+        }
+        else
+        {
+            description = L"准备就绪 · 开始后会把" + sourceLabel + L"送到这里";
+            badge = L"准备就绪";
+        }
+        if (streaming)
+        {
+            badge = L"正在投放 · " + to_hstring(streamingCount) + unit;
+            tone = 1;
+            action = L"停止投放";
+            if (next.testToneActive)
+            {
+                description = selectedStereoGroup ? L"正在测试左右声道：先左，后右（3 秒），随后恢复所选声音。" :
+                    L"正在播放测试音，结束后恢复所选声音。";
+            }
+            else if (authDevice)
+            {
+                description = authDevice->name + (pin ? L" 需要配对码" : L" 需要访问密码") + L" · 其余设备继续投放";
+                tone = 3;
+            }
+            else if (failedCount > 0)
+            {
+                description = to_hstring(failedCount) + L" 台连接失败 · 其余设备继续投放";
+                tone = 3;
+            }
+            else
+            {
+                description = L"正在投放" + sourceLabel + (applicationSource || sourceName.empty() ? hstring{} : L" · 来自 " + sourceName);
+            }
+        }
+        else if (next.state == L"connecting")
+        {
+            badge = L"正在连接"; tone = 2; description = L"正在建立连接，请稍候…";
+            action = L"正在连接…"; actionName = L"正在连接，点击取消";
+        }
+        else if (next.state == L"reconnecting")
+        {
+            badge = L"正在重连"; tone = 2; description = L"连接暂时中断，正在尝试恢复…";
+            action = L"正在重连…"; actionName = L"正在重连，点击停止";
+        }
+        if (auth && !streaming)
+        {
+            hstring const authName = authDevice ? authDevice->name : next.authDeviceName;
+            badge = pin ? L"需要配对码" : L"需要密码";
+            tone = 3;
+            description = (authName.empty() ? hstring(L"所选设备") : authName) + (pin ? L" 需要配对码才能继续" : L" 需要访问密码才能继续");
+            action = pin ? L"输入配对码" : L"输入访问密码";
+            actionName = hstring{};
+        }
+        if (next.state == L"error" && !streaming && !auth)
+        {
+            badge = L"需要处理"; tone = 4; description = L"连接没有成功，查看上方提示后再试一次。";
+            action = L"重新连接"; actionName = hstring{};
+        }
+        // Keep an actionable failure in one place. Capture-source problems belong
+        // to the source; session/network errors retain the banner.
+        if ((sourceError || (streaming && !hasSource)) && !auth)
+        {
+            badge = applicationSource ? L"等待选择应用" : sourceError ? L"需要处理" : L"等待音频输出";
+            tone = applicationSource || !sourceError ? 3 : 4;
+            if (streaming)
+                description = applicationSource ? L"还没选择应用 · 扬声器连接保持，正在发送静音" : L"扬声器连接已保留；选择声音来源后继续投放。";
+            else if (active)
+                description = L"扬声器正在连接；完成声音来源设置后继续投放。";
+            else if (!applicationSource && next.sources.empty())
+                description = L"连接或启用一个 Windows 播放设备，然后刷新声音来源。";
+            else
+                description = device ? L"完成声音来源设置后，就能连接已选扬声器。" : L"先选择声音来源和扬声器。";
+            if (!active) { action = L"开始投放"; actionName = hstring{}; }
+        }
+        if (headline.empty()) headline = L"选择要接收声音的扬声器";
+
         bool const labelChanged = ConnectLabel().Text() != action;
         SetText(StatusBadge(), badge);
-        SetText(TargetName(), targets.empty() ? L"尚未选择扬声器" : targets);
+        SetText(TargetName(), headline);
         SetText(StatusDescription(), description);
         ToolTipService::SetToolTip(StatusDescription(), box_value(description));
-        ToolTipService::SetToolTip(TargetName(), box_value(targets));
-        StatusDot().Fill(Brush(streaming ? L"SignalFillBrush" : next.state == L"error" ? L"DangerBrush" :
-            busy || auth ? L"WarningBrush" : L"FaintBrush"));
-        UpdatePulse(streaming);
+        ToolTipService::SetToolTip(TargetName(), box_value(headline));
+        StatusPill().Background(Brush(tone == 1 ? L"SignalWashBrush" : tone == 3 ? L"CautionWashBrush" :
+            tone == 4 ? L"CriticalWashBrush" : L"PillRestBrush"));
+        StatusBadge().Foreground(Brush(tone == 1 ? L"SignalBrush" : tone == 3 ? L"WarningBrush" :
+            tone == 4 ? L"DangerBrush" : L"MutedBrush"));
+        StatusDot().Fill(Brush(tone == 1 || tone == 2 ? L"SignalFillBrush" : tone == 3 ? L"WarningBrush" :
+            tone == 4 ? L"DangerBrush" : L"FaintBrush"));
+        UpdatePulse(tone == 1, tone == 2);
         SetText(ConnectLabel(), action);
-        SetAccessibleName(ConnectButton(), action);
-        if (labelChanged && m_devicesRendered) AnimateIn(ConnectContent(), 0.0f, 4.0f, 200, 0.2f);
+        SetAccessibleName(ConnectButton(), actionName.empty() ? action : actionName);
+        if (labelChanged && m_devicesRendered) SwapConnectIcon();
         bool const selectedOnline = std::any_of(next.devices.begin(), next.devices.end(), [&next](Device const& entry)
             { return next.IsSelected(entry.id) && entry.online; });
         bool const canConnect = active || (selectedOnline && hasSource);
         ConnectButton().IsEnabled(canConnect);
-        ConnectGlyph().Glyph(auth ? L"" : streaming ? L"" : L"");
-        ConnectGlyph().Visibility(busy && m_motionAllowed ? Visibility::Collapsed : Visibility::Visible);
-        ConnectSpinner().Visibility(busy && m_motionAllowed ? Visibility::Visible : Visibility::Collapsed);
-        ConnectSpinner().IsActive(busy && m_motionAllowed);
+        ConnectGlyph().Glyph(auth && !streaming ? GlyphLock : streaming || active ? GlyphStop : GlyphPlay);
+        bool const animateConnecting = busy && m_motionAllowed && m_homeMotionVisible;
+        ConnectGlyph().Visibility(animateConnecting ? Visibility::Collapsed : Visibility::Visible);
+        ConnectSpinner().Visibility(animateConnecting ? Visibility::Visible : Visibility::Collapsed);
+        ConnectSpinner().IsActive(animateConnecting);
         CancelAuthButton().Visibility(auth ? Visibility::Visible : Visibility::Collapsed);
         ForgetButton().IsEnabled(device != nullptr && !active);
         ForgetLabel().Text(device ? L"忘记“" + device->name + L"”" : L"忘记设备凭据");
@@ -564,6 +769,7 @@ namespace winrt::Airloom::implementation
             ? hstring(L"扬声器音量未读取") : VolumeLabel().Text());
         LocalMuteToggle().IsEnabled(hasSource && !applicationSource);
         LocalMuteLabel().Foreground(Brush(hasSource && !applicationSource ? L"InkBrush" : L"DisabledTextBrush"));
+        LocalMuteGlyph().Foreground(Brush(hasSource && !applicationSource ? L"MutedBrush" : L"DisabledTextBrush"));
         ToolTipService::SetToolTip(LocalMuteToggle(), box_value(applicationSource
             ? L"指定应用模式保留本机播放，不改变电脑整体静音状态。"
             : L"静音所选 Windows 输出；断开后恢复。若采集无声，请先关闭。"));
@@ -571,39 +777,74 @@ namespace winrt::Airloom::implementation
         // Keep the transport slot stable when source enumeration finishes or fails.
         TestToneButton().IsEnabled(streaming);
         SourceRetryButton().IsEnabled(m_engine.Available() && !next.sourcesRefreshing);
-        SetText(SourceRetryLabel(), next.sourcesRefreshing ? L"正在刷新…" : L"刷新列表");
+        ToolTipService::SetToolTip(SourceRetryButton(), box_value(next.sourcesRefreshing ? L"正在刷新声音来源…" : L"刷新声音来源列表"));
         SpinGlyph(SourceRetryGlyph(), next.sourcesRefreshing, m_sourceSpinRunning);
         CopyDiagnosticsButton().IsEnabled(!next.diagnosticsJson.empty() && next.diagnosticsJson != L"{}");
         SetText(TestToneLabel(), next.testToneActive ? L"停止试播" : selectedStereoGroup ? L"测试左右声道" : L"试播 3 秒");
-        TestToneGlyph().Glyph(next.testToneActive ? L"" : L"");
+        TestToneGlyph().Glyph(next.testToneActive ? GlyphStop : L"\xE8D6");
         SetAccessibleName(TestToneButton(), next.testToneActive ? L"停止试播" :
             selectedStereoGroup ? L"测试左右声道，先左，后右，三秒" : L"播放三秒测试音");
         ToolTipService::SetToolTip(TestToneButton(), box_value(selectedStereoGroup
             ? L"先左，后右，共 3 秒，用于核对组合的左右声道。"
-            : L"播放三秒测试音，结束后恢复所选声音。"));
+            : L"向已连接的扬声器播放 3 秒测试音，结束后恢复所选声音。"));
+
+        // What the capture actually hears, as its own line under the headline.
+        bool const captureProblem = sourceError || next.captureState == L"error";
         SetText(CaptureStatusText(), sourceError ? next.errorMessage :
             next.sourcesRefreshing && next.sources.empty() ? L"正在读取声音来源…" :
             next.testToneActive ? selectedStereoGroup ? L"正在测试左右声道：先左，后右（3 秒），随后恢复所选声音。" :
                 L"正在播放测试音，结束后恢复所选声音。" :
             next.captureState != L"idle" && !next.captureMessage.empty() ? next.captureMessage :
             !next.sourceMessage.empty() ? next.sourceMessage : L"连接后显示实际声音采集状态。");
-        CaptureStatusText().MaxLines(sourceError ? 0 : 2);
         ToolTipService::SetToolTip(CaptureStatusText(), box_value(CaptureStatusText().Text()));
-        CaptureStatusText().Foreground(Brush(sourceError ? L"DangerBrush" : next.captureState == L"signal" ? L"SignalBrush" :
-            next.captureState == L"error" ? L"DangerBrush" :
+        CaptureStatusText().Foreground(Brush(captureProblem ? L"DangerBrush" : next.captureState == L"signal" ? L"SignalBrush" :
             next.captureState == L"silent" || next.captureState == L"quiet" ? L"WarningBrush" : L"MutedBrush"));
+        CaptureGlyph().Visibility(captureProblem ? Visibility::Visible : Visibility::Collapsed);
+        CaptureDot().Visibility(captureProblem ? Visibility::Collapsed : Visibility::Visible);
+        CaptureDot().Fill(Brush(next.captureState == L"signal" ? L"SignalFillBrush" :
+            next.captureState == L"silent" || next.captureState == L"quiet" ? L"WarningBrush" : L"FaintBrush"));
 
-        if (m_desktop.HasTrayIcon())
+        // The route's source tile: this computer, or the chosen application.
+        RouteSourceGlyph().Glyph(captureProblem ? GlyphWarning : applicationSource ? GlyphApp : GlyphDesktop);
+        RouteSourceGlyph().Foreground(Brush(captureProblem ? L"DangerBrush" : applicationSource ? L"SignalBrush" : L"InkBrush"));
+        RouteSourceTile().Background(Brush(captureProblem ? L"CriticalWashBrush" : L"AppSurfaceBrush"));
+        RouteSourceTile().BorderBrush(Brush(L"NodeStrokeBrush"));
+        hstring routeTitle = L"这台电脑";
+        hstring routeSubtitle = sourceName;
+        if (captureProblem)
         {
-            SetText(FooterMessage(), next.muteLocal
-                ? L"电脑输出已静音；若声音中断，请关闭电脑静音。"
-                : L"关闭窗口后，声音投放会在托盘中继续。");
+            routeTitle = sourceError && !applicationSource ? L"没有输出设备" : L"无法采集声音";
+            routeSubtitle = L"查看上方提示";
         }
+        else if (applicationSource)
+        {
+            routeTitle = hasSource ? sourceName : hstring(L"选择应用");
+            routeSubtitle = hasSource ? L"指定应用" : L"先让应用播放声音";
+        }
+        SetText(RouteSourceTitle(), routeTitle);
+        SetText(RouteSourceSubtitle(), routeSubtitle);
+
+        // Dock: what is being sent, and to whom.
+        DockGlyph().Glyph(applicationSource ? GlyphApp : GlyphDesktop);
+        hstring dockTitle = L"系统声音";
+        if (sourceError && !applicationSource) dockTitle = L"没有声音来源";
+        else if (applicationSource) dockTitle = hasSource ? sourceName : hstring(L"指定应用 · 未选择");
+        SetText(DockTitle(), dockTitle);
+        hstring dockDetail = L"尚未选择扬声器";
+        if (chosen.size() == 1) dockDetail = L"送往 " + chosen.front()->name;
+        else if (chosen.size() > 1) dockDetail = L"送往 " + chosen.front()->name + L" 等 " + to_hstring(chosen.size()) + L" 台";
+        if (!m_desktop.HasTrayIcon()) dockDetail = L"系统托盘暂不可用，关闭窗口会退出 Airloom。";
+        else if (next.muteLocal) dockDetail = L"电脑输出已静音；若声音中断，请关闭电脑静音。";
+        SetText(FooterMessage(), dockDetail);
+        ToolTipService::SetToolTip(FooterMessage(), box_value(dockDetail));
+        SetText(DockElapsed(), streaming ? DurationText(next.elapsedSeconds) : hstring{});
+
         if (next.state != m_snapshot.state || next.selectedDeviceIds != m_snapshot.selectedDeviceIds)
         {
             if (m_devicesRendered) AnimateStateChange();
-            m_desktop.SetTooltip(L"Airloom · " + badge + (streaming ? L" · " + to_hstring(streamingCount) + L" 台" : L""));
+            m_desktop.SetTooltip(L"Airloom · " + badge);
         }
+        RenderRoute(next);
         RenderAudio(next);
         RenderError(next);
     }
@@ -629,55 +870,122 @@ namespace winrt::Airloom::implementation
                 DeviceRow created;
                 created.id = device.id;
 
-                // The whole row is one native button (selection), with a check
-                // indicator, the receiver's name and its live state.
+                // The selectable part of a row is one native button: a check
+                // indicator, the speaker's avatar, its name and its live state.
                 created.button = Button();
                 created.button.Style(AppStyle(L"ReceiverRowStyle"));
                 Automation::AutomationProperties::SetAutomationId(created.button, L"Receiver:" + device.id);
                 Grid contents;
-                contents.ColumnSpacing(14);
-                ColumnDefinition checkColumn, textColumn;
+                contents.ColumnSpacing(12);
+                ColumnDefinition checkColumn, avatarColumn, textColumn;
                 checkColumn.Width(GridLength{20, GridUnitType::Pixel});
+                avatarColumn.Width(GridLength{36, GridUnitType::Pixel});
                 textColumn.Width(GridLength{1, GridUnitType::Star});
                 contents.ColumnDefinitions().Append(checkColumn);
+                contents.ColumnDefinitions().Append(avatarColumn);
                 contents.ColumnDefinitions().Append(textColumn);
                 created.check = Border();
                 created.check.Width(20);
                 created.check.Height(20);
                 created.check.CornerRadius(CornerRadius{4, 4, 4, 4});
-                created.check.VerticalAlignment(stereoGroup ? VerticalAlignment::Top : VerticalAlignment::Center);
-                created.check.Margin(Thickness{0, stereoGroup ? 1.0 : 0.0, 0, 0});
+                created.check.VerticalAlignment(VerticalAlignment::Center);
                 Automation::AutomationProperties::SetAccessibilityView(created.check, Automation::Peers::AccessibilityView::Raw);
                 created.checkGlyph = FontIcon();
-                created.checkGlyph.Glyph(L"");
+                created.checkGlyph.Glyph(L"\xE73E");
                 created.checkGlyph.FontSize(12);
                 created.checkGlyph.HorizontalAlignment(HorizontalAlignment::Center);
                 created.checkGlyph.VerticalAlignment(VerticalAlignment::Center);
                 created.check.Child(created.checkGlyph);
                 contents.Children().Append(created.check);
+
+                created.avatar = Grid();
+                created.avatar.Width(36);
+                created.avatar.Height(36);
+                created.avatar.VerticalAlignment(VerticalAlignment::Center);
+                Grid::SetColumn(created.avatar, 1);
+                Automation::AutomationProperties::SetAccessibilityView(created.avatar, Automation::Peers::AccessibilityView::Raw);
+                created.avatarFace = Shapes::Ellipse();
+                created.avatarFace.Width(36);
+                created.avatarFace.Height(36);
+                created.avatar.Children().Append(created.avatarFace);
+                created.avatarGlyphs = StackPanel();
+                created.avatarGlyphs.Orientation(Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
+                created.avatarGlyphs.HorizontalAlignment(HorizontalAlignment::Center);
+                created.avatarGlyphs.VerticalAlignment(VerticalAlignment::Center);
+                for (int glyphIndex = 0; glyphIndex < (stereoGroup ? 2 : 1); ++glyphIndex)
+                {
+                    FontIcon glyph;
+                    glyph.Glyph(GlyphSpeaker);
+                    glyph.FontSize(stereoGroup ? 13.0 : 18.0);
+                    created.avatarGlyphs.Children().Append(glyph);
+                }
+                created.avatar.Children().Append(created.avatarGlyphs);
+                created.badge = Border();
+                created.badge.Width(16);
+                created.badge.Height(16);
+                created.badge.CornerRadius(CornerRadius{8, 8, 8, 8});
+                created.badge.BorderThickness(Thickness{2, 2, 2, 2});
+                created.badge.HorizontalAlignment(HorizontalAlignment::Right);
+                created.badge.VerticalAlignment(VerticalAlignment::Bottom);
+                created.badge.Margin(Thickness{0, 0, -3, -3});
+                created.badge.Visibility(Visibility::Collapsed);
+                created.badgeGlyph = FontIcon();
+                created.badgeGlyph.FontSize(8);
+                created.badgeGlyph.HorizontalAlignment(HorizontalAlignment::Center);
+                created.badgeGlyph.VerticalAlignment(VerticalAlignment::Center);
+                created.badge.Child(created.badgeGlyph);
+                created.avatar.Children().Append(created.badge);
+                contents.Children().Append(created.avatar);
+
                 StackPanel labels;
-                Grid::SetColumn(labels, 1);
+                Grid::SetColumn(labels, 2);
                 labels.Spacing(2);
                 labels.VerticalAlignment(VerticalAlignment::Center);
                 created.name = TextBlock();
                 created.name.FontSize(14);
                 created.name.TextTrimming(TextTrimming::CharacterEllipsis);
                 created.name.TextWrapping(TextWrapping::NoWrap);
+                labels.Children().Append(created.name);
+                StackPanel statusLine;
+                statusLine.Orientation(Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
+                statusLine.Spacing(6);
+                // Three small bars move only while this speaker really receives audio.
+                created.equalizer = Grid();
+                created.equalizer.Width(10);
+                created.equalizer.Height(10);
+                created.equalizer.VerticalAlignment(VerticalAlignment::Center);
+                created.equalizer.Visibility(Visibility::Collapsed);
+                Automation::AutomationProperties::SetAccessibilityView(created.equalizer, Automation::Peers::AccessibilityView::Raw);
+                for (int barIndex = 0; barIndex < 3; ++barIndex)
+                {
+                    Shapes::Rectangle bar;
+                    bar.Width(2);
+                    bar.Height(10);
+                    bar.RadiusX(1);
+                    bar.RadiusY(1);
+                    bar.HorizontalAlignment(HorizontalAlignment::Left);
+                    bar.VerticalAlignment(VerticalAlignment::Bottom);
+                    bar.Margin(Thickness{barIndex * 4.0, 0, 0, 0});
+                    created.equalizer.Children().Append(bar);
+                    created.equalizerBars.push_back(bar);
+                }
+                statusLine.Children().Append(created.equalizer);
+                created.spinner = ProgressRing();
+                created.spinner.Width(12);
+                created.spinner.Height(12);
+                created.spinner.MinWidth(12);
+                created.spinner.MinHeight(12);
+                created.spinner.IsActive(false);
+                created.spinner.Visibility(Visibility::Collapsed);
+                created.spinner.VerticalAlignment(VerticalAlignment::Center);
+                statusLine.Children().Append(created.spinner);
                 created.detail = TextBlock();
                 created.detail.FontSize(12);
                 created.detail.TextTrimming(TextTrimming::CharacterEllipsis);
                 created.detail.TextWrapping(TextWrapping::NoWrap);
-                labels.Children().Append(created.name);
-                labels.Children().Append(created.detail);
-                if (stereoGroup)
-                {
-                    created.groupNote = TextBlock();
-                    created.groupNote.FontSize(12);
-                    created.groupNote.TextTrimming(TextTrimming::CharacterEllipsis);
-                    created.groupNote.TextWrapping(TextWrapping::NoWrap);
-                    Automation::AutomationProperties::SetAutomationId(created.groupNote, L"ReceiverGroupNote:" + device.id);
-                    labels.Children().Append(created.groupNote);
-                }
+                created.detail.VerticalAlignment(VerticalAlignment::Center);
+                statusLine.Children().Append(created.detail);
+                labels.Children().Append(statusLine);
                 contents.Children().Append(labels);
                 created.button.Content(contents);
                 created.button.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
@@ -691,12 +999,13 @@ namespace winrt::Airloom::implementation
                         }
                     });
 
-                // Per-receiver actions are visible on the row ("more") and on right-click.
+                // Per-receiver actions are on the row ("more") and on right-click.
                 MenuFlyout actions;
                 created.retry = MenuFlyoutItem();
+                created.retry.Language(WindowRoot().Language());
                 created.retry.Text(L"重新连接此设备");
                 FontIcon retryIcon;
-                retryIcon.Glyph(L"");
+                retryIcon.Glyph(L"\xE72C");
                 created.retry.Icon(retryIcon);
                 created.retry.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
                     {
@@ -709,8 +1018,9 @@ namespace winrt::Airloom::implementation
                     });
                 actions.Items().Append(created.retry);
                 created.hide = MenuFlyoutItem();
+                created.hide.Language(WindowRoot().Language());
                 FontIcon hideIcon;
-                hideIcon.Glyph(L"");
+                hideIcon.Glyph(L"\xED1A");
                 created.hide.Icon(hideIcon);
                 created.hide.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
                     {
@@ -721,53 +1031,51 @@ namespace winrt::Airloom::implementation
                     });
                 actions.Items().Append(created.hide);
                 created.button.ContextFlyout(actions);
-                created.more = Button();
-                created.more.Style(AppStyle(L"IconButtonStyle"));
-                created.more.HorizontalAlignment(HorizontalAlignment::Right);
-                created.more.VerticalAlignment(VerticalAlignment::Center);
-                created.more.Margin(Thickness{0, 0, 8, 0});
-                FontIcon moreGlyph;
-                moreGlyph.Glyph(L"");
-                moreGlyph.FontSize(16);
-                created.more.Content(moreGlyph);
-                created.more.Flyout(actions);
-                ToolTipService::SetToolTip(created.more, box_value(L"更多操作"));
-                Automation::AutomationProperties::SetAutomationId(created.more, L"ReceiverActions:" + device.id);
-                created.rowGrid = Grid();
-                created.rowGrid.Children().Append(created.button);
-                created.rowGrid.Children().Append(created.more);
-                created.root = created.rowGrid;
+
+                // Actions beside the button, never nested in it: one row keeps one
+                // selection action, and each extra action is its own native button.
+                StackPanel actionsPanel;
+                actionsPanel.Orientation(Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
+                actionsPanel.Spacing(2);
+                actionsPanel.VerticalAlignment(VerticalAlignment::Center);
+                actionsPanel.Margin(Thickness{0, 0, 4, 0});
+                Grid::SetColumn(actionsPanel, 1);
+                created.action = HyperlinkButton();
+                created.action.FontSize(12);
+                created.action.Padding(Thickness{6, 2, 6, 2});
+                created.action.VerticalAlignment(VerticalAlignment::Center);
+                created.action.Visibility(Visibility::Collapsed);
+                Automation::AutomationProperties::SetAutomationId(created.action, L"ReceiverQuickAction:" + device.id);
+                created.action.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
+                    {
+                        if (auto self = weak.get())
+                        {
+                            auto current = std::find_if(self->m_deviceRows.begin(), self->m_deviceRows.end(), [&id](auto const& entry)
+                                { return entry.id == id; });
+                            if (current == self->m_deviceRows.end()) return;
+                            if (current->actionKind == L"auth")
+                            {
+                                if (self->m_snapshot.authRequestId != 0 && self->m_snapshot.authDeviceId == id)
+                                    self->ShowAuthentication(true);
+                            }
+                            else if (current->actionKind == L"retry")
+                            {
+                                auto command = MakeCommand(L"connect");
+                                command.Insert(L"device_id", JsonValue::CreateStringValue(id));
+                                self->Send(command);
+                            }
+                        }
+                    });
+                actionsPanel.Children().Append(created.action);
                 if (stereoGroup)
                 {
-                    // Members are a sibling disclosure, never a button nested in the
-                    // selection button: one receiver keeps one selection action.
-                    created.groupSurface = Border();
-                    created.groupSurface.CornerRadius(CornerRadius{6, 6, 6, 6});
-                    created.groupSurface.BorderThickness(Thickness{1, 1, 1, 1});
-                    StackPanel groupContents;
-                    groupContents.Children().Append(created.rowGrid);
                     created.memberToggle = Button();
-                    created.memberToggle.Style(AppStyle(L"QuietButtonStyle"));
-                    created.memberToggle.HorizontalAlignment(HorizontalAlignment::Stretch);
-                    created.memberToggle.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-                    created.memberToggle.Margin(Thickness{35, 0, 8, 4});
+                    created.memberToggle.Style(AppStyle(L"RowIconButtonStyle"));
+                    created.memberToggle.VerticalAlignment(VerticalAlignment::Center);
                     Automation::AutomationProperties::SetAutomationId(created.memberToggle, L"ReceiverMembers:" + device.id);
-                    Grid disclosure;
-                    disclosure.ColumnSpacing(8);
-                    ColumnDefinition summaryColumn, chevronColumn;
-                    summaryColumn.Width(GridLength{1, GridUnitType::Star});
-                    chevronColumn.Width(GridLength{12, GridUnitType::Pixel});
-                    disclosure.ColumnDefinitions().Append(summaryColumn);
-                    disclosure.ColumnDefinitions().Append(chevronColumn);
-                    created.memberSummary = TextBlock();
-                    created.memberSummary.FontSize(12);
-                    created.memberSummary.VerticalAlignment(VerticalAlignment::Center);
-                    disclosure.Children().Append(created.memberSummary);
                     created.memberChevron = FontIcon();
-                    created.memberChevron.FontSize(10);
-                    Grid::SetColumn(created.memberChevron, 1);
-                    disclosure.Children().Append(created.memberChevron);
-                    created.memberToggle.Content(disclosure);
+                    created.memberChevron.FontSize(12);
+                    created.memberToggle.Content(created.memberChevron);
                     created.memberToggle.Click([weak = get_weak(), id = device.id](auto const&, auto const&)
                         {
                             if (auto self = weak.get())
@@ -776,15 +1084,58 @@ namespace winrt::Airloom::implementation
                                     { return entry.id == id; });
                                 if (current == self->m_deviceRows.end()) return;
                                 current->membersExpanded = !current->membersExpanded;
+                                bool const expanded = current->membersExpanded;
+                                auto host = current->memberHost;
                                 self->RenderDevices(self->m_snapshot);
-                                if (current->membersExpanded) self->AnimateIn(current->memberPanel, 0.0f, -6.0f, 220);
+                                if (expanded) self->AnimateIn(host, 0.0f, -6.0f, 250);
                             }
                         });
-                    groupContents.Children().Append(created.memberToggle);
+                    actionsPanel.Children().Append(created.memberToggle);
+                }
+                created.more = Button();
+                created.more.Style(AppStyle(L"RowIconButtonStyle"));
+                created.more.VerticalAlignment(VerticalAlignment::Center);
+                FontIcon moreGlyph;
+                moreGlyph.Glyph(L"\xE712");
+                moreGlyph.FontSize(16);
+                created.more.Content(moreGlyph);
+                created.more.Flyout(actions);
+                ToolTipService::SetToolTip(created.more, box_value(L"更多操作"));
+                Automation::AutomationProperties::SetAutomationId(created.more, L"ReceiverActions:" + device.id);
+                actionsPanel.Children().Append(created.more);
+
+                created.rowGrid = Grid();
+                created.rowGrid.CornerRadius(CornerRadius{6, 6, 6, 6});
+                ColumnDefinition mainColumn, actionColumn;
+                mainColumn.Width(GridLength{1, GridUnitType::Star});
+                actionColumn.Width(GridLength{1, GridUnitType::Auto});
+                created.rowGrid.ColumnDefinitions().Append(mainColumn);
+                created.rowGrid.ColumnDefinitions().Append(actionColumn);
+                created.rowGrid.Children().Append(created.button);
+                created.rowGrid.Children().Append(actionsPanel);
+                created.root = created.rowGrid;
+                if (stereoGroup)
+                {
+                    // Members fold out under the row, aligned with the name.
+                    created.groupSurface = Border();
+                    created.groupSurface.CornerRadius(CornerRadius{6, 6, 6, 6});
+                    StackPanel groupContents;
+                    groupContents.Children().Append(created.rowGrid);
+                    created.memberHost = Border();
+                    created.memberHost.Margin(Thickness{68, 0, 12, 10});
+                    created.memberHost.Padding(Thickness{0, 8, 0, 0});
+                    created.memberHost.BorderThickness(Thickness{0, 1, 0, 0});
+                    created.memberHost.Visibility(Visibility::Collapsed);
+                    StackPanel memberContents;
+                    memberContents.Spacing(6);
+                    created.memberSummary = TextBlock();
+                    created.memberSummary.FontSize(12);
+                    memberContents.Children().Append(created.memberSummary);
                     created.memberPanel = StackPanel();
-                    created.memberPanel.Spacing(8);
-                    created.memberPanel.Margin(Thickness{47, 2, 16, 12});
-                    groupContents.Children().Append(created.memberPanel);
+                    created.memberPanel.Spacing(6);
+                    memberContents.Children().Append(created.memberPanel);
+                    created.memberHost.Child(memberContents);
+                    groupContents.Children().Append(created.memberHost);
                     created.groupSurface.Child(groupContents);
                     created.root = created.groupSurface;
                 }
@@ -795,8 +1146,14 @@ namespace winrt::Airloom::implementation
             auto& row = *found;
             bool const selected = next.IsSelected(device.id);
             bool const enabled = device.online || selected;
+            bool const partial = stereoGroup && !device.groupComplete;
+            bool const streamingNow = device.state == L"streaming" && !partial;
+            bool const connecting = device.state == L"connecting" || device.state == L"reconnecting";
+            bool const needsAuth = device.state == L"auth_required";
+            bool const failed = device.state == L"error";
             row.button.IsEnabled(enabled);
-            row.button.Background(Brush(selected ? L"RowSelectedBrush" : L"RowRestBrush"));
+            if (row.groupSurface) row.groupSurface.Background(Brush(selected ? L"RowSelectedBrush" : L"RowRestBrush"));
+            else row.rowGrid.Background(Brush(selected ? L"RowSelectedBrush" : L"RowRestBrush"));
             // Check indicator drawn to the native CheckBox metrics: 20px, 4px radius,
             // accent fill when on, a strong stroke when off.
             row.check.Background(Brush(selected ? L"CheckOnBrush" : L"CheckRestBrush"));
@@ -808,25 +1165,66 @@ namespace winrt::Airloom::implementation
             if (row.rendered && row.selected != selected && selected) PopElement(row.check, 20.0f);
             row.selected = selected;
             row.rendered = true;
+
+            row.avatarFace.Fill(Brush(selected ? L"AvatarSelectedBrush" : L"PillRestBrush"));
+            auto const avatarInk = Brush(selected ? L"SignalBrush" : L"MutedBrush");
+            for (auto const& child : row.avatarGlyphs.Children())
+                if (auto glyph = child.try_as<FontIcon>()) glyph.Foreground(avatarInk);
+            row.avatar.Opacity(enabled ? 1.0 : 0.5);
+            row.badge.Visibility(needsAuth || failed || partial ? Visibility::Visible : Visibility::Collapsed);
+            row.badge.Background(Brush(failed ? L"DangerBrush" : L"WarningBrush"));
+            row.badge.BorderBrush(Brush(L"AppSurfaceBrush"));
+            row.badgeGlyph.Glyph(needsAuth ? GlyphLock : GlyphWarning);
+            row.badgeGlyph.Foreground(Brush(L"AppSurfaceBrush"));
+
             SetText(row.name, device.name);
             row.name.Foreground(Brush(enabled ? L"InkBrush" : L"DisabledTextBrush"));
             hstring stateLabel = !device.online ? L"暂时离线" : L"可连接";
-            if (device.state == L"streaming") stateLabel = L"正在传输";
+            if (streamingNow) stateLabel = L"正在投放";
             else if (device.state == L"connecting") stateLabel = L"正在连接…";
             else if (device.state == L"reconnecting") stateLabel = L"正在重连…";
-            else if (device.state == L"auth_required") stateLabel = L"等待密码或配对码";
-            else if (device.state == L"error") stateLabel = L"连接失败 · 可在“更多”中重试";
+            else if (needsAuth) stateLabel = next.authKind == L"pin" && next.authDeviceId == device.id ? L"需要配对码" : L"需要访问密码";
+            else if (failed) stateLabel = L"连接失败 · 可重试";
             else if (selected) stateLabel = L"已选择";
-            else if (device.passwordRequired) stateLabel = L"需要密码";
+            else if (device.passwordRequired) stateLabel = L"需要访问密码";
             auto const onlineMembers = static_cast<size_t>(std::count_if(device.members.begin(), device.members.end(),
                 [](auto const& member) { return member.online; }));
-            if (stereoGroup && !device.groupComplete)
+            if (partial)
                 stateLabel = L"成员暂缺 · " + to_hstring(onlineMembers) + L" / " + to_hstring(device.expectedMembers) + L" 在线";
-            SetText(row.detail, stateLabel);
+            bool const plainState = !streamingNow && !connecting && !needsAuth && !failed && !partial;
+            SetText(row.detail, stereoGroup && plainState ? stateLabel + L" · 原生立体声组合" : stateLabel);
             row.detail.Foreground(Brush(m_highContrast && selected ? L"InkBrush" :
-                stereoGroup && !device.groupComplete ? L"WarningBrush" :
-                device.state == L"streaming" ? L"SignalBrush" : device.state == L"error" ? L"DangerBrush" :
-                device.state == L"auth_required" ? L"WarningBrush" : L"MutedBrush"));
+                partial || needsAuth ? L"WarningBrush" :
+                streamingNow ? L"SignalBrush" : failed ? L"DangerBrush" : L"MutedBrush"));
+            row.equalizer.Visibility(streamingNow ? Visibility::Visible : Visibility::Collapsed);
+            for (auto const& bar : row.equalizerBars) bar.Fill(Brush(L"SignalBrush"));
+            bool const equalize = streamingNow && m_motionAllowed && m_homeMotionVisible;
+            if (equalize != row.equalizerRunning)
+            {
+                row.equalizerRunning = equalize;
+                int delay{};
+                for (auto const& bar : row.equalizerBars)
+                {
+                    if (equalize) StartEqualizer(bar, delay);
+                    else StopMotion(bar);
+                    delay += 300;
+                }
+            }
+            bool const animateConnecting = connecting && m_motionAllowed && m_homeMotionVisible;
+            row.spinner.Visibility(animateConnecting ? Visibility::Visible : Visibility::Collapsed);
+            row.spinner.IsActive(animateConnecting);
+
+            // The one next step for this speaker, as an inline link.
+            row.actionKind = needsAuth && next.authRequestId != 0 && next.authDeviceId == device.id ? hstring(L"auth") :
+                failed && selected ? hstring(L"retry") : hstring{};
+            row.action.Visibility(row.actionKind.empty() ? Visibility::Collapsed : Visibility::Visible);
+            if (!row.actionKind.empty())
+            {
+                bool const authAction = row.actionKind == L"auth";
+                row.action.Content(box_value(authAction ? (next.authKind == L"pin" ? L"输入配对码" : L"输入密码") : L"重试"));
+                SetAccessibleName(row.action, (authAction ? (next.authKind == L"pin" ? hstring(L"输入配对码：") : hstring(L"输入密码：")) :
+                    hstring(L"重试连接：")) + device.name);
+            }
             row.retry.Visibility(selected && device.state != L"streaming" ? Visibility::Visible : Visibility::Collapsed);
             row.retry.Text(stereoGroup ? L"重新连接此组合" : L"重新连接此设备");
             row.hide.Text(stereoGroup ? selected ? L"断开并隐藏组合" : L"隐藏组合" : selected ? L"断开并隐藏设备" : L"隐藏设备");
@@ -838,17 +1236,15 @@ namespace winrt::Airloom::implementation
                 device.name + (device.model.empty() ? L"" : L" · " + device.model)));
             if (stereoGroup)
             {
-                row.groupSurface.BorderBrush(Brush(L"GroupStrokeBrush"));
-                row.groupSurface.Background(Brush(L"GroupSurfaceBrush"));
-                SetText(row.groupNote, L"原生立体声组合 · " + to_hstring(device.expectedMembers) + L" 台 HomePod");
-                row.groupNote.Foreground(Brush(L"MutedBrush"));
+                row.memberHost.BorderBrush(Brush(L"DividerBrush"));
                 auto const summary = L"成员 · " + to_hstring(onlineMembers) + L" / " + to_hstring(device.expectedMembers) + L" 在线";
                 SetText(row.memberSummary, summary);
-                row.memberSummary.Foreground(Brush(L"MutedBrush"));
+                row.memberSummary.Foreground(Brush(L"FaintBrush"));
                 row.memberChevron.Foreground(Brush(L"MutedBrush"));
-                row.memberChevron.Glyph(row.membersExpanded ? L"" : L"");
+                row.memberChevron.Glyph(row.membersExpanded ? GlyphChevronUp : GlyphChevronDown);
                 SetAccessibleName(row.memberToggle, (row.membersExpanded ? L"收起 " : L"展开 ") + device.name + L" 的" + summary);
-                row.memberPanel.Visibility(row.membersExpanded ? Visibility::Visible : Visibility::Collapsed);
+                ToolTipService::SetToolTip(row.memberToggle, box_value(row.membersExpanded ? L"收起成员" : L"展开成员"));
+                row.memberHost.Visibility(row.membersExpanded ? Visibility::Visible : Visibility::Collapsed);
                 auto memberChildren = row.memberPanel.Children();
                 uint32_t memberIndex{};
                 for (auto const& member : device.members)
@@ -997,17 +1393,35 @@ namespace winrt::Airloom::implementation
         SetText(SampleRateText(), SampleRateLabel(next.sampleRate));
         SetText(ElapsedText(), streaming || next.elapsedSeconds > 0 ? DurationText(next.elapsedSeconds) : L"—");
         SetText(PacketsText(), CountText(next.packetsSent));
-        // Levels and transfer figures appear with a session and fold away without one.
+        // Levels always keep their place; transfer figures replace their placeholder
+        // when a session starts, so the stage never changes height.
         auto const sessionVisibility = streaming ? Visibility::Visible : Visibility::Collapsed;
-        if (MetersPanel().Visibility() != sessionVisibility) MetersPanel().Visibility(sessionVisibility);
-        if (StatsPanel().Visibility() != sessionVisibility) StatsPanel().Visibility(sessionVisibility);
+        if (StatsFigures().Visibility() != sessionVisibility) StatsFigures().Visibility(sessionVisibility);
+        auto const placeholderVisibility = streaming ? Visibility::Collapsed : Visibility::Visible;
+        if (StatsPlaceholder().Visibility() != placeholderVisibility) StatsPlaceholder().Visibility(placeholderVisibility);
 
         auto const width = std::max(1.0, WaveformCanvas().ActualWidth());
         auto const height = std::max(1.0, WaveformCanvas().ActualHeight());
-        auto const center = height * 0.5;
+        // Bars stand on a baseline a little below the middle, with a short reflection
+        // beneath it, so the instrument reads as a level display rather than a barcode.
+        auto const baseline = height * 0.6;
+        constexpr size_t waveformBins = 64;
+        auto const step = width / static_cast<double>(waveformBins);
+        // The resting baseline is a row of dots, one under each bar position.
+        auto const dot = std::max(1.0, WaveformBaseline().StrokeThickness());
+        WaveformBaseline().X1(step * 0.5);
         WaveformBaseline().X2(width);
-        WaveformBaseline().Y1(center);
-        WaveformBaseline().Y2(center);
+        WaveformBaseline().Y1(baseline);
+        WaveformBaseline().Y2(baseline);
+        auto const dotPeriod = std::max(1.0, step / dot);
+        auto const dashes = WaveformBaseline().StrokeDashArray();
+        if (!dashes || dashes.Size() != 2 || std::abs(dashes.GetAt(1) - dotPeriod) > 0.001)
+        {
+            DoubleCollection pattern;
+            pattern.Append(0.0);
+            pattern.Append(dotPeriod);
+            WaveformBaseline().StrokeDashArray(pattern);
+        }
         bool const waveformAllowed = m_visualizerEnabled && m_motionAllowed;
         bool const hasSignal = streaming && std::max(left, right) > 0.00005;
         auto const hintVisibility = hasSignal && waveformAllowed ? Visibility::Collapsed : Visibility::Visible;
@@ -1017,37 +1431,548 @@ namespace winrt::Airloom::implementation
             !m_motionAllowed ? L"已遵循 Windows 动画设置" : L"等待声音 · 播放一首音乐试试");
 
         // The core provides a 64-bin peak envelope, not signed time-domain samples.
-        // Display its actual magnitude on a fixed -60..0 dB scale. Mirroring is only
-        // a display convention; there is no synthetic motion or automatic gain.
+        // Display its actual magnitude on a fixed -60..0 dB scale above the baseline.
+        // The shorter, quieter reflection below it is only a display convention; there
+        // is no synthetic motion or automatic gain.
         if (m_waveformBars.empty())
         {
             auto color = Brush(L"SignalFillBrush");
-            for (size_t index = 0; index < 64; ++index)
+            // Even entries are the bars; odd entries are their reflections.
+            for (size_t index = 0; index < waveformBins * 2; ++index)
             {
                 Line bar;
                 bar.Stroke(color);
                 bar.StrokeStartLineCap(PenLineCap::Round);
                 bar.StrokeEndLineCap(PenLineCap::Round);
+                if (index % 2 == 1) bar.Opacity(0.26);
                 bar.Visibility(Visibility::Collapsed);
                 WaveformCanvas().Children().Append(bar);
                 m_waveformBars.push_back(bar);
             }
         }
-        auto const step = width / static_cast<double>(m_waveformBars.size());
-        for (size_t index = 0; index < m_waveformBars.size(); ++index)
+        auto const thickness = std::clamp(step * 0.42, 2.0, 4.0);
+        for (size_t index = 0; index < waveformBins && index * 2 + 1 < m_waveformBars.size(); ++index)
         {
             auto const peak = waveformAllowed && streaming && index < next.waveform.size()
                 ? std::clamp(std::abs(next.waveform[index]), 0.0, 1.0) : 0.0;
             auto const magnitude = peak > 0.001 ? std::clamp((20.0 * std::log10(peak) + 60.0) / 60.0, 0.0, 1.0) : 0.0;
             auto& shown = m_displayWave[index];
             shown = waveformAllowed && streaming ? std::max(magnitude, shown * release) : 0.0;
-            auto const extent = shown * height * 0.46;
+            auto const rise = shown * baseline * 0.92;
+            auto const reflection = shown * (height - baseline) * 0.6;
             auto const x = (static_cast<double>(index) + 0.5) * step;
-            auto const& bar = m_waveformBars[index];
+            auto const visible = shown > 0.004 ? Visibility::Visible : Visibility::Collapsed;
+            auto const& bar = m_waveformBars[index * 2];
             bar.X1(x); bar.X2(x);
-            bar.Y1(center - extent); bar.Y2(center + extent);
-            bar.StrokeThickness(std::clamp(step * 0.5, 2.0, 5.0));
-            bar.Visibility(shown > 0.004 ? Visibility::Visible : Visibility::Collapsed);
+            bar.Y1(baseline - rise); bar.Y2(baseline);
+            bar.StrokeThickness(thickness);
+            bar.Visibility(visible);
+            auto const& mirror = m_waveformBars[index * 2 + 1];
+            mirror.X1(x); mirror.X2(x);
+            mirror.Y1(baseline); mirror.Y2(baseline + reflection);
+            mirror.StrokeThickness(thickness);
+            // High contrast keeps only the measured bars.
+            mirror.Visibility(m_highContrast ? Visibility::Collapsed : visible);
+        }
+    }
+
+    void MainWindow::RenderRoute(Snapshot const& next)
+    {
+        // Continuous motion exists only while it explains something real and
+        // Windows allows animation; the drawn state is the same without it.
+        bool const animate = m_motionAllowed && !m_highContrast && m_homeMotionVisible;
+        if (!animate && m_routeAnimationsAllowed)
+        {
+            // Collapsing home can zero its canvas size. Stop existing visuals
+            // before the geometry guard, so a settings page cannot leave them running.
+            StopMotion(RouteSourceHalo());
+            RouteSourceHalo().Visibility(Visibility::Collapsed);
+            m_sourceHaloRunning = false;
+            for (auto& node : m_routeNodes)
+            {
+                if (node.linkStoryboard) node.linkStoryboard.Stop();
+                node.linkStoryboard = nullptr;
+                node.link.ClearValue(Shapes::Shape::StrokeDashOffsetProperty());
+                if (node.look == L"live") node.link.ClearValue(Shapes::Shape::StrokeDashArrayProperty());
+                StopMotion(node.disc);
+                StopMotion(node.halo);
+                StopMotion(node.ring);
+                node.halo.Visibility(Visibility::Collapsed);
+                for (auto const& particle : node.particles)
+                {
+                    Hosting::ElementCompositionPreview::GetElementVisual(particle).StopAnimation(L"Translation");
+                    StopMotion(particle);
+                }
+                StopMotion(node.particleHost);
+                node.particleHost.Visibility(Visibility::Collapsed);
+                node.haloRunning = node.ringRunning = node.particlesRunning = node.flowing = node.marching = false;
+            }
+        }
+        m_routeAnimationsAllowed = animate;
+        double const width = RouteCanvas().ActualWidth();
+        double const height = RouteCanvas().ActualHeight();
+        if (width < 40.0 || height < 40.0) return;
+        bool const streaming = next.StreamingCount() > 0;
+        bool const hasSource = std::any_of(next.sources.begin(), next.sources.end(), [&next](auto const& source)
+            { return source.id == next.selectedSourceId; });
+        // Particles show sound actually leaving: a captured signal or the test tone.
+        bool const flowing = streaming && (next.testToneActive ||
+            (hasSource && (next.captureState == L"signal" || next.captureState == L"quiet")));
+
+        struct Entry
+        {
+            hstring id;
+            hstring name;
+            hstring state;
+            hstring look;
+            hstring glyph;
+            hstring badge;
+        };
+        std::vector<Entry> entries;
+        size_t chosen{};
+        for (auto const& device : next.devices)
+        {
+            if (!next.IsSelected(device.id) || IsDeviceHidden(device)) continue;
+            ++chosen;
+            if (entries.size() >= 4) continue;
+            Entry entry;
+            entry.id = device.id;
+            entry.name = device.name;
+            entry.glyph = device.kind == L"native_stereo" ? L"group" : L"single";
+            if (device.kind == L"native_stereo" && !device.groupComplete)
+            {
+                entry.look = L"warn"; entry.badge = L"warn"; entry.state = L"成员暂缺";
+            }
+            else if (device.state == L"streaming")
+            {
+                entry.look = L"live";
+                entry.state = next.testToneActive ? L"正在试播" : hasSource ? L"正在投放" : L"已连接 · 静音";
+            }
+            else if (device.state == L"connecting" || device.state == L"reconnecting")
+            {
+                entry.look = L"busy";
+                entry.state = device.state == L"connecting" ? L"正在连接…" : L"正在重连…";
+            }
+            else if (device.state == L"auth_required")
+            {
+                entry.look = L"warn"; entry.badge = L"lock";
+                entry.state = next.authKind == L"pin" && next.authDeviceId == device.id ? L"需要配对码" : L"需要访问密码";
+            }
+            else if (device.state == L"error")
+            {
+                entry.look = L"err"; entry.badge = L"warn"; entry.state = L"连接失败 · 可重试";
+            }
+            else
+            {
+                entry.look = L"idle";
+                entry.state = device.online ? L"已选择" : L"暂时离线";
+            }
+            entries.push_back(std::move(entry));
+        }
+        if (chosen > entries.size() && !entries.empty())
+            entries.back().state = entries.back().state + L" · 另有 " + to_hstring(chosen - entries.size()) + L" 台";
+        if (entries.empty())
+        {
+            bool const anyVisible = std::any_of(next.devices.begin(), next.devices.end(), [this](Device const& device)
+                { return !IsDeviceHidden(device); });
+            Entry ghost;
+            ghost.look = L"ghost";
+            ghost.glyph = L"add";
+            ghost.name = anyVisible ? L"选择扬声器" : L"寻找扬声器";
+            ghost.state = anyVisible ? (m_wideLayout ? L"在右侧勾选" : L"在上方勾选") :
+                next.state == L"discovering" ? L"正在发现…" : L"可重新发现";
+            entries.push_back(std::move(ghost));
+        }
+
+        std::wstring signature = std::to_wstring(static_cast<int>(width)) + L"x" + std::to_wstring(static_cast<int>(height));
+        signature += animate ? L"|a" : L"|-";
+        signature += flowing ? L"|f" : L"|-";
+        signature += m_wideLayout ? L"|w" : L"|c";
+        for (auto const& entry : entries)
+        {
+            for (auto const* part : {&entry.id, &entry.look, &entry.name, &entry.state, &entry.badge, &entry.glyph})
+            {
+                signature += L'\x1f';
+                signature += part->c_str();
+            }
+        }
+        auto const now = std::chrono::steady_clock::now();
+        bool const finishParticleFade = std::any_of(m_routeNodes.begin(), m_routeNodes.end(), [&](RouteNode const& node)
+            { return node.particlesRunning && !node.flowing && now >= node.particleStopAt; });
+        if (signature == m_routeSignature && !finishParticleFade) return;
+        m_routeSignature = signature;
+
+        // Geometry follows the design: an 80 px source tile whose right edge
+        // starts every curve, and 210 px speaker blocks on the right.
+        double const content = std::min(width, m_wideLayout ? 720.0 : 600.0);
+        double const left = std::floor((width - content) / 2.0);
+        double const sourceY = std::round(height / 2.0);
+        double const sourceX = left + 100.0;
+        double const nodeX = std::max(sourceX + 66.0, left + content - 210.0);
+        double const endX = nodeX - 6.0;
+        double const count = static_cast<double>(entries.size());
+        double const gap = entries.size() > 1 ? std::clamp((height - 56.0) / (count - 1.0), 56.0, 74.0) : 0.0;
+        double const firstY = sourceY - gap * (count - 1.0) / 2.0;
+        Canvas::SetLeft(RouteSource(), left);
+        Canvas::SetTop(RouteSource(), sourceY - 40.0);
+
+        bool const sourceHalo = flowing && animate;
+        if (sourceHalo != m_sourceHaloRunning)
+        {
+            m_sourceHaloRunning = sourceHalo;
+            if (sourceHalo)
+            {
+                RouteSourceHalo().Visibility(Visibility::Visible);
+                StartLoop(RouteSourceHalo(), 40.0f, 40.0f, 1.28f, 0.5f, 2400);
+            }
+            else
+            {
+                StopMotion(RouteSourceHalo());
+                RouteSourceHalo().Visibility(Visibility::Collapsed);
+            }
+        }
+
+        auto links = RouteLinkLayer().Children();
+        auto particleLayer = RouteParticleLayer().Children();
+        auto nodeLayer = RouteNodeLayer().Children();
+        auto const detach = [](UIElementCollection const& collection, UIElement const& element)
+            {
+                uint32_t index{};
+                if (element && collection.IndexOf(element, index)) collection.RemoveAt(index);
+            };
+        m_routeNodes.erase(std::remove_if(m_routeNodes.begin(), m_routeNodes.end(), [&](RouteNode& node)
+            {
+                bool const keep = std::any_of(entries.begin(), entries.end(), [&node](Entry const& entry)
+                    { return entry.id == node.id; });
+                if (keep) return false;
+                if (node.linkStoryboard) node.linkStoryboard.Stop();
+                detach(links, node.link);
+                detach(particleLayer, node.particleHost);
+                detach(nodeLayer, node.root);
+                return true;
+            }), m_routeNodes.end());
+
+        for (size_t index = 0; index < entries.size(); ++index)
+        {
+            auto const& entry = entries[index];
+            auto found = std::find_if(m_routeNodes.begin(), m_routeNodes.end(), [&entry](RouteNode const& node)
+                { return node.id == entry.id; });
+            bool const created = found == m_routeNodes.end();
+            if (created)
+            {
+                RouteNode node;
+                node.id = entry.id;
+                node.link = Shapes::Path();
+                node.link.StrokeThickness(2.0);
+                node.link.StrokeStartLineCap(PenLineCap::Round);
+                node.link.StrokeEndLineCap(PenLineCap::Round);
+                links.Append(node.link);
+                node.particleHost = Canvas();
+                node.particleHost.Visibility(Visibility::Collapsed);
+                particleLayer.Append(node.particleHost);
+
+                node.root = Grid();
+                node.root.Width(210.0);
+                node.root.Height(52.0);
+                node.root.ColumnSpacing(12.0);
+                ColumnDefinition discColumn, labelColumn;
+                discColumn.Width(GridLength{52, GridUnitType::Pixel});
+                labelColumn.Width(GridLength{1, GridUnitType::Star});
+                node.root.ColumnDefinitions().Append(discColumn);
+                node.root.ColumnDefinitions().Append(labelColumn);
+                node.disc = Grid();
+                node.disc.Width(52.0);
+                node.disc.Height(52.0);
+                node.halo = Shapes::Ellipse();
+                node.halo.Width(52.0);
+                node.halo.Height(52.0);
+                node.halo.Visibility(Visibility::Collapsed);
+                node.disc.Children().Append(node.halo);
+                node.face = Shapes::Ellipse();
+                node.face.Width(52.0);
+                node.face.Height(52.0);
+                node.disc.Children().Append(node.face);
+                node.glyphs = StackPanel();
+                node.glyphs.Orientation(Microsoft::UI::Xaml::Controls::Orientation::Horizontal);
+                node.glyphs.HorizontalAlignment(HorizontalAlignment::Center);
+                node.glyphs.VerticalAlignment(VerticalAlignment::Center);
+                node.disc.Children().Append(node.glyphs);
+                // A connecting speaker's outer ring turns.
+                node.ring = Shapes::Ellipse();
+                node.ring.Width(62.0);
+                node.ring.Height(62.0);
+                node.ring.Margin(Thickness{-5, -5, -5, -5});
+                node.ring.StrokeThickness(2.0);
+                node.ring.StrokeDashArray(Dashes(23.0, 70.0));
+                node.ring.StrokeDashCap(PenLineCap::Round);
+                node.ring.Visibility(Visibility::Collapsed);
+                node.disc.Children().Append(node.ring);
+                node.badge = Border();
+                node.badge.Width(20.0);
+                node.badge.Height(20.0);
+                node.badge.CornerRadius(CornerRadius{10, 10, 10, 10});
+                node.badge.BorderThickness(Thickness{2, 2, 2, 2});
+                node.badge.HorizontalAlignment(HorizontalAlignment::Right);
+                node.badge.VerticalAlignment(VerticalAlignment::Bottom);
+                node.badge.Margin(Thickness{0, 0, -3, -3});
+                node.badge.Visibility(Visibility::Collapsed);
+                node.badgeGlyph = FontIcon();
+                node.badgeGlyph.FontSize(10.0);
+                node.badgeGlyph.HorizontalAlignment(HorizontalAlignment::Center);
+                node.badgeGlyph.VerticalAlignment(VerticalAlignment::Center);
+                node.badge.Child(node.badgeGlyph);
+                node.disc.Children().Append(node.badge);
+                node.root.Children().Append(node.disc);
+                StackPanel labels;
+                Grid::SetColumn(labels, 1);
+                labels.VerticalAlignment(VerticalAlignment::Center);
+                node.name = TextBlock();
+                node.name.FontSize(14.0);
+                node.name.FontWeight(Windows::UI::Text::FontWeight{600});
+                node.name.TextWrapping(TextWrapping::NoWrap);
+                node.name.TextTrimming(TextTrimming::CharacterEllipsis);
+                labels.Children().Append(node.name);
+                node.state = TextBlock();
+                node.state.FontSize(12.0);
+                node.state.TextWrapping(TextWrapping::NoWrap);
+                node.state.TextTrimming(TextTrimming::CharacterEllipsis);
+                labels.Children().Append(node.state);
+                node.root.Children().Append(labels);
+                nodeLayer.Append(node.root);
+                m_routeNodes.push_back(std::move(node));
+                found = std::prev(m_routeNodes.end());
+            }
+            auto& node = *found;
+
+            if (node.glyphKind != entry.glyph)
+            {
+                node.glyphKind = entry.glyph;
+                node.glyphs.Children().Clear();
+                int const glyphCount = entry.glyph == L"group" ? 2 : 1;
+                for (int glyphIndex = 0; glyphIndex < glyphCount; ++glyphIndex)
+                {
+                    FontIcon glyph;
+                    glyph.Glyph(entry.glyph == L"add" ? GlyphAdd : GlyphSpeaker);
+                    glyph.FontSize(entry.glyph == L"group" ? 15.0 : entry.glyph == L"add" ? 18.0 : 22.0);
+                    node.glyphs.Children().Append(glyph);
+                }
+            }
+
+            double const nodeY = std::round(firstY + gap * static_cast<double>(index));
+            bool const moved = node.startX != sourceX || node.startY != sourceY || node.endX != endX || node.endY != nodeY;
+            if (moved)
+            {
+                node.startX = sourceX;
+                node.startY = sourceY;
+                node.endX = endX;
+                node.endY = nodeY;
+                double const span = endX - sourceX;
+                Media::PathFigure figure;
+                figure.StartPoint(Point{static_cast<float>(sourceX), static_cast<float>(sourceY)});
+                figure.IsFilled(false);
+                Media::BezierSegment curve;
+                curve.Point1(Point{static_cast<float>(sourceX + span * 0.5), static_cast<float>(sourceY)});
+                curve.Point2(Point{static_cast<float>(endX - span * 0.42), static_cast<float>(nodeY)});
+                curve.Point3(Point{static_cast<float>(endX), static_cast<float>(nodeY)});
+                Media::PathSegmentCollection segments;
+                segments.Append(curve);
+                figure.Segments(segments);
+                Media::PathFigureCollection figures;
+                figures.Append(figure);
+                Media::PathGeometry geometry;
+                geometry.Figures(figures);
+                node.link.Data(geometry);
+                node.length = RouteLength(sourceX, sourceY, endX, nodeY);
+                Canvas::SetLeft(node.root, nodeX);
+                Canvas::SetTop(node.root, nodeY - 26.0);
+            }
+
+            hstring const previous = node.look;
+            bool const lookChanged = previous != entry.look;
+            node.look = entry.look;
+            bool const live = entry.look == L"live";
+            bool const busy = entry.look == L"busy";
+            bool const ghost = entry.look == L"ghost";
+            bool const attention = entry.look == L"warn";
+            bool const problem = entry.look == L"err";
+            bool const arrived = live && lookChanged && !previous.empty() && !created && animate;
+
+            // Line language: dotted = chosen but idle, marching dashes = connecting,
+            // solid accent = connected, short dashes in caution/critical = needs you.
+            // Theme refreshes replace the paint without restarting a route's motion.
+            node.link.Stroke(Brush(live ? L"AccentLineBrush" : busy ? L"SignalFillBrush" :
+                problem ? L"DangerBrush" : attention ? L"WarningBrush" : L"RouteIdleBrush"));
+            node.link.Opacity(live ? 1.0 : busy ? 0.75 : attention || problem ? 0.8 : ghost ? 0.4 : 0.7);
+            bool const march = busy && animate;
+            if (lookChanged || moved || node.marching != march || (!animate && node.linkStoryboard))
+            {
+                if (node.linkStoryboard)
+                {
+                    node.linkStoryboard.Stop();
+                    node.linkStoryboard = nullptr;
+                }
+                node.marching = false;
+                node.link.ClearValue(Shapes::Shape::StrokeDashOffsetProperty());
+                if (live)
+                {
+                    node.link.ClearValue(Shapes::Shape::StrokeDashArrayProperty());
+                }
+                else if (busy)
+                {
+                    node.link.StrokeDashArray(Dashes(3.0, 4.0));
+                    node.link.StrokeDashCap(PenLineCap::Flat);
+                }
+                else if (attention || problem)
+                {
+                    node.link.StrokeDashArray(Dashes(2.0, 3.5));
+                    node.link.StrokeDashCap(PenLineCap::Flat);
+                }
+                else
+                {
+                    node.link.StrokeDashArray(Dashes(0.0, 3.5));
+                    node.link.StrokeDashCap(PenLineCap::Round);
+                }
+                if (arrived) node.linkStoryboard = DrawPath(node.link, node.length);
+                else if (march)
+                {
+                    node.linkStoryboard = MarchPath(node.link);
+                    node.marching = true;
+                }
+            }
+
+            node.face.Fill(Brush(ghost ? L"RowRestBrush" : L"AppSurfaceBrush"));
+            node.face.Stroke(Brush(live ? L"SignalFillBrush" : ghost ? L"RouteIdleBrush" : L"NodeStrokeBrush"));
+            node.face.StrokeThickness(live ? 2.0 : ghost ? 1.5 : 1.0);
+            if (ghost) node.face.StrokeDashArray(Dashes(3.0, 2.5));
+            else node.face.ClearValue(Shapes::Shape::StrokeDashArrayProperty());
+            auto const ink = Brush(live ? L"SignalBrush" : attention ? L"WarningBrush" : problem ? L"DangerBrush" :
+                ghost ? L"FaintBrush" : busy ? L"InkBrush" : L"MutedBrush");
+            for (auto const& child : node.glyphs.Children())
+                if (auto glyph = child.try_as<FontIcon>()) glyph.Foreground(ink);
+            node.badge.Visibility(entry.badge.empty() ? Visibility::Collapsed : Visibility::Visible);
+            node.badge.Background(Brush(problem ? L"DangerBrush" : L"WarningBrush"));
+            node.badge.BorderBrush(Brush(L"AppSurfaceBrush"));
+            node.badgeGlyph.Glyph(entry.badge == L"lock" ? GlyphLock : GlyphWarning);
+            node.badgeGlyph.Foreground(Brush(L"AppSurfaceBrush"));
+            SetText(node.name, entry.name);
+            node.name.Foreground(Brush(ghost ? L"MutedBrush" : L"InkBrush"));
+            SetText(node.state, entry.state);
+            node.state.Foreground(Brush(live ? L"SignalBrush" : attention ? L"WarningBrush" : problem ? L"DangerBrush" :
+                ghost ? L"FaintBrush" : L"MutedBrush"));
+            node.halo.Fill(Brush(L"SignalFillBrush"));
+            node.ring.Stroke(Brush(L"SignalFillBrush"));
+
+            // A joining speaker pops once (0.86 → 1.06 → 1), then breathes quietly.
+            if (arrived) BounceElement(node.disc, 26.0f);
+            bool const halo = live && animate;
+            if (halo != node.haloRunning)
+            {
+                node.haloRunning = halo;
+                if (halo)
+                {
+                    node.halo.Visibility(Visibility::Visible);
+                    StartLoop(node.halo, 26.0f, 26.0f, 1.75f, 0.24f, 2400, static_cast<int>(index) * 300);
+                }
+                else
+                {
+                    StopMotion(node.halo);
+                    node.halo.Visibility(Visibility::Collapsed);
+                }
+            }
+            node.ring.Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
+            bool const spin = busy && animate;
+            if (spin != node.ringRunning)
+            {
+                node.ringRunning = spin;
+                if (spin) StartSpin(node.ring, 31.0f, 31.0f, 1100);
+                else StopMotion(node.ring);
+            }
+
+            // Particles travel the same curve on the compositor (1.8 s, linear), so
+            // they stay smooth whatever the UI thread is doing.
+            bool const fading = node.particlesRunning && (node.flowing || now < node.particleStopAt);
+            bool const particles = live && animate && (flowing || fading);
+            if (particles && (!node.particlesRunning || moved))
+            {
+                if (node.particles.empty())
+                {
+                    for (int particleIndex = 0; particleIndex < 5; ++particleIndex)
+                    {
+                        Shapes::Ellipse particle;
+                        particle.Width(6.0);
+                        particle.Height(6.0);
+                        Canvas::SetLeft(particle, -3.0);
+                        Canvas::SetTop(particle, -3.0);
+                        node.particleHost.Children().Append(particle);
+                        node.particles.push_back(particle);
+                    }
+                }
+                node.particleHost.Visibility(Visibility::Visible);
+                auto hostVisual = Hosting::ElementCompositionPreview::GetElementVisual(node.particleHost);
+                auto compositor = hostVisual.Compositor();
+                hostVisual.StopAnimation(L"Opacity");
+                hostVisual.Opacity(0.0f);
+                node.flowing = flowing;
+                node.particleStopAt = flowing ? std::chrono::steady_clock::time_point{} : now + std::chrono::milliseconds(150);
+                if (flowing) FadeVisual(node.particleHost, 1.0f, 250);
+                auto const linear = compositor.CreateLinearEasingFunction();
+                for (size_t particleIndex = 0; particleIndex < node.particles.size(); ++particleIndex)
+                {
+                    auto const& particle = node.particles[particleIndex];
+                    Hosting::ElementCompositionPreview::SetIsTranslationEnabled(particle, true);
+                    auto visual = Hosting::ElementCompositionPreview::GetElementVisual(particle);
+                    auto travel = compositor.CreateVector3KeyFrameAnimation();
+                    for (int step = 0; step <= 24; ++step)
+                    {
+                        double const progress = step / 24.0;
+                        auto const point = RoutePointAt(node.startX, node.startY, node.endX, node.endY, progress);
+                        travel.InsertKeyFrame(static_cast<float>(progress),
+                            float3{static_cast<float>(point.x), static_cast<float>(point.y), 0.0f}, linear);
+                    }
+                    auto fade = compositor.CreateScalarKeyFrameAnimation();
+                    fade.InsertKeyFrame(0.0f, 0.0f, linear);
+                    fade.InsertKeyFrame(0.12f, 1.0f, linear);
+                    fade.InsertKeyFrame(0.86f, 1.0f, linear);
+                    fade.InsertKeyFrame(1.0f, 0.0f, linear);
+                    auto const delay = std::chrono::milliseconds(static_cast<int>(particleIndex) * 360 + static_cast<int>(index) * 190);
+                    travel.Duration(std::chrono::milliseconds(1800));
+                    travel.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+                    travel.DelayTime(delay);
+                    fade.Duration(std::chrono::milliseconds(1800));
+                    fade.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+                    fade.DelayTime(delay);
+                    visual.Opacity(0.0f);
+                    visual.StartAnimation(L"Translation", travel);
+                    visual.StartAnimation(L"Opacity", fade);
+                }
+                node.particlesRunning = true;
+            }
+            else if (!particles && node.particlesRunning)
+            {
+                for (auto const& particle : node.particles)
+                {
+                    auto visual = Hosting::ElementCompositionPreview::GetElementVisual(particle);
+                    visual.StopAnimation(L"Translation");
+                    visual.StopAnimation(L"Opacity");
+                }
+                node.particleHost.Visibility(Visibility::Collapsed);
+                node.particlesRunning = false;
+                node.flowing = false;
+            }
+            for (auto const& particle : node.particles) particle.Fill(Brush(L"SignalFillBrush"));
+            // Silence (or a source switch) lets the particles fade out in 150 ms and
+            // back in 250 ms; the connected line itself stays.
+            if (node.particlesRunning && node.flowing != flowing)
+            {
+                node.flowing = flowing;
+                node.particleStopAt = flowing ? std::chrono::steady_clock::time_point{} : now + std::chrono::milliseconds(150);
+                FadeVisual(node.particleHost, flowing ? 1.0f : 0.0f, flowing ? 250 : 150);
+            }
+            if (created && animate)
+            {
+                AnimateIn(node.root, 0.0f, 6.0f, 250);
+                AnimateIn(node.link, 0.0f, 0.0f, 250);
+            }
         }
     }
 
@@ -1123,7 +2048,10 @@ namespace winrt::Airloom::implementation
 
     void MainWindow::OnConnect(IInspectable const&, RoutedEventArgs const&)
     {
-        if (m_snapshot.authRequestId != 0) ShowAuthentication(true);
+        // A running route always keeps its stop action, even while a different
+        // receiver is waiting for credentials in its own row.
+        if (m_snapshot.StreamingCount() > 0) Send(L"disconnect");
+        else if (m_snapshot.authRequestId != 0) ShowAuthentication(true);
         else Send(IsActive(m_snapshot.state) ? L"disconnect" : L"connect");
     }
 
@@ -1256,6 +2184,8 @@ namespace winrt::Airloom::implementation
         m_authDialog = dialog;
         m_dialogRequestId = requestId;
         dialog.XamlRoot(LayoutRoot().XamlRoot());
+        // Dialogs live in the popup layer and do not inherit the window root's language tag.
+        dialog.Language(WindowRoot().Language());
         dialog.RequestedTheme(LayoutRoot().ActualTheme());
         dialog.Style(Application::Current().Resources().Lookup(box_value(L"DefaultContentDialogStyle")).as<Style>());
         dialog.Title(box_value(pin ? L"输入设备配对码" : L"输入扬声器访问密码"));
@@ -1536,6 +2466,7 @@ namespace winrt::Airloom::implementation
         // Windows 11 places "back" in the title bar of a sub-page.
         SettingsBackButton().Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
         SettingsButton().Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
+        TitleSection().Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
         TitleDragRegion().Padding(Thickness{visible ? 8.0 : 16.0, 0, 0, 0});
         // The focus target has only just become visible; move focus after layout.
         DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [weak = get_weak(), visible]
@@ -1549,8 +2480,9 @@ namespace winrt::Airloom::implementation
             });
         if (changed)
         {
-            // Drill in from the right, back out from the left.
-            AnimateIn(visible ? SettingsSheet().as<UIElement>() : HomeSheet().as<UIElement>(), visible ? 48.0f : -48.0f, 0.0f, 320);
+            // Drill in (96 % → 100 %, 320 ms); back out (102 % → 100 %, 250 ms).
+            if (visible) AnimateZoomIn(SettingsSheet(), 0.96f, 320);
+            else AnimateZoomIn(HomeSheet(), 1.02f, 250);
             if (visible) AnimateIn(SettingsBackButton(), -8.0f, 0.0f, 240);
         }
         if (visible && focusDevices)
@@ -1687,6 +2619,9 @@ namespace winrt::Airloom::implementation
         titlebar.ButtonPressedBackgroundColor(m_highContrast ? SystemColor(COLOR_HIGHLIGHT) :
             dark ? Windows::UI::Color{10, 255, 255, 255} : Windows::UI::Color{6, 0, 0, 0});
         for (auto const& bar : m_waveformBars) bar.Stroke(Brush(L"SignalFillBrush"));
+        // Refresh code-created brushes without changing route state or replaying
+        // connection animations. Every route element refreshes its paint together.
+        m_routeSignature.clear();
         m_forceDeviceRender = true;
         m_visibilityRendered = false;
     }
@@ -1745,6 +2680,30 @@ namespace winrt::Airloom::implementation
         visual.StartAnimation(L"Opacity", opacity);
     }
 
+    void MainWindow::AnimateZoomIn(UIElement const& element, float fromScale, int milliseconds)
+    {
+        // Settings drills in from 96 %; home returns from 102 %. Both views fill
+        // the area under the title bar, so that is the scale centre.
+        if (!m_motionAllowed || !element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        auto compositor = visual.Compositor();
+        auto const width = static_cast<float>(LayoutRoot().ActualWidth());
+        auto const height = static_cast<float>(std::max(0.0, LayoutRoot().ActualHeight() - 48.0));
+        visual.CenterPoint(float3{width * 0.5f, height * 0.5f, 0.0f});
+        auto const ease = Decelerate(compositor);
+        auto const duration = std::chrono::milliseconds(milliseconds);
+        auto scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0.0f, float3{fromScale, fromScale, 1.0f});
+        scale.InsertKeyFrame(1.0f, float3{1.0f, 1.0f, 1.0f}, ease);
+        scale.Duration(duration);
+        auto opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.InsertKeyFrame(0.0f, 0.0f);
+        opacity.InsertKeyFrame(1.0f, 1.0f, ease);
+        opacity.Duration(duration);
+        visual.StartAnimation(L"Scale", scale);
+        visual.StartAnimation(L"Opacity", opacity);
+    }
+
     void MainWindow::PopElement(UIElement const& element, float size)
     {
         if (!m_motionAllowed || !element) return;
@@ -1758,42 +2717,196 @@ namespace winrt::Airloom::implementation
         visual.StartAnimation(L"Scale", scale);
     }
 
-    void MainWindow::UpdatePulse(bool live)
+    void MainWindow::UpdatePulse(bool live, bool busy)
     {
-        // A live dot breathes outward only while audio is really being sent and
-        // the window is on screen; otherwise it is a still, coloured dot.
-        bool const run = live && m_motionAllowed && IsWindowVisible(m_hwnd);
-        if (run == m_pulseRunning) return;
-        m_pulseRunning = run;
-        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(StatusPulse());
-        if (!run)
+        // Live: the dot breathes outward. Busy: it blinks. Only while the window
+        // is on screen and Windows allows animation; otherwise a still dot.
+        int const mode = !m_motionAllowed || m_highContrast || !m_homeMotionVisible ? 0 : live ? 1 : busy ? 2 : 0;
+        if (mode == m_pulseMode) return;
+        m_pulseMode = mode;
+        auto pulse = Hosting::ElementCompositionPreview::GetElementVisual(StatusPulse());
+        auto dot = Hosting::ElementCompositionPreview::GetElementVisual(StatusDot());
+        pulse.StopAnimation(L"Scale");
+        pulse.StopAnimation(L"Opacity");
+        dot.StopAnimation(L"Opacity");
+        dot.Opacity(1.0f);
+        StatusPulse().Visibility(mode == 1 ? Visibility::Visible : Visibility::Collapsed);
+        if (mode == 1)
         {
-            visual.StopAnimation(L"Scale");
-            visual.StopAnimation(L"Opacity");
-            StatusPulse().Visibility(Visibility::Collapsed);
-            return;
+            StartLoop(StatusPulse(), 4.0f, 4.0f, 2.6f, 0.5f, 1600);
         }
-        StatusPulse().Visibility(Visibility::Visible);
+        else if (mode == 2)
+        {
+            auto compositor = dot.Compositor();
+            auto blink = compositor.CreateScalarKeyFrameAnimation();
+            blink.InsertKeyFrame(0.0f, 1.0f);
+            blink.InsertKeyFrame(0.5f, 0.3f);
+            blink.InsertKeyFrame(1.0f, 1.0f);
+            blink.Duration(std::chrono::milliseconds(1000));
+            blink.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+            dot.StartAnimation(L"Opacity", blink);
+        }
+    }
+
+    void MainWindow::StartLoop(UIElement const& element, float centerX, float centerY, float toScale, float fromOpacity,
+        int milliseconds, int delayMilliseconds)
+    {
+        if (!element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
         auto compositor = visual.Compositor();
-        visual.CenterPoint(float3{5.0f, 5.0f, 0.0f});
+        visual.CenterPoint(float3{centerX, centerY, 0.0f});
         auto const ease = compositor.CreateCubicBezierEasingFunction(float2{0.0f, 0.0f}, float2{0.2f, 1.0f});
+        auto const duration = std::chrono::milliseconds(milliseconds);
         auto scale = compositor.CreateVector3KeyFrameAnimation();
         scale.InsertKeyFrame(0.0f, float3{1.0f, 1.0f, 1.0f});
-        scale.InsertKeyFrame(1.0f, float3{2.6f, 2.6f, 1.0f}, ease);
-        scale.Duration(std::chrono::milliseconds(1600));
+        scale.InsertKeyFrame(1.0f, float3{toScale, toScale, 1.0f}, ease);
+        scale.Duration(duration);
         scale.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
         auto fade = compositor.CreateScalarKeyFrameAnimation();
-        fade.InsertKeyFrame(0.0f, 0.5f);
+        fade.InsertKeyFrame(0.0f, fromOpacity);
         fade.InsertKeyFrame(1.0f, 0.0f, ease);
-        fade.Duration(std::chrono::milliseconds(1600));
+        fade.Duration(duration);
         fade.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+        if (delayMilliseconds > 0)
+        {
+            scale.DelayTime(std::chrono::milliseconds(delayMilliseconds));
+            fade.DelayTime(std::chrono::milliseconds(delayMilliseconds));
+            visual.Opacity(0.0f);
+        }
         visual.StartAnimation(L"Scale", scale);
         visual.StartAnimation(L"Opacity", fade);
     }
 
+    void MainWindow::StartSpin(UIElement const& element, float centerX, float centerY, int milliseconds)
+    {
+        if (!element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        auto compositor = visual.Compositor();
+        visual.CenterPoint(float3{centerX, centerY, 0.0f});
+        auto rotation = compositor.CreateScalarKeyFrameAnimation();
+        rotation.InsertKeyFrame(0.0f, 0.0f);
+        rotation.InsertKeyFrame(1.0f, 360.0f, compositor.CreateLinearEasingFunction());
+        rotation.Duration(std::chrono::milliseconds(milliseconds));
+        rotation.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+        visual.StartAnimation(L"RotationAngleInDegrees", rotation);
+    }
+
+    void MainWindow::StartEqualizer(UIElement const& element, int delayMilliseconds)
+    {
+        if (!element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        auto compositor = visual.Compositor();
+        // Each bar grows from its foot.
+        visual.CenterPoint(float3{1.0f, 10.0f, 0.0f});
+        auto const ease = compositor.CreateCubicBezierEasingFunction(float2{0.42f, 0.0f}, float2{0.58f, 1.0f});
+        auto scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0.0f, float3{1.0f, 0.3f, 1.0f});
+        scale.InsertKeyFrame(0.5f, float3{1.0f, 1.0f, 1.0f}, ease);
+        scale.InsertKeyFrame(1.0f, float3{1.0f, 0.3f, 1.0f}, ease);
+        scale.Duration(std::chrono::milliseconds(900));
+        scale.IterationBehavior(Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+        if (delayMilliseconds > 0) scale.DelayTime(std::chrono::milliseconds(delayMilliseconds));
+        visual.StartAnimation(L"Scale", scale);
+    }
+
+    void MainWindow::StopMotion(UIElement const& element)
+    {
+        if (!element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        visual.StopAnimation(L"Scale");
+        visual.StopAnimation(L"Opacity");
+        visual.StopAnimation(L"RotationAngleInDegrees");
+        visual.Scale(float3{1.0f, 1.0f, 1.0f});
+        visual.Opacity(1.0f);
+        visual.RotationAngleInDegrees(0.0f);
+    }
+
+    void MainWindow::FadeVisual(UIElement const& element, float opacity, int milliseconds)
+    {
+        if (!element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        if (!m_motionAllowed)
+        {
+            visual.StopAnimation(L"Opacity");
+            visual.Opacity(opacity);
+            return;
+        }
+        auto compositor = visual.Compositor();
+        auto fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(1.0f, opacity, compositor.CreateLinearEasingFunction());
+        fade.Duration(std::chrono::milliseconds(milliseconds));
+        visual.StartAnimation(L"Opacity", fade);
+    }
+
+    void MainWindow::BounceElement(UIElement const& element, float center)
+    {
+        if (!m_motionAllowed || !element) return;
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(element);
+        auto compositor = visual.Compositor();
+        visual.CenterPoint(float3{center, center, 0.0f});
+        auto const ease = Decelerate(compositor);
+        auto scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0.0f, float3{0.86f, 0.86f, 1.0f});
+        scale.InsertKeyFrame(0.6f, float3{1.06f, 1.06f, 1.0f}, ease);
+        scale.InsertKeyFrame(1.0f, float3{1.0f, 1.0f, 1.0f}, ease);
+        scale.Duration(std::chrono::milliseconds(450));
+        visual.StartAnimation(L"Scale", scale);
+    }
+
+    void MainWindow::SwapConnectIcon()
+    {
+        // One slot, three states: the icon scales in (0.5 → 1, 167 ms) while the
+        // label cross-fades; the button itself never changes size.
+        if (!m_motionAllowed) return;
+        auto icon = Hosting::ElementCompositionPreview::GetElementVisual(ConnectIcon());
+        auto compositor = icon.Compositor();
+        auto const ease = Decelerate(compositor);
+        icon.CenterPoint(float3{8.0f, 8.0f, 0.0f});
+        auto scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0.0f, float3{0.5f, 0.5f, 1.0f});
+        scale.InsertKeyFrame(1.0f, float3{1.0f, 1.0f, 1.0f}, ease);
+        scale.Duration(std::chrono::milliseconds(167));
+        auto fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0.0f, 0.0f);
+        fade.InsertKeyFrame(1.0f, 1.0f, ease);
+        fade.Duration(std::chrono::milliseconds(167));
+        icon.StartAnimation(L"Scale", scale);
+        icon.StartAnimation(L"Opacity", fade);
+        auto label = Hosting::ElementCompositionPreview::GetElementVisual(ConnectLabel());
+        auto labelFade = compositor.CreateScalarKeyFrameAnimation();
+        labelFade.InsertKeyFrame(0.0f, 0.2f);
+        labelFade.InsertKeyFrame(1.0f, 1.0f, compositor.CreateLinearEasingFunction());
+        labelFade.Duration(std::chrono::milliseconds(120));
+        label.StartAnimation(L"Opacity", labelFade);
+    }
+
+    void MainWindow::UpdateRadar(bool searching)
+    {
+        // Three staggered rings while discovery is really running and the list
+        // is empty; they stop as soon as the first speaker arrives.
+        bool const run = searching && m_motionAllowed && !m_highContrast && m_homeMotionVisible;
+        if (run == m_radarRunning) return;
+        m_radarRunning = run;
+        int delay{};
+        for (UIElement ring : {RadarRing1().as<UIElement>(), RadarRing2().as<UIElement>(), RadarRing3().as<UIElement>()})
+        {
+            if (run)
+            {
+                ring.Visibility(Visibility::Visible);
+                StartLoop(ring, 22.0f, 22.0f, 2.6f, 0.45f, 2400, delay);
+            }
+            else
+            {
+                StopMotion(ring);
+                ring.Visibility(Visibility::Collapsed);
+            }
+            delay += 800;
+        }
+    }
+
     void MainWindow::SpinGlyph(FontIcon const& glyph, bool spin, bool& running)
     {
-        bool const run = spin && m_motionAllowed;
+        bool const run = spin && m_motionAllowed && m_homeMotionVisible;
         if (run == running) return;
         running = run;
         auto visual = Hosting::ElementCompositionPreview::GetElementVisual(glyph);
@@ -1823,7 +2936,7 @@ namespace winrt::Airloom::implementation
         DeviceCards().ChildrenTransitions(m_motionAllowed ? m_deviceTransitions : nullptr);
         DeviceVisibilityList().ChildrenTransitions(m_motionAllowed ? m_visibilityTransitions : nullptr);
         // Session figures slide in when a session starts; they never animate out.
-        for (UIElement element : {MetersPanel().as<UIElement>(), StatsPanel().as<UIElement>()})
+        for (UIElement element : {StatsFigures().as<UIElement>()})
         {
             if (!m_motionAllowed)
             {
@@ -1850,10 +2963,14 @@ namespace winrt::Airloom::implementation
         }
         if (!m_motionAllowed)
         {
-            UpdatePulse(false);
+            UpdatePulse(false, false);
+            UpdateRadar(false);
             SpinGlyph(RefreshGlyph(), false, m_discoverySpinRunning);
             SpinGlyph(SourceRetryGlyph(), false, m_sourceSpinRunning);
         }
+        // Route halos, particles and row equalizers reconcile on the next render.
+        m_routeSignature.clear();
+        m_forceDeviceRender = true;
     }
 
     void MainWindow::FlashVisibilityCard()
@@ -1891,6 +3008,8 @@ namespace winrt::Airloom::implementation
         // XAML layout reports effective pixels. Use the actual client content,
         // not the HWND's outer frame or an assumed monitor scale.
         bool const wide = width >= 1050.0;
+        if (wide != m_wideLayout) m_routeSignature.clear();
+        m_wideLayout = wide;
         WideWorkspaceTrigger().IsActive(wide);
         CompactWorkspaceTrigger().IsActive(!wide);
     }
@@ -1903,6 +3022,11 @@ namespace winrt::Airloom::implementation
     void MainWindow::OnWaveformSizeChanged(IInspectable const&, SizeChangedEventArgs const&)
     {
         if (m_loaded) RenderAudio(m_snapshot);
+    }
+
+    void MainWindow::OnRouteSizeChanged(IInspectable const&, SizeChangedEventArgs const&)
+    {
+        if (m_loaded) RenderRoute(m_snapshot);
     }
 
     void MainWindow::ShowWindow()

@@ -1,8 +1,29 @@
 # Airloom visual system
 
-## Current design: 0.4.3
+## Current design: route stage (unreleased)
 
-The user-supplied native WinUI redesign remains the visual authority: Windows 11 Mica, Fluent surfaces and controls, theme-aware signal cards, system accent and native motion. Its visual baseline and existing evidence are recorded in [the 0.4.2 interface specification](docs/design/ui-0.4.2.md). The earlier silver-workspace tokens and permanently dark instrument described below are retained as historical design and evidence, not instructions to restore the previous appearance.
+The home view is one **stage** card and one **speaker rail** on Mica, with a layered dock beneath them. It keeps WinUI 3, Fluent controls, the system accent and every behavior contract below; only composition, visuals and motion change. Windows CI screenshots have not yet been reviewed for this design.
+
+| Region | Rule |
+| --- | --- |
+| Stage header | Scope (`系统声音` / `指定应用`) and source as native ComboBoxes, an icon refresh action, and a state pill on the right |
+| Headline | The chosen speakers (24 px compact, 28 px wide), one subline for what is happening, one caption line for what the capture actually hears |
+| Route | This computer (or the chosen app) as an 80 px tile on the left; one curve per chosen speaker (up to four) to a 52 px node on the right |
+| Signal | The 64-bin engine envelope above a dotted baseline, L/R meters beside it, transfer figures in one divided row |
+| Speaker rail | 340 px beside the stage at 1050 px and wider, above it below that; rows of check, avatar, name, live state and inline next step |
+| Dock | 84 px on a layer with a top divider: source summary, test tone, a 164 × 44 accent pill, elapsed time, volume with a fixed 52 px value slot, local mute |
+
+The route is drawn from real state only. A dotted line means chosen but idle; marching dashes mean connecting; a solid accent line means connected; short caution or critical dashes mean the speaker needs the person. Particles travel a connected line only while the capture reports a signal (or the test tone plays), and fade out during silence or a source switch while the line stays.
+
+Motion follows WinUI durations (167 / 250 / 333 ms) with a decelerating curve: a connected route draws in over 500 ms, a joining node pops once (0.86 → 1.06 → 1, 450 ms), settings drills in from 96 % and home returns from 102 %, and the primary button swaps its icon in one fixed slot. Continuous motion — route particles, node halos, the connecting ring, row equalizers, the discovery radar and the live pill — exists only while the state it explains is true and the home view is visible. Hiding or minimizing the window and opening settings stop those animations even if the receiver state has not changed. Silent particles stop after their 150 ms fade. Windows' animation setting stops all of it; high contrast also drops halos and particles. Line styles, state text, levels and figures remain in every case.
+
+When one receiver is playing and another requests credentials, the primary action remains **停止投放** and stops the session. The credential action belongs only to the receiver named by the active authentication request; queued requests cannot open a different receiver's prompt.
+
+Smoke-test contracts are unchanged: all automation IDs, the 44 px primary action height, fixed volume geometry, the non-scrolling dock, wide/compact placement and the compact first-receiver visibility rule.
+
+## Interaction contract: 0.4.3 (still current)
+
+The 0.4.2 visual baseline is recorded in [the 0.4.2 interface specification](docs/design/ui-0.4.2.md) and superseded by the route stage above. The earlier silver-workspace tokens and permanently dark instrument described below are retained as historical design and evidence, not instructions to restore the previous appearance.
 
 The 0.4.3 interaction contract preserves active receiver sessions during discovery refresh and source/scope changes. Windows capture alone is replaced; the established connection can wait with zero audio until an application is explicitly selected. The stop action and independent test tone remain available while connected. A capture transition may have a brief silent interval.
 
@@ -122,7 +143,7 @@ Update downloading/launching/error states may expand their own group. Hidden rec
 
 Volume follows the pointer immediately. The local target remains authoritative while dragging, awaiting dispatch or awaiting core acknowledgement. Pointer release flushes the final value. Old snapshots cannot move the slider back. Receiver rows preserve their identity while labels and states update.
 
-Motion gives feedback: a press, a selection, a state transition or opening settings. It does not introduce staggered card entrances or ornamental motion. Continuous sound visualization comes only from engine data. Windows reduced-motion settings and the waveform preference are honored; signal values and controls remain useful with motion off.
+Motion gives feedback: a press, a selection, a state transition or opening settings. It does not introduce staggered card entrances or ornamental motion. Continuous sound visualization comes only from engine data. (The route stage above defines which continuous state motion is allowed and when it stops.) Windows reduced-motion settings and the waveform preference are honored; signal values and controls remain useful with motion off.
 
 Focus, keyboard behavior, accessible names and status announcements remain native. Selection and errors must be legible without color. The instrument's text uses its own foreground resources so the light theme never puts dark text onto its dark display.
 

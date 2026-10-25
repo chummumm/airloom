@@ -34,6 +34,15 @@
                     <SolidColorBrush x:Key="DividerBrush" Color="#15FFFFFF" />
                     <SolidColorBrush x:Key="GroupSurfaceBrush" Color="#08FFFFFF" />
                     <SolidColorBrush x:Key="GroupStrokeBrush" Color="#19000000" />
+                    <!-- Redesign: route, pill and row surfaces. -->
+                    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#2B2B2B" />
+                    <SolidColorBrush x:Key="AccentLineBrush" Color="{ThemeResource SystemAccentColorLight2}" Opacity="0.55" />
+                    <SolidColorBrush x:Key="RouteIdleBrush" Color="#8BFFFFFF" />
+                    <SolidColorBrush x:Key="NodeStrokeBrush" Color="#1AFFFFFF" />
+                    <SolidColorBrush x:Key="PillRestBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="AvatarSelectedBrush" Color="{ThemeResource SystemAccentColorLight2}" Opacity="0.2" />
+                    <SolidColorBrush x:Key="CautionWashBrush" Color="#433519" />
+                    <SolidColorBrush x:Key="CriticalWashBrush" Color="#442726" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="AppCanvasBrush" Color="Transparent" />
@@ -55,6 +64,14 @@
                     <SolidColorBrush x:Key="DividerBrush" Color="#0F000000" />
                     <SolidColorBrush x:Key="GroupSurfaceBrush" Color="#80F9F9F9" />
                     <SolidColorBrush x:Key="GroupStrokeBrush" Color="#0F000000" />
+                    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FBFBFB" />
+                    <SolidColorBrush x:Key="AccentLineBrush" Color="{ThemeResource SystemAccentColorDark1}" Opacity="0.5" />
+                    <SolidColorBrush x:Key="RouteIdleBrush" Color="#72000000" />
+                    <SolidColorBrush x:Key="NodeStrokeBrush" Color="#17000000" />
+                    <SolidColorBrush x:Key="PillRestBrush" Color="#0E000000" />
+                    <SolidColorBrush x:Key="AvatarSelectedBrush" Color="{ThemeResource SystemAccentColorDark1}" Opacity="0.16" />
+                    <SolidColorBrush x:Key="CautionWashBrush" Color="#FFF4CE" />
+                    <SolidColorBrush x:Key="CriticalWashBrush" Color="#FDE7E9" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="AppCanvasBrush" Color="{ThemeResource SystemColorWindowColor}" />
@@ -76,6 +93,14 @@
                     <SolidColorBrush x:Key="DividerBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="GroupSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="GroupStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="AppSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="AccentLineBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="RouteIdleBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="NodeStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PillRestBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="AvatarSelectedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="CautionWashBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="CriticalWashBrush" Color="{ThemeResource SystemColorWindowColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -186,8 +211,43 @@
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
-                <Setter Property="Padding" Value="12,10,48,10" />
-                <Setter Property="MinHeight" Value="58" />
+                <Setter Property="Padding" Value="10,10,6,10" />
+                <Setter Property="MinHeight" Value="60" />
+                <Setter Property="CornerRadius" Value="6" />
+            </Style>
+            <!-- Row-level icon actions (members, more): 32 px square, subtle. -->
+            <Style x:Key="RowIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="MinWidth" Value="32" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+            <!-- The one primary action: a 44 px accent pill with a fixed slot, so the
+                 dock never reflows when its label or icon changes. -->
+            <Style x:Key="CastButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="Height" Value="44" />
+                <Setter Property="MinWidth" Value="164" />
+                <Setter Property="Padding" Value="22,0" />
+                <Setter Property="CornerRadius" Value="22" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="DockButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Height" Value="36" />
+                <Setter Property="MinWidth" Value="88" />
+                <Setter Property="Padding" Value="12,0" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="StatTermStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+            </Style>
+            <Style x:Key="StatValueStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

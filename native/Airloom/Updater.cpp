@@ -90,7 +90,7 @@ namespace
         Require(TrustedHost(host), "Unexpected update host");
         std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
         if (parts.dwExtraInfoLength) path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-        InternetHandle session(WinHttpOpen(L"Airloom/0.4.3", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        InternetHandle session(WinHttpOpen(L"Airloom/0.4.4", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
         NetworkCheck(WinHttpSetTimeouts(session.value, 10000, 10000, 10000, 10000));
         InternetHandle connection(WinHttpConnect(session.value, host.c_str(), parts.nPort, 0));

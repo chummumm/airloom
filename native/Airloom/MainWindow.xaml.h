@@ -40,6 +40,7 @@ namespace winrt::Airloom::implementation
         void OnCopyDiagnostics(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnExitClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnWaveformSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+        void OnRouteSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
 
     private:
         void InitializeWindow();
@@ -50,6 +51,7 @@ namespace winrt::Airloom::implementation
         void RenderDevices(airloom::native::Snapshot const& snapshot);
         void RenderSources(airloom::native::Snapshot const& snapshot);
         void RenderAudio(airloom::native::Snapshot const& snapshot);
+        void RenderRoute(airloom::native::Snapshot const& snapshot);
         void RenderError(airloom::native::Snapshot const& snapshot);
         void RenderDeviceVisibility(airloom::native::Snapshot const& snapshot);
         void RenderUpdate();
@@ -62,8 +64,18 @@ namespace winrt::Airloom::implementation
         void ApplyTheme();
         void AnimateStateChange();
         void AnimateIn(Microsoft::UI::Xaml::UIElement const& element, float fromX, float fromY, int milliseconds, float fromOpacity = 0.0f);
+        void AnimateZoomIn(Microsoft::UI::Xaml::UIElement const& element, float fromScale, int milliseconds);
         void PopElement(Microsoft::UI::Xaml::UIElement const& element, float size);
-        void UpdatePulse(bool live);
+        void BounceElement(Microsoft::UI::Xaml::UIElement const& element, float center);
+        void SwapConnectIcon();
+        void StartLoop(Microsoft::UI::Xaml::UIElement const& element, float centerX, float centerY, float toScale, float fromOpacity,
+            int milliseconds, int delayMilliseconds = 0);
+        void StartSpin(Microsoft::UI::Xaml::UIElement const& element, float centerX, float centerY, int milliseconds);
+        void StartEqualizer(Microsoft::UI::Xaml::UIElement const& element, int delayMilliseconds);
+        void StopMotion(Microsoft::UI::Xaml::UIElement const& element);
+        void FadeVisual(Microsoft::UI::Xaml::UIElement const& element, float opacity, int milliseconds);
+        void UpdatePulse(bool live, bool busy);
+        void UpdateRadar(bool searching);
         void SpinGlyph(Microsoft::UI::Xaml::Controls::FontIcon const& glyph, bool spin, bool& running);
         void ApplyMotionPreference();
         void FlashVisibilityCard();
@@ -86,19 +98,63 @@ namespace winrt::Airloom::implementation
             Microsoft::UI::Xaml::Controls::Button more{nullptr};
             Microsoft::UI::Xaml::Controls::Border check{nullptr};
             Microsoft::UI::Xaml::Controls::FontIcon checkGlyph{nullptr};
+            Microsoft::UI::Xaml::Controls::Grid avatar{nullptr};
+            Microsoft::UI::Xaml::Shapes::Ellipse avatarFace{nullptr};
+            Microsoft::UI::Xaml::Controls::StackPanel avatarGlyphs{nullptr};
+            Microsoft::UI::Xaml::Controls::Border badge{nullptr};
+            Microsoft::UI::Xaml::Controls::FontIcon badgeGlyph{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock name{nullptr};
+            Microsoft::UI::Xaml::Controls::Grid equalizer{nullptr};
+            std::vector<Microsoft::UI::Xaml::Shapes::Rectangle> equalizerBars;
+            Microsoft::UI::Xaml::Controls::ProgressRing spinner{nullptr};
             Microsoft::UI::Xaml::Controls::TextBlock detail{nullptr};
+            Microsoft::UI::Xaml::Controls::HyperlinkButton action{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem retry{nullptr};
             Microsoft::UI::Xaml::Controls::MenuFlyoutItem hide{nullptr};
             Microsoft::UI::Xaml::Controls::Border groupSurface{nullptr};
-            Microsoft::UI::Xaml::Controls::TextBlock groupNote{nullptr};
             Microsoft::UI::Xaml::Controls::Button memberToggle{nullptr};
-            Microsoft::UI::Xaml::Controls::TextBlock memberSummary{nullptr};
             Microsoft::UI::Xaml::Controls::FontIcon memberChevron{nullptr};
+            Microsoft::UI::Xaml::Controls::Border memberHost{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock memberSummary{nullptr};
             Microsoft::UI::Xaml::Controls::StackPanel memberPanel{nullptr};
+            hstring actionKind;
             bool membersExpanded{};
+            bool equalizerRunning{};
             bool rendered{};
             bool selected{};
+        };
+
+        // One speaker on the route: its curve, flowing particles and node.
+        struct RouteNode
+        {
+            hstring id;
+            Microsoft::UI::Xaml::Shapes::Path link{nullptr};
+            Microsoft::UI::Xaml::Controls::Canvas particleHost{nullptr};
+            std::vector<Microsoft::UI::Xaml::Shapes::Ellipse> particles;
+            Microsoft::UI::Xaml::Controls::Grid root{nullptr};
+            Microsoft::UI::Xaml::Controls::Grid disc{nullptr};
+            Microsoft::UI::Xaml::Shapes::Ellipse halo{nullptr};
+            Microsoft::UI::Xaml::Shapes::Ellipse face{nullptr};
+            Microsoft::UI::Xaml::Shapes::Ellipse ring{nullptr};
+            Microsoft::UI::Xaml::Controls::StackPanel glyphs{nullptr};
+            Microsoft::UI::Xaml::Controls::Border badge{nullptr};
+            Microsoft::UI::Xaml::Controls::FontIcon badgeGlyph{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock name{nullptr};
+            Microsoft::UI::Xaml::Controls::TextBlock state{nullptr};
+            Microsoft::UI::Xaml::Media::Animation::Storyboard linkStoryboard{nullptr};
+            hstring look;
+            hstring glyphKind;
+            double startX{-1.0};
+            double startY{-1.0};
+            double endX{-1.0};
+            double endY{-1.0};
+            double length{};
+            bool haloRunning{};
+            bool ringRunning{};
+            bool particlesRunning{};
+            bool flowing{};
+            bool marching{};
+            std::chrono::steady_clock::time_point particleStopAt{};
         };
 
         struct SourceRow
@@ -126,6 +182,8 @@ namespace winrt::Airloom::implementation
         std::vector<DeviceRow> m_deviceRows;
         std::vector<SourceRow> m_sourceRows;
         std::vector<VisibilityRow> m_visibilityRows;
+        std::vector<RouteNode> m_routeNodes;
+        std::wstring m_routeSignature;
         std::vector<Microsoft::UI::Xaml::Shapes::Line> m_waveformBars;
         // Display-only release ballistics for real engine peaks; values are never invented.
         std::vector<double> m_displayWave = std::vector<double>(64, 0.0);
@@ -152,13 +210,18 @@ namespace winrt::Airloom::implementation
         bool m_sourcesPending{};
         bool m_forceDeviceRender{};
         bool m_settingsOpen{};
+        bool m_homeMotionVisible{};
+        bool m_routeAnimationsAllowed{true};
         bool m_visibilityRendered{};
         bool m_volumePending{};
         bool m_volumeAwaitingAck{};
         bool m_volumePointerDown{};
         bool m_updateRendered{};
         bool m_motionApplied{};
-        bool m_pulseRunning{};
+        int m_pulseMode{};
+        bool m_wideLayout{};
+        bool m_radarRunning{};
+        bool m_sourceHaloRunning{};
         bool m_sourceSpinRunning{};
         bool m_discoverySpinRunning{};
         double m_pendingVolume{0.75};

@@ -397,6 +397,73 @@ function Assert-CompactReceiversVisible {
     }
 }
 
+function Assert-NativeControlsLayout {
+    # The route layout moves the source controls into the stage and divides the
+    # fixed dock into three columns. A present UIA peer alone does not establish
+    # that its visible hit target fits at the minimum supported window width.
+    $Dock = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
+    $Transport = [ordered]@{}
+    foreach ($Id in @('TestToneButton', 'ConnectButton', 'VolumeSliderHost', 'VolumeValue', 'LocalMuteToggle')) {
+        $Control = Wait-NativeId $Id
+        $Bounds = $Control.Current.BoundingRectangle
+        if ($Control.Current.IsOffscreen -or $Bounds.IsEmpty -or $Bounds.Width -le 0 -or $Bounds.Height -le 0 -or
+            $Bounds.Left -lt $Dock.Left - 1 -or $Bounds.Right -gt $Dock.Right + 1 -or
+            $Bounds.Top -lt $Dock.Top - 1 -or $Bounds.Bottom -gt $Dock.Bottom + 1) {
+            throw "Transport control '$Id' was clipped or outside the fixed dock."
+        }
+        $Transport[$Id] = $Bounds
+    }
+    if ($Transport.TestToneButton.Right -gt $Transport.ConnectButton.Left + 1 -or
+        $Transport.ConnectButton.Right -gt $Transport.VolumeSliderHost.Left + 1 -or
+        $Transport.VolumeSliderHost.Right -gt $Transport.LocalMuteToggle.Left + 1) {
+        throw 'The native dock overlapped its playback, volume, or local-mute hit targets.'
+    }
+
+    $Source = [ordered]@{}
+    $SourceVisible = $false
+    try {
+        # In compact mode the receivers intentionally precede this row. Scroll
+        # it into view through the native viewport; never invoke an offscreen peer
+        # as a substitute for proving that the user can reach the controls.
+        foreach ($Percent in @(0, 25, 50, 75, 100)) {
+            Set-HomeScroll $Percent
+            $Viewport = (Wait-NativeId 'HomeScrollViewer').Current.BoundingRectangle
+            $SourceVisible = $true
+            foreach ($Id in @('SourceModePicker', 'SourcePicker', 'SourceRetryButton', 'StatusBadge')) {
+                $Control = Wait-NativeId $Id
+                $Bounds = $Control.Current.BoundingRectangle
+                $Source[$Id] = $Bounds
+                if ($Control.Current.IsOffscreen -or $Bounds.IsEmpty -or $Bounds.Width -le 0 -or $Bounds.Height -le 0 -or
+                    $Bounds.Top -lt $Viewport.Top - 1 -or $Bounds.Bottom -gt [Math]::Min($Viewport.Bottom, $Dock.Top) + 1) {
+                    $SourceVisible = $false
+                }
+            }
+            if ($SourceVisible) { break }
+        }
+        if (-not $SourceVisible) { throw 'The native source controls could not be brought fully into the home viewport.' }
+        $Panel = (Wait-NativeId 'SignalPanel').Current.BoundingRectangle
+        foreach ($Id in $Source.Keys) {
+            if ($Source[$Id].Left -lt $Panel.Left - 1 -or $Source[$Id].Right -gt $Panel.Right + 1) {
+                throw "Source control '$Id' overflowed the signal stage."
+            }
+        }
+        if ($Source.SourceModePicker.Right -gt $Source.SourcePicker.Left + 1 -or
+            $Source.SourcePicker.Right -gt $Source.SourceRetryButton.Left + 1 -or
+            $Source.SourceRetryButton.Right -gt $Source.StatusBadge.Left + 1) {
+            throw 'The source selector, refresh action, or status label overlapped.'
+        }
+        $Proof = [ordered]@{ verified = $true; transport = [ordered]@{}; source = [ordered]@{} }
+        foreach ($Section in @('transport', 'source')) {
+            $BoundsById = if ($Section -eq 'transport') { $Transport } else { $Source }
+            foreach ($Id in $BoundsById.Keys) {
+                $Bounds = $BoundsById[$Id]
+                $Proof[$Section][$Id] = [ordered]@{ x = $Bounds.X; y = $Bounds.Y; width = $Bounds.Width; height = $Bounds.Height }
+            }
+        }
+        return $Proof
+    } finally { Set-HomeScroll 0 }
+}
+
 function Test-NativeIdleLayout {
     # The shipped core has no connected receivers on CI. Its volume control
     # must stay disabled instead of creating a pending value for a later device.
@@ -422,6 +489,7 @@ function Test-NativeIdleLayout {
             Assert-CompactReceiversVisible
             $CompactTopVerified = $true
         }
+        $ControlLayout = Assert-NativeControlsLayout
         $Geometry = Get-NativeLayout
         $Composition = Assert-AdaptiveComposition $Geometry $WorkspaceWidth
         $DockBeforeScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
@@ -435,7 +503,7 @@ function Test-NativeIdleLayout {
         Set-HomeScroll 0
         $Measurements += [ordered]@{
             window_width = $Size[0]; window_height = $Size[1]; bounds = $Geometry
-            workspace_width_dip = $WorkspaceWidth; composition = $Composition
+            workspace_width_dip = $WorkspaceWidth; composition = $Composition; controls = $ControlLayout
         }
         Save-NativeScreenshot (Join-Path $EvidencePath "native-window-$($Size[0]).png")
     }
@@ -445,12 +513,14 @@ function Test-NativeIdleLayout {
     return [ordered]@{
         verified = $true; synthetic_data = $false; no_target_volume_disabled_verified = $true
         no_startup_volume_ack_error_verified = $true
+        source_control_layout_verified = $true; transport_control_layout_verified = $true
         compact_receivers_visible_at_top = $CompactTopVerified; measurements = $Measurements
     }
 }
 
 function Test-NativeVolumeLayout([string] $EvidencePrefix) {
     $Measurements = @()
+    $ControlMeasurements = @()
     $DragVerified = $false
     $CompactTopVerified = $false
     $InputProof = $null
@@ -466,6 +536,9 @@ function Test-NativeVolumeLayout([string] $EvidencePrefix) {
         if ($WorkspaceWidth -lt 1050) {
             Assert-CompactReceiversVisible
             $CompactTopVerified = $true
+        }
+        $ControlMeasurements += [ordered]@{
+            window_width = $Size[0]; window_height = $Size[1]; controls = (Assert-NativeControlsLayout)
         }
         $DockBeforeScroll = (Wait-NativeId 'TransportPanel').Current.BoundingRectangle
         Set-HomeScroll 100
@@ -582,6 +655,8 @@ function Test-NativeVolumeLayout([string] $EvidencePrefix) {
     return [ordered]@{
         verified = $true; synthetic_data = $true
         measurements = $Measurements; pointer_drag_verified = $DragVerified; pointer_input = $InputProof
+        source_control_layout_verified = $true; transport_control_layout_verified = $true
+        control_measurements = $ControlMeasurements
         compact_receivers_visible_at_top = $CompactTopVerified
     }
 }

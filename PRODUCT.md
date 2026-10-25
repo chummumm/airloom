@@ -31,7 +31,7 @@ Audio meters and waveform samples come from the engine. Packet counts, clock exc
 
 HomePod compatibility and audible output require real Windows audio hardware and receivers. Native CI can establish launch, layout, interaction and process-exit behavior; protocol tests establish the wire behavior they explicitly exercise. Neither substitutes for a listening test.
 
-The app is currently a preview. Compatibility limitations and reproducible errors should be explained in the relevant state, without invented performance metrics.
+Compatibility limitations and reproducible errors should be explained in the relevant state, without a preview label or invented performance metrics.
 
 ## Sources of truth
 
